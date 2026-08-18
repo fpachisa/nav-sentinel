@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" color="#10151C" font-family="Archivo, Helvetica Neue, Arial, sans-serif" viewBox="0 0 1040 300" role="img"
+        aria-label="The accounting and custodian books produce a NAV control total. Tolerance rules detect breaks, which are grouped into cases, investigated, and drafted into corrections. The signed sum of those corrections must equal minus the control total, leaving a zero residual, before a cycle can be signed off.">
+        <title>NAV Sentinel — definition of done is arithmetic</title>
+  <defs>
+          <marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="dc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2C6E5A"/>
+          </marker>
+        </defs>
+        <rect x="0" y="0" width="1040" height="300" fill="#F1F4F7"/>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="24" y="40" width="150" height="46" rx="3"/>
+          <rect x="24" y="104" width="150" height="46" rx="3"/>
+        </g>
+        <text x="99" y="68" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Accounting book</text>
+        <text x="99" y="132" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Custodian book</text>
+
+        <rect x="228" y="40" width="150" height="110" rx="3" fill="none" stroke="#1F5C8B" stroke-width="1.8"/>
+        <text x="303" y="76" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="#1F5C8B" text-anchor="middle">Control total</text>
+        <text x="303" y="96" font-family="JetBrains Mono, monospace" font-size="9" fill="#1F5C8B" text-anchor="middle">the difference</text>
+        <text x="303" y="110" font-family="JetBrains Mono, monospace" font-size="9" fill="#1F5C8B" text-anchor="middle">to be explained</text>
+        <text x="303" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B" text-anchor="middle">not investigable work</text>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="432" y="66" width="132" height="58" rx="3"/>
+          <rect x="618" y="66" width="132" height="58" rx="3"/>
+        </g>
+        <text x="498" y="90" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Cases</text>
+        <text x="498" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">tolerance rules,</text>
+        <text x="498" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">no model</text>
+        <text x="684" y="90" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Corrections</text>
+        <text x="684" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">drafted by the</text>
+        <text x="684" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">fleet, multi-leg</text>
+
+        <rect x="806" y="52" width="210" height="86" rx="3" fill="none" stroke="#2C6E5A" stroke-width="1.8"/>
+        <text x="911" y="78" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="#2C6E5A" text-anchor="middle">Residual = 0</text>
+        <text x="911" y="98" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">Σ corrections</text>
+        <text x="911" y="112" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">= −control total</text>
+        <text x="911" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#2C6E5A" text-anchor="middle">to the cent</text>
+
+        <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#d)">
+          <line x1="174" y1="63" x2="222" y2="80"/>
+          <line x1="174" y1="127" x2="222" y2="110"/>
+          <line x1="378" y1="95" x2="426" y2="95"/>
+          <line x1="564" y1="95" x2="612" y2="95"/>
+        </g>
+        <line x1="750" y1="95" x2="800" y2="95" stroke="#2C6E5A" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="#2C6E5A"/>
+
+        <path d="M303 150 Q303 214 640 214 Q911 214 911 142" stroke="#2C6E5A" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="#2C6E5A"/>
+        <text x="608" y="234" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">the control total is what the sum must reconcile against</text>
+
+        <rect x="24" y="256" width="992" height="30" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="40" y="275" font-family="JetBrains Mono, monospace" font-size="9" fill="#46525F">A model cannot declare the cycle complete. Withhold any one break and the residual equals that break's impact — asserted by test.</text>
+      </svg>

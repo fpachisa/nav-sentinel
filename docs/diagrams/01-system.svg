@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" color="#10151C" font-family="Archivo, Helvetica Neue, Arial, sans-serif" viewBox="0 0 1040 660" role="img"
+        aria-label="Agents in a top band pass every data access down through a full-width control plane band containing the Agent Registry, Agent Identity and six policies, before reaching books and records, memory, ECB rates, quarantined EDGAR filings, and Vertex AI. Cloud Trace records one trace per case. The ledger is reachable only after human approval.">
+        <title>NAV Sentinel — system architecture</title>
+  <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#A8322A"/>
+          </marker>
+          <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#7C8894"/>
+          </marker>
+        </defs>
+        <rect x="0" y="0" width="1040" height="660" fill="#F1F4F7"/>
+
+        <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#7C8894" letter-spacing="1.3">
+          <text x="30" y="22">THE FLEET · ADK AGENTS ON VERTEX AI</text>
+          <text x="30" y="234">CONTROL PLANE</text>
+          <text x="30" y="438">DATA AND MODEL SERVICES</text>
+          <text x="30" y="562">TELEMETRY</text>
+        </g>
+
+        <!-- fleet -->
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="30" y="76" width="116" height="54" rx="3"/>
+          <rect x="180" y="76" width="116" height="54" rx="3"/>
+          <rect x="560" y="76" width="124" height="54" rx="3"/>
+        </g>
+        <rect x="330" y="40" width="196" height="126" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <rect x="342" y="50" width="172" height="32" rx="2"/>
+          <rect x="342" y="87" width="172" height="32" rx="2"/>
+          <rect x="342" y="124" width="172" height="32" rx="2"/>
+        </g>
+        <rect x="712" y="76" width="150" height="54" rx="3" fill="#E6EFF6" stroke="#1F5C8B" stroke-width="1.8"/>
+        <rect x="896" y="76" width="114" height="54" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="5 3"/>
+
+        <g font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">
+          <text x="88"  y="100">Detection</text>
+          <text x="238" y="100">Triage</text>
+          <text x="622" y="100">Remediation</text>
+          <text x="953" y="100">Ledger</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">
+          <text x="88"  y="117">tolerance rules</text>
+          <text x="238" y="117">classify · discover</text>
+          <text x="622" y="117">drafts, cannot post</text>
+          <text x="953" y="117">golden records</text>
+        </g>
+        <text x="428" y="32" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle" letter-spacing=".8">INVESTIGATORS · REGISTRY-DISCOVERED</text>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
+          <text x="428" y="70">FX &amp; Rates</text>
+          <text x="428" y="107">Corporate Actions</text>
+          <text x="428" y="144">Trade &amp; Settlement</text>
+        </g>
+        <text x="787" y="98" font-family="Archivo, sans-serif" font-size="12.5" fill="#1F5C8B" text-anchor="middle" font-weight="700">Approval gate</text>
+        <text x="787" y="115" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B" text-anchor="middle">human · four eyes</text>
+
+        <!-- fleet flow -->
+        <g stroke="currentColor" stroke-width="1.4" marker-end="url(#a)" fill="none">
+          <line x1="146" y1="103" x2="174" y2="103"/>
+          <line x1="296" y1="103" x2="324" y2="103"/>
+          <line x1="526" y1="103" x2="554" y2="103"/>
+          <line x1="684" y1="103" x2="706" y2="103"/>
+        </g>
+        <line x1="862" y1="103" x2="890" y2="103" stroke="#A8322A" stroke-width="1.6" marker-end="url(#ad)"/>
+        <text x="876" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="#A8322A" text-anchor="middle">only after</text>
+        <text x="876" y="157" font-family="JetBrains Mono, monospace" font-size="8" fill="#A8322A" text-anchor="middle">approval</text>
+
+        <!-- triage consults the registry -->
+        <path d="M238 130 V196 H345 V284" stroke="#1F5C8B" stroke-width="1.2" fill="none" marker-end="url(#a)" color="#1F5C8B"/>
+        <text x="252" y="190" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B">discover(category)</text>
+
+        <!-- fleet down into the control plane -->
+        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
+          <line x1="88"  y1="130" x2="88"  y2="242"/>
+          <line x1="428" y1="166" x2="428" y2="242"/>
+          <line x1="622" y1="130" x2="622" y2="242"/>
+        </g>
+        <text x="96" y="180" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894">call_tool(name, args)</text>
+        <text x="436" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894">evidence</text>
+        <text x="630" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894">nav lookups</text>
+
+        <!-- control plane band -->
+        <rect x="30" y="246" width="980" height="104" rx="3" fill="#E6EFF6" stroke="#1F5C8B" stroke-width="1.8"/>
+        <text x="46" y="272" font-family="Archivo, sans-serif" font-size="13.5" font-weight="700" fill="#1F5C8B" letter-spacing=".04em">AGENT GATEWAY</text>
+        <text x="46" y="292" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B">resolves tools</text>
+        <text x="46" y="304" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B">by name</text>
+        <text x="46" y="322" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B">records every</text>
+        <text x="46" y="334" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1F5C8B">decision</text>
+
+        <g fill="none" stroke="#1F5C8B" stroke-width="1.3">
+          <rect x="260" y="284" width="170" height="50" rx="2"/>
+          <rect x="446" y="284" width="170" height="50" rx="2"/>
+          <rect x="632" y="284" width="358" height="50" rx="2"/>
+        </g>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="#1F5C8B" text-anchor="middle" font-weight="600">
+          <text x="345" y="304">Agent Registry</text>
+          <text x="531" y="304">Agent Identity</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="#1F5C8B" text-anchor="middle">
+          <text x="345" y="321">manifests · versions · authority</text>
+          <text x="531" y="321">one service account per agent</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="#1F5C8B">
+          <rect x="644" y="292" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="670" y="303" text-anchor="middle">P-001</text>
+          <rect x="704" y="292" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="730" y="303" text-anchor="middle">P-002</text>
+          <rect x="764" y="292" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="790" y="303" text-anchor="middle">P-003</text>
+          <rect x="644" y="313" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="670" y="324" text-anchor="middle">P-004</text>
+          <rect x="704" y="313" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="730" y="324" text-anchor="middle">P-005</text>
+          <rect x="764" y="313" width="52" height="15" rx="2" fill="none" stroke="#1F5C8B" stroke-width=".8"/>
+          <text x="790" y="324" text-anchor="middle">P-006</text>
+          <text x="826" y="298">allowlist · drafting</text>
+          <text x="826" y="310">posting · materiality</text>
+          <text x="826" y="322">ingest · data scope</text>
+        </g>
+
+        <!-- control plane down to data -->
+        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
+          <line x1="88"  y1="350" x2="88"  y2="448"/>
+          <line x1="428" y1="350" x2="454" y2="448"/>
+          <line x1="622" y1="350" x2="635" y2="448"/>
+          <line x1="880" y1="350" x2="872" y2="448"/>
+        </g>
+
+        <!-- data band -->
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="30"  y="450" width="164" height="58" rx="3"/>
+          <rect x="210" y="450" width="146" height="58" rx="3"/>
+          <rect x="372" y="450" width="164" height="58" rx="3"/>
+          <rect x="734" y="450" width="276" height="58" rx="3"/>
+        </g>
+        <rect x="552" y="450" width="166" height="58" rx="3" fill="none" stroke="#A8322A" stroke-width="1.6"/>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
+          <text x="112" y="474">Books &amp; records</text>
+          <text x="283" y="474">Memory</text>
+          <text x="454" y="474">ECB reference rates</text>
+          <text x="872" y="474">Vertex AI · Gemini</text>
+        </g>
+        <text x="635" y="474" font-family="Archivo, sans-serif" font-size="11.5" fill="#A8322A" text-anchor="middle" font-weight="600">SEC EDGAR</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">
+          <text x="112" y="491">Firestore · read-only</text>
+          <text x="283" y="491">recurrence, cross-cycle</text>
+          <text x="454" y="491">authoritative, structured</text>
+          <text x="872" y="491">3.7 Flash · 3.5 Flash-Lite · location: global</text>
+        </g>
+        <text x="635" y="491" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#A8322A" text-anchor="middle">untrusted · quarantined</text>
+        <text x="635" y="526" font-family="JetBrains Mono, monospace" font-size="8" fill="#A8322A" text-anchor="middle">see figure 3</text>
+
+        <!-- telemetry -->
+        <rect x="30" y="576" width="980" height="32" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="46" y="597" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#46525F">Cloud Trace via OpenTelemetry — one trace per exception case, carrying every policy decision and every piece of evidence</text>
+        <g stroke="#7C8894" stroke-width=".9" stroke-dasharray="3 3" fill="none" marker-end="url(#af)" color="#7C8894">
+          <line x1="364" y1="350" x2="364" y2="572"/>
+          <line x1="726" y1="350" x2="726" y2="572"/>
+        </g>
+      </svg>

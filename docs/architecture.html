@@ -1,0 +1,605 @@
+<title>NAV Sentinel Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root {
+  --ink:        #10151C;
+  --ink-soft:   #46525F;
+  --ink-faint:  #7C8894;
+  --paper:      #FBFCFD;
+  --paper-sunk: #F1F4F7;
+  --rule:       #D6DCE4;
+  --accent:     #1F5C8B;
+  --accent-wash:#E6EFF6;
+  --deny:       #A8322A;
+  --closed:     #2C6E5A;
+
+  --sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink:        #E4EAF0;
+    --ink-soft:   #A2AEBB;
+    --ink-faint:  #6E7B88;
+    --paper:      #0C1116;
+    --paper-sunk: #141B22;
+    --rule:       #2A343E;
+    --accent:     #7DB4DE;
+    --accent-wash:#17242F;
+    --deny:       #E28379;
+    --closed:     #6FBFA6;
+  }
+}
+:root[data-theme="dark"] {
+  --ink:        #E4EAF0;
+  --ink-soft:   #A2AEBB;
+  --ink-faint:  #6E7B88;
+  --paper:      #0C1116;
+  --paper-sunk: #141B22;
+  --rule:       #2A343E;
+  --accent:     #7DB4DE;
+  --accent-wash:#17242F;
+  --deny:       #E28379;
+  --closed:     #6FBFA6;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 72px 32px 120px; }
+.measure { max-width: 66ch; }
+
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+  margin: 0 0 14px;
+}
+h1 {
+  font-family: var(--sans); font-weight: 700; font-size: clamp(34px, 5vw, 52px);
+  line-height: 1.04; letter-spacing: -.02em; margin: 0 0 18px; text-wrap: balance;
+}
+h2 {
+  font-family: var(--sans); font-weight: 600; font-size: 25px; letter-spacing: -.01em;
+  margin: 0 0 6px; text-wrap: balance;
+}
+h3 {
+  font-family: var(--sans); font-weight: 600; font-size: 16px; letter-spacing: -.005em;
+  margin: 0 0 8px;
+}
+.lede { font-size: 20px; line-height: 1.5; color: var(--ink-soft); margin: 0 0 8px; }
+p { margin: 0 0 16px; }
+a { color: var(--accent); }
+
+section { margin-top: 76px; }
+.sec-head { border-top: 2px solid var(--ink); padding-top: 14px; margin-bottom: 28px; }
+.sec-head .num {
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .12em;
+  color: var(--ink-faint); display: block; margin-bottom: 8px;
+}
+.sec-head p { margin: 6px 0 0; color: var(--ink-soft); max-width: 66ch; }
+
+figure { margin: 34px 0 0; }
+.canvas {
+  overflow-x: auto; background: var(--paper-sunk);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 26px 22px;
+}
+.canvas svg { display: block; width: 100%; min-width: 720px; height: auto; color: var(--ink); }
+figcaption {
+  font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink-soft);
+  margin-top: 14px; padding-left: 12px; border-left: 2px solid var(--accent);
+  max-width: 82ch;
+}
+figcaption b { color: var(--ink); font-weight: 500; }
+
+.notes { display: grid; gap: 22px; margin-top: 34px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.note { border-top: 1px solid var(--rule); padding-top: 14px; }
+.note p { font-size: 15px; color: var(--ink-soft); margin: 0; }
+.note .k {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); display: block; margin-bottom: 6px;
+}
+
+table { width: 100%; border-collapse: collapse; margin-top: 26px; font-size: 15px; }
+th, td { text-align: left; padding: 11px 14px 11px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th {
+  font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-faint); border-bottom: 1px solid var(--ink);
+}
+td code, p code, li code { font-family: var(--mono); font-size: .88em; color: var(--accent); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.state { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.state.open { color: var(--deny); }
+.state.done { color: var(--closed); }
+
+ul { padding-left: 20px; margin: 0 0 16px; }
+li { margin-bottom: 7px; }
+
+.measured {
+  margin-top: 30px; border: 1px solid var(--rule); border-left: 3px solid var(--deny);
+  background: var(--paper-sunk); padding: 20px 22px; border-radius: 2px;
+}
+.measured h3 { margin-bottom: 10px; }
+.measured table { margin-top: 14px; }
+.measured p:last-child { margin-bottom: 0; }
+
+footer {
+  margin-top: 86px; border-top: 1px solid var(--rule); padding-top: 18px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+}
+</style>
+
+<div class="wrap">
+
+<p class="eyebrow">All Things Agentic · Track C · Fortified Enterprise Fleet</p>
+<h1>NAV Sentinel</h1>
+<p class="lede measure">A governed fleet of fund-accounting agents that clears reconciliation exceptions inside the NAV production window — and the control plane that makes deploying it defensible.</p>
+
+<section>
+  <div class="sec-head">
+    <span class="num">Figure 1</span>
+    <h2>The system</h2>
+    <p>Agents above, data below, and exactly one crossing. The gateway is drawn as a band rather than a box because no call reaches data without passing through it — that is the architecture's central claim, and a box on the side would misstate it.</p>
+  </div>
+
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1040 660" role="img"
+        aria-label="Agents in a top band pass every data access down through a full-width control plane band containing the Agent Registry, Agent Identity and six policies, before reaching books and records, memory, ECB rates, quarantined EDGAR filings, and Vertex AI. Cloud Trace records one trace per case. The ledger is reachable only after human approval.">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--deny)"/>
+          </marker>
+          <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-faint)"/>
+          </marker>
+        </defs>
+
+        <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--ink-faint)" letter-spacing="1.3">
+          <text x="30" y="22">THE FLEET · ADK AGENTS ON VERTEX AI</text>
+          <text x="30" y="234">CONTROL PLANE</text>
+          <text x="30" y="438">DATA AND MODEL SERVICES</text>
+          <text x="30" y="562">TELEMETRY</text>
+        </g>
+
+        <!-- fleet -->
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="30" y="76" width="116" height="54" rx="3"/>
+          <rect x="180" y="76" width="116" height="54" rx="3"/>
+          <rect x="560" y="76" width="124" height="54" rx="3"/>
+        </g>
+        <rect x="330" y="40" width="196" height="126" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <rect x="342" y="50" width="172" height="32" rx="2"/>
+          <rect x="342" y="87" width="172" height="32" rx="2"/>
+          <rect x="342" y="124" width="172" height="32" rx="2"/>
+        </g>
+        <rect x="712" y="76" width="150" height="54" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
+        <rect x="896" y="76" width="114" height="54" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="5 3"/>
+
+        <g font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">
+          <text x="88"  y="100">Detection</text>
+          <text x="238" y="100">Triage</text>
+          <text x="622" y="100">Remediation</text>
+          <text x="953" y="100">Ledger</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">
+          <text x="88"  y="117">tolerance rules</text>
+          <text x="238" y="117">classify · discover</text>
+          <text x="622" y="117">drafts, cannot post</text>
+          <text x="953" y="117">golden records</text>
+        </g>
+        <text x="428" y="32" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle" letter-spacing=".8">INVESTIGATORS · REGISTRY-DISCOVERED</text>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
+          <text x="428" y="70">FX &amp; Rates</text>
+          <text x="428" y="107">Corporate Actions</text>
+          <text x="428" y="144">Trade &amp; Settlement</text>
+        </g>
+        <text x="787" y="98" font-family="Archivo, sans-serif" font-size="12.5" fill="var(--accent)" text-anchor="middle" font-weight="700">Approval gate</text>
+        <text x="787" y="115" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)" text-anchor="middle">human · four eyes</text>
+
+        <!-- fleet flow -->
+        <g stroke="currentColor" stroke-width="1.4" marker-end="url(#a)" fill="none">
+          <line x1="146" y1="103" x2="174" y2="103"/>
+          <line x1="296" y1="103" x2="324" y2="103"/>
+          <line x1="526" y1="103" x2="554" y2="103"/>
+          <line x1="684" y1="103" x2="706" y2="103"/>
+        </g>
+        <line x1="862" y1="103" x2="890" y2="103" stroke="var(--deny)" stroke-width="1.6" marker-end="url(#ad)"/>
+        <text x="876" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">only after</text>
+        <text x="876" y="157" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">approval</text>
+
+        <!-- triage consults the registry -->
+        <path d="M238 130 V196 H345 V284" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#a)" color="var(--accent)"/>
+        <text x="252" y="190" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">discover(category)</text>
+
+        <!-- fleet down into the control plane -->
+        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
+          <line x1="88"  y1="130" x2="88"  y2="242"/>
+          <line x1="428" y1="166" x2="428" y2="242"/>
+          <line x1="622" y1="130" x2="622" y2="242"/>
+        </g>
+        <text x="96" y="180" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">call_tool(name, args)</text>
+        <text x="436" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">evidence</text>
+        <text x="630" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">nav lookups</text>
+
+        <!-- control plane band -->
+        <rect x="30" y="246" width="980" height="104" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
+        <text x="46" y="272" font-family="Archivo, sans-serif" font-size="13.5" font-weight="700" fill="var(--accent)" letter-spacing=".04em">AGENT GATEWAY</text>
+        <text x="46" y="292" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">resolves tools</text>
+        <text x="46" y="304" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">by name</text>
+        <text x="46" y="322" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">records every</text>
+        <text x="46" y="334" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">decision</text>
+
+        <g fill="none" stroke="var(--accent)" stroke-width="1.3">
+          <rect x="260" y="284" width="170" height="50" rx="2"/>
+          <rect x="446" y="284" width="170" height="50" rx="2"/>
+          <rect x="632" y="284" width="358" height="50" rx="2"/>
+        </g>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="var(--accent)" text-anchor="middle" font-weight="600">
+          <text x="345" y="304">Agent Registry</text>
+          <text x="531" y="304">Agent Identity</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">
+          <text x="345" y="321">manifests · versions · authority</text>
+          <text x="531" y="321">one service account per agent</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)">
+          <rect x="644" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="670" y="303" text-anchor="middle">P-001</text>
+          <rect x="704" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="730" y="303" text-anchor="middle">P-002</text>
+          <rect x="764" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="790" y="303" text-anchor="middle">P-003</text>
+          <rect x="644" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="670" y="324" text-anchor="middle">P-004</text>
+          <rect x="704" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="730" y="324" text-anchor="middle">P-005</text>
+          <rect x="764" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
+          <text x="790" y="324" text-anchor="middle">P-006</text>
+          <text x="826" y="298">allowlist · drafting</text>
+          <text x="826" y="310">posting · materiality</text>
+          <text x="826" y="322">ingest · data scope</text>
+        </g>
+
+        <!-- control plane down to data -->
+        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
+          <line x1="88"  y1="350" x2="88"  y2="448"/>
+          <line x1="428" y1="350" x2="454" y2="448"/>
+          <line x1="622" y1="350" x2="635" y2="448"/>
+          <line x1="880" y1="350" x2="872" y2="448"/>
+        </g>
+
+        <!-- data band -->
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="30"  y="450" width="164" height="58" rx="3"/>
+          <rect x="210" y="450" width="146" height="58" rx="3"/>
+          <rect x="372" y="450" width="164" height="58" rx="3"/>
+          <rect x="734" y="450" width="276" height="58" rx="3"/>
+        </g>
+        <rect x="552" y="450" width="166" height="58" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.6"/>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
+          <text x="112" y="474">Books &amp; records</text>
+          <text x="283" y="474">Memory</text>
+          <text x="454" y="474">ECB reference rates</text>
+          <text x="872" y="474">Vertex AI · Gemini</text>
+        </g>
+        <text x="635" y="474" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--deny)" text-anchor="middle" font-weight="600">SEC EDGAR</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">
+          <text x="112" y="491">Firestore · read-only</text>
+          <text x="283" y="491">recurrence, cross-cycle</text>
+          <text x="454" y="491">authoritative, structured</text>
+          <text x="872" y="491">3.7 Flash · 3.5 Flash-Lite · location: global</text>
+        </g>
+        <text x="635" y="491" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">untrusted · quarantined</text>
+        <text x="635" y="526" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">see figure 3</text>
+
+        <!-- telemetry -->
+        <rect x="30" y="576" width="980" height="32" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="46" y="597" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--ink-soft)">Cloud Trace via OpenTelemetry — one trace per exception case, carrying every policy decision and every piece of evidence</text>
+        <g stroke="var(--ink-faint)" stroke-width=".9" stroke-dasharray="3 3" fill="none" marker-end="url(#af)" color="var(--ink-faint)">
+          <line x1="364" y1="350" x2="364" y2="572"/>
+          <line x1="726" y1="350" x2="726" y2="572"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption><b>Every data access crosses the gateway.</b> Investigators are discovered through the registry rather than wired in, so publishing a specialist changes routing without a code change. The ledger arrow is red and dashed because no agent in the fleet holds posting authority at any materiality — the only path to the books runs through a human approval.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="num">Figure 2</span>
+    <h2>What happens to a tool call</h2>
+    <p>An agent cannot hand the gateway a function to run — it emits a name and arguments, which is all a language model can produce anyway. Resolution happens inside the boundary, against a frozen catalogue.</p>
+  </div>
+
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1040 300" role="img"
+        aria-label="An agent emits a tool name and arguments. The gateway resolves identity from context, reads the manifest from the registry, checks the allowlist and data scope, resolves the name to a callable in a frozen catalogue, executes it, and screens the result if the tool is marked untrusted. Denials at any step are recorded and raised.">
+        <defs>
+          <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="bd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--deny)"/>
+          </marker>
+        </defs>
+
+        <rect x="24" y="96" width="130" height="58" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="89" y="120" font-family="Archivo, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">Investigator</text>
+        <text x="89" y="136" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">no tool imports</text>
+
+        <rect x="196" y="40" width="700" height="170" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
+        <text x="212" y="62" font-family="Archivo, sans-serif" font-size="11" font-weight="700" fill="var(--accent)" letter-spacing=".08em">GATEWAY</text>
+
+        <g fill="none" stroke="var(--accent)" stroke-width="1.2">
+          <rect x="216" y="88" width="118" height="76" rx="2"/>
+          <rect x="356" y="88" width="118" height="76" rx="2"/>
+          <rect x="496" y="88" width="118" height="76" rx="2"/>
+          <rect x="636" y="88" width="118" height="76" rx="2"/>
+          <rect x="776" y="88" width="104" height="76" rx="2"/>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">
+          <text x="275" y="104">1</text><text x="415" y="104">2</text><text x="555" y="104">3</text>
+          <text x="695" y="104">4</text><text x="828" y="104">5</text>
+        </g>
+        <g font-family="Archivo, sans-serif" font-size="11" fill="var(--accent)" text-anchor="middle" font-weight="600">
+          <text x="275" y="124">identity</text>
+          <text x="415" y="124">manifest</text>
+          <text x="555" y="124">policy</text>
+          <text x="695" y="124">resolve</text>
+          <text x="828" y="124">screen</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">
+          <text x="275" y="140">from context,</text><text x="275" y="150">never an argument</text>
+          <text x="415" y="140">read from the</text><text x="415" y="150">published registry</text>
+          <text x="555" y="140">P-001 allowlist</text><text x="555" y="150">P-006 data scope</text>
+          <text x="695" y="140">name to callable,</text><text x="695" y="150">frozen catalogue</text>
+          <text x="828" y="140">if the tool is</text><text x="828" y="150">marked untrusted</text>
+        </g>
+
+        <rect x="938" y="96" width="86" height="58" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="981" y="120" font-family="Archivo, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">Data</text>
+        <text x="981" y="136" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">read-only</text>
+
+        <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#b)">
+          <line x1="154" y1="125" x2="210" y2="125"/>
+          <line x1="880" y1="125" x2="932" y2="125"/>
+        </g>
+        <text x="182" y="112" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">name</text>
+        <text x="182" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">+ args</text>
+
+        <g stroke="var(--accent)" stroke-width="1" fill="none" marker-end="url(#b)" color="var(--accent)">
+          <line x1="334" y1="126" x2="352" y2="126"/>
+          <line x1="474" y1="126" x2="492" y2="126"/>
+          <line x1="614" y1="126" x2="632" y2="126"/>
+          <line x1="754" y1="126" x2="772" y2="126"/>
+        </g>
+
+        <line x1="555" y1="164" x2="555" y2="238" stroke="var(--deny)" stroke-width="1.5" fill="none" marker-end="url(#bd)"/>
+        <text x="566" y="196" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--deny)">deny → recorded, then raised</text>
+        <text x="566" y="212" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)">a refused call leaves no ALLOW in the log</text>
+
+        <rect x="24" y="238" width="1000" height="30" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="40" y="257" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">Governance log — the decision names the tool that executed, not the label the caller supplied</text>
+      </svg>
+    </div>
+    <figcaption><b>Resolution, not delegation.</b> The gateway previously accepted a name <em>and</em> a callable and validated only the name, so any function could run under a declared tool's label while the audit record named the label. The catalogue is now a read-only mapping that refuses any key disagreeing with its own entry, and it captures function objects at import time — so rebinding a tool module afterwards cannot redirect what runs.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="num">Figure 3</span>
+    <h2>The quarantine boundary</h2>
+    <p>Issuer filings are written by someone else and land in a model's context, which makes them the fleet's real attack surface. Screening alone turned out not to hold, so the boundary is structural.</p>
+  </div>
+
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1040 340" role="img"
+        aria-label="An untrusted EDGAR filing passes through windowed Model Armor screening into an extractor that holds no tools, no identity and no memory and emits only typed values. Those values cross the trust boundary to the investigator, which never sees the prose. Value cross-checks and human approval sit behind it.">
+        <defs>
+          <marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="cd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--deny)"/>
+          </marker>
+          <marker id="cc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--closed)"/>
+          </marker>
+        </defs>
+
+        <text x="24" y="26" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--deny)" letter-spacing="1.2">UNTRUSTED — ATTACKER-CONTROLLABLE PROSE</text>
+        <text x="606" y="26" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" letter-spacing="1.2">PRIVILEGED — TOOLS, IDENTITY, AUTHORITY</text>
+
+        <line x1="586" y1="36" x2="586" y2="304" stroke="var(--ink)" stroke-width="2.5"/>
+        <text x="586" y="322" font-family="Archivo, sans-serif" font-size="11" font-weight="700" fill="currentColor" text-anchor="middle" letter-spacing=".06em">TRUST BOUNDARY</text>
+
+        <rect x="24" y="70" width="150" height="72" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.5"/>
+        <text x="99" y="96" font-family="Archivo, sans-serif" font-size="12" fill="var(--deny)" text-anchor="middle">EDGAR filing</text>
+        <text x="99" y="112" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">38 KB–1 MB</text>
+        <text x="99" y="126" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">issuer-authored</text>
+
+        <rect x="216" y="70" width="160" height="72" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.5"/>
+        <text x="296" y="96" font-family="Archivo, sans-serif" font-size="12" fill="var(--deny)" text-anchor="middle">Model Armor</text>
+        <text x="296" y="112" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">1 KB windows</text>
+        <text x="296" y="126" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">500 B overlap</text>
+
+        <rect x="418" y="60" width="150" height="92" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <text x="493" y="84" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="currentColor" text-anchor="middle">Extractor</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">
+          <text x="493" y="102">no tools</text>
+          <text x="493" y="116">no identity</text>
+          <text x="493" y="130">no memory</text>
+          <text x="493" y="144">typed output only</text>
+        </g>
+
+        <rect x="636" y="70" width="170" height="72" rx="3" fill="none" stroke="var(--closed)" stroke-width="1.5"/>
+        <text x="721" y="96" font-family="Archivo, sans-serif" font-size="12" fill="var(--closed)" text-anchor="middle">Investigator</text>
+        <text x="721" y="112" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">reasons over values,</text>
+        <text x="721" y="126" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">never over prose</text>
+
+        <rect x="848" y="70" width="168" height="72" rx="3" fill="none" stroke="var(--closed)" stroke-width="1.5"/>
+        <text x="932" y="96" font-family="Archivo, sans-serif" font-size="12" fill="var(--closed)" text-anchor="middle">Cross-checks</text>
+        <text x="932" y="112" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">books and records,</text>
+        <text x="932" y="126" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">plausibility bounds</text>
+
+        <g stroke="var(--deny)" stroke-width="1.5" fill="none" marker-end="url(#cd)" color="var(--deny)">
+          <line x1="174" y1="106" x2="210" y2="106"/>
+          <line x1="376" y1="106" x2="412" y2="106"/>
+        </g>
+        <line x1="568" y1="106" x2="630" y2="106" stroke="var(--closed)" stroke-width="2" fill="none" marker-end="url(#cc)" color="var(--closed)"/>
+        <line x1="806" y1="106" x2="842" y2="106" stroke="var(--closed)" stroke-width="1.5" fill="none" marker-end="url(#cc)" color="var(--closed)"/>
+
+        <text x="580" y="96" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--closed)" text-anchor="end">typed values only</text>
+
+        <rect x="636" y="196" width="380" height="76" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="826" y="218" font-family="Archivo, sans-serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="600">Why a second layer exists</text>
+        <text x="826" y="236" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">the extractor stops instruction injection —</text>
+        <text x="826" y="250" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">it cannot stop a filing stating a false</text>
+        <text x="826" y="264" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">withholding rate, so values are cross-checked</text>
+        <line x1="932" y1="142" x2="932" y2="192" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="3 3" fill="none" marker-end="url(#c)" color="var(--ink-faint)"/>
+      </svg>
+    </div>
+    <figcaption><b>Prose stops at the boundary; only typed values cross it.</b> The extractor holds no tools and no registry authority, so an injection surviving screening arrives somewhere that cannot act on it. Data poisoning is a separate problem and needs a separate control — hence the cross-checks, and behind them the human approval that no agent can bypass.</figcaption>
+  </figure>
+
+  <div class="measured">
+    <h3>Why screening alone was not enough</h3>
+    <p>Measured against the live service with the injection held constant at 1,008 bytes. Placement decides the outcome, not concentration:</p>
+    <table>
+      <thead><tr><th>Injection position in a 19,662 B filing</th><th>Whole-document screen</th></tr></thead>
+      <tbody>
+        <tr><td>head</td><td class="num"><span class="state open">missed</span></td></tr>
+        <tr><td>middle</td><td class="num"><span class="state open">missed</span></td></tr>
+        <tr><td>tail</td><td class="num"><span class="state done">caught</span></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:16px">Above a threshold between <code>40,827</code> and <code>41,329</code> bytes the filter reports <code>execution_state: EXECUTION_SKIPPED</code> and <code>invocation_result: PARTIAL</code> while <code>filter_match_state</code> still reads <code>NO_MATCH_FOUND</code> — so code checking only the match state cannot distinguish a skipped scan from a clean one. Windowing at 1 KB with 500 B overlap catches the injection at every position tested, with no false positives; 4 KB windows do not. All three response fields are now checked, and an unscreenable value is refused rather than passed through.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="num">Figure 4</span>
+    <h2>Definition of done is arithmetic</h2>
+    <p>A NAV difference is not another break to investigate. It is the control total, and every break is a candidate explanation for it. The cycle closes only when the fleet's own proposed corrections account for the whole difference.</p>
+  </div>
+
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1040 300" role="img"
+        aria-label="The accounting and custodian books produce a NAV control total. Tolerance rules detect breaks, which are grouped into cases, investigated, and drafted into corrections. The signed sum of those corrections must equal minus the control total, leaving a zero residual, before a cycle can be signed off.">
+        <defs>
+          <marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="dc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--closed)"/>
+          </marker>
+        </defs>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="24" y="40" width="150" height="46" rx="3"/>
+          <rect x="24" y="104" width="150" height="46" rx="3"/>
+        </g>
+        <text x="99" y="68" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Accounting book</text>
+        <text x="99" y="132" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Custodian book</text>
+
+        <rect x="228" y="40" width="150" height="110" rx="3" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+        <text x="303" y="76" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--accent)" text-anchor="middle">Control total</text>
+        <text x="303" y="96" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--accent)" text-anchor="middle">the difference</text>
+        <text x="303" y="110" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--accent)" text-anchor="middle">to be explained</text>
+        <text x="303" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)" text-anchor="middle">not investigable work</text>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="432" y="66" width="132" height="58" rx="3"/>
+          <rect x="618" y="66" width="132" height="58" rx="3"/>
+        </g>
+        <text x="498" y="90" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Cases</text>
+        <text x="498" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">tolerance rules,</text>
+        <text x="498" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">no model</text>
+        <text x="684" y="90" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">Corrections</text>
+        <text x="684" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">drafted by the</text>
+        <text x="684" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">fleet, multi-leg</text>
+
+        <rect x="806" y="52" width="210" height="86" rx="3" fill="none" stroke="var(--closed)" stroke-width="1.8"/>
+        <text x="911" y="78" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--closed)" text-anchor="middle">Residual = 0</text>
+        <text x="911" y="98" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">Σ corrections</text>
+        <text x="911" y="112" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">= −control total</text>
+        <text x="911" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">to the cent</text>
+
+        <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#d)">
+          <line x1="174" y1="63" x2="222" y2="80"/>
+          <line x1="174" y1="127" x2="222" y2="110"/>
+          <line x1="378" y1="95" x2="426" y2="95"/>
+          <line x1="564" y1="95" x2="612" y2="95"/>
+        </g>
+        <line x1="750" y1="95" x2="800" y2="95" stroke="var(--closed)" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="var(--closed)"/>
+
+        <path d="M303 150 Q303 214 640 214 Q911 214 911 142" stroke="var(--closed)" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="var(--closed)"/>
+        <text x="608" y="234" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">the control total is what the sum must reconcile against</text>
+
+        <rect x="24" y="256" width="992" height="30" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="40" y="275" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">A model cannot declare the cycle complete. Withhold any one break and the residual equals that break's impact — asserted by test.</text>
+      </svg>
+    </div>
+    <figcaption><b>The fleet is graded against arithmetic it cannot fudge.</b> Summing the <em>generator's</em> expected corrections would only prove the fixtures are internally consistent; summing the <em>fleet's</em> proposals is what shows the agents produced something. Leg-level correction accuracy and root-cause accuracy are reported beside a non-agentic heuristic baseline on the same cases.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="num">Reference</span>
+    <h2>Platform mapping and current state</h2>
+    <p>Track C names seven components. Each maps to a managed Google Cloud service; the design work is in how they are composed and what the fleet does inside them.</p>
+  </div>
+
+  <table>
+    <thead><tr><th>Requirement</th><th>Service</th><th>What we designed on top</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>Agent Registry</td><td>Agent Registry</td><td>Versioned manifests declaring capability, tool allowlist, data scopes and authority; triage resolves specialists at runtime</td><td><span class="state done">built</span></td></tr>
+      <tr><td>Agent Identity</td><td>Agent Identity + IAM</td><td>One service account per manifest; no shared fleet identity, no ambient authority</td><td><span class="state done">built</span></td></tr>
+      <tr><td>Agent Gateway</td><td>Agent Gateway</td><td>Six policies, name-only tool resolution, screening bound to the fetching tool</td><td><span class="state done">built</span></td></tr>
+      <tr><td>Model Armor</td><td>Model Armor</td><td>Windowed screening gated on all three response fields, plus the quarantined extractor behind it</td><td><span class="state open">in progress</span></td></tr>
+      <tr><td>Observability</td><td>Cloud Trace, OTLP</td><td>One trace per case; the reasoning chain is the audit artefact, not debug output</td><td><span class="state done">built</span></td></tr>
+      <tr><td>Agent Runtime</td><td>Cloud Run + Pub/Sub</td><td>Asynchronous dispatch; a failed investigator degrades its case, not the run</td><td><span class="state open">pending</span></td></tr>
+      <tr><td>Memory Bank</td><td>Firestore, Memory-Bank-shaped interface</td><td>Cross-cycle recurrence, so a break seen last month is recognised rather than re-investigated</td><td><span class="state open">pending</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="notes">
+    <div class="note">
+      <span class="k">Model and location</span>
+      <p><code>gemini-3.7-flash</code> for investigation, <code>gemini-3.5-flash-lite</code> for triage. Both are served only from the <code>global</code> location — every 3.x identifier returns 404 in <code>us-central1</code>, where nothing newer than the 2.5 family resolves. Model Armor is the mirror: regional endpoint only.</p>
+    </div>
+    <div class="note">
+      <span class="k">Deterministic by design</span>
+      <p>Break detection, materiality and approval routing contain no model calls. Whether two numbers differ, and who may clear a difference of a given size, must be reproducible and testable. Models are reserved for explaining why.</p>
+    </div>
+    <div class="note">
+      <span class="k">Enforcement outside the agent</span>
+      <p>An agent that checks its own permissions is one prompt away from deciding it has them. Every decision is made by the gateway from the published manifest, and recorded on the case trace.</p>
+    </div>
+  </div>
+</section>
+
+<footer>NAV Sentinel · All Things Agentic Hackathon · Track C · github.com/fpachisa/nav-sentinel</footer>
+</div>

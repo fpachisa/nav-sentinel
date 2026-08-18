@@ -52,6 +52,12 @@ A model cannot declare victory here. The arithmetic either closes or it does not
 
 ## Architecture
 
+Four figures — the system, the enforcement path, the quarantine boundary, and the closure
+proof — are in [docs/diagrams/](docs/diagrams/), with the full write-up in
+[docs/architecture.html](docs/architecture.html).
+
+![System architecture](docs/diagrams/01-system.svg)
+
 | Brief requirement | Google Cloud component | What we designed on top |
 | :--- | :--- | :--- |
 | Agent Registry | Agent Registry | Versioned YAML manifests declaring capability, tool allowlist, data scopes and authority. Triage resolves specialists by capability at runtime, so adding one is a publish, not a code change. |
