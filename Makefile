@@ -18,7 +18,7 @@ test: ## Run the invariant test suite (offline)
 	$(PY) -m pytest tests/ -q
 
 verify: ## Offline gate: lint + diagrams + full invariant suite
-	.venv/bin/ruff check src tests fixtures
+	.venv/bin/ruff check src tests fixtures scripts
 	$(PY) scripts/check_diagrams.py
 	$(PY) -m pytest tests/ -q
 
@@ -30,7 +30,7 @@ compliance: ## Prove the qualifying stack requirements against live Vertex AI
 	$(PY) -m pytest tests/ -q -m live
 
 lint: ## Lint
-	.venv/bin/ruff check src tests fixtures
+	.venv/bin/ruff check src tests fixtures scripts
 
 bootstrap: ## Provision Google Cloud: APIs, per-agent identities, Model Armor, Pub/Sub
 	PROJECT=$(PROJECT) REGION=$(REGION) bash infra/bootstrap.sh

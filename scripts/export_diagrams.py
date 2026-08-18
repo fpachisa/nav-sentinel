@@ -32,7 +32,7 @@ FIGURES = [
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    blocks = re.findall(r'(<svg viewBox="0 0 1040 \d+".*?</svg>)', DOC.read_text(), re.S)
+    blocks = re.findall(r'(<svg viewBox="0 0 1040 \d+".*?</svg>)', DOC.read_text(), re.DOTALL)
     if len(blocks) != len(FIGURES):
         raise SystemExit(f"expected {len(FIGURES)} figures, found {len(blocks)}")
 

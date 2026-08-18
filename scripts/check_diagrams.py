@@ -30,7 +30,7 @@ DOC = Path(__file__).resolve().parents[1] / "docs" / "architecture.html"
 
 def figures(src: str) -> list[tuple[int, int, str]]:
     out = []
-    for m in re.finditer(r'<svg viewBox="0 0 (\d+) (\d+)"(.*?)</svg>', src, re.S):
+    for m in re.finditer(r'<svg viewBox="0 0 (\d+) (\d+)"(.*?)</svg>', src, re.DOTALL):
         out.append((int(m.group(1)), int(m.group(2)), m.group(3)))
     return out
 
