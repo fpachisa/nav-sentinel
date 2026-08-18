@@ -1,0 +1,30 @@
+agent_id: cash-fees-investigator
+version: 1.2.0
+display_name: Cash, Fees & Accruals Investigator
+owner: fund-accounting-platform
+description: >
+  Resolves breaks in cash and accrual accounting: management and performance fee accruals,
+  expense caps, deposit interest, and unmatched cash movements.
+
+handles_categories: [cash_fees]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - books_and_records.cash_movements
+  - books_and_records.nav_record
+  - books_and_records.funds
+
+data_scopes:
+  read: [cash_movements, nav_records, funds]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_bps: 0.0
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 45

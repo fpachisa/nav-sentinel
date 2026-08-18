@@ -1,0 +1,33 @@
+agent_id: remediation-agent
+version: 1.5.0
+display_name: Remediation Drafting Agent
+owner: fund-accounting-platform
+description: >
+  Drafts the correcting journal entry for a confirmed root cause, with the full evidence
+  chain attached. Entries are balanced and their expected residual stated, so the proposal
+  can be checked arithmetically before any human reviews it.
+
+handles_categories: []
+model: gemini-3.7-flash
+
+allowed_tools:
+  - books_and_records.nav_record
+  - books_and_records.funds
+  - books_and_records.security
+
+data_scopes:
+  read: [nav_records, funds, securities, exception_cases]
+  write: [remediation_proposals]
+
+# The only agent permitted to draft an entry -- and still not permitted to post one.
+# max_autonomous_bps of zero means no adjustment of any size clears without a human.
+authority:
+  may_propose_remediation: true
+  may_post_entries: false
+  max_autonomous_bps: 0.0
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 60

@@ -1,0 +1,41 @@
+# Agent Registry manifest.
+# Published to the registry at deploy time; Triage discovers agents by matching
+# `handles_categories` and honours `data_scopes` when granting tool access.
+agent_id: fx-rates-investigator
+version: 1.3.0
+display_name: FX & Rates Investigator
+owner: fund-accounting-platform
+description: >
+  Resolves reconciliation breaks caused by foreign-exchange rate application: stale rates,
+  wrong fixing date, inverted crosses and missing TARGET-holiday handling. Verifies against
+  European Central Bank euro foreign-exchange reference rates.
+
+handles_categories: [fx_rate]
+model: gemini-3.7-flash
+
+# Least privilege. The registry is the single declaration of what this agent may touch;
+# the Agent Gateway denies any tool call not listed here.
+allowed_tools:
+  - ecb_fx.rate_on
+  - ecb_fx.latest_rate_on_or_before
+  - ecb_fx.cross_rate
+  - books_and_records.positions
+  - books_and_records.security
+  - books_and_records.nav_record
+
+data_scopes:
+  read: [positions, securities, nav_records]
+  write: []
+
+# No investigator may propose or post an accounting entry. It reports a root cause;
+# the remediation agent drafts, and a human approves.
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_bps: 0.0
+
+untrusted_inputs: false        # ECB data is structured and authoritative
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 45

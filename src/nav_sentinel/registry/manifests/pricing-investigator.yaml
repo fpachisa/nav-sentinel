@@ -1,0 +1,30 @@
+agent_id: pricing-investigator
+version: 1.1.0
+display_name: Pricing & Valuation Investigator
+owner: fund-accounting-platform
+description: >
+  Resolves breaks caused by security valuation: stale vendor prices, wrong price source,
+  and marks on illiquid or thinly traded instruments.
+
+handles_categories: [pricing]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - books_and_records.positions
+  - books_and_records.security
+  - books_and_records.trades_for_security
+
+data_scopes:
+  read: [positions, securities, trades]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_bps: 0.0
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 45

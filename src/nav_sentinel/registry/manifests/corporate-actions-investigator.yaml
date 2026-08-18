@@ -1,0 +1,37 @@
+agent_id: corporate-actions-investigator
+version: 2.1.0
+display_name: Corporate Actions Investigator
+owner: fund-accounting-platform
+description: >
+  Resolves breaks caused by corporate action processing: dividends (including gross-versus-net
+  withholding on depositary receipts), share splits, spin-offs and mergers. Reads issuer
+  filings from SEC EDGAR.
+
+handles_categories: [corporate_action]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - edgar.recent_filings
+  - edgar.search_filings
+  - edgar.fetch_filing_text
+  - books_and_records.positions
+  - books_and_records.security
+  - books_and_records.cash_movements
+
+data_scopes:
+  read: [positions, securities, cash_movements]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_bps: 0.0
+
+# This agent ingests issuer-authored documents from the public internet. That content is
+# untrusted by definition, so every fetch is screened by Model Armor before it reaches
+# the model context. This is the fleet's primary prompt-injection surface.
+untrusted_inputs: true
+requires_model_armor: true
+
+sla:
+  target_latency_seconds: 90

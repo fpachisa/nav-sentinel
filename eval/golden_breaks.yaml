@@ -1,0 +1,87 @@
+nav_date: '2026-08-17'
+scenarios:
+- scenario: FX_STALE_RATE
+  fund_id: MERID-GEF
+  isin: US0378331005
+  expected_category: fx_rate
+  incorrect_side: accounting
+  root_cause: Accounting valued the USD position using the ECB reference rate for 2026-08-14 (1.1567)
+    instead of 2026-08-17 (1.1593).
+  expected_correction_base: '-86625.48'
+  verifiable_against: ecb_fx_reference_rates
+- scenario: CA_STOCK_SPLIT_NOT_APPLIED
+  fund_id: MERID-GEF
+  isin: US5949181045
+  expected_category: corporate_action
+  incorrect_side: accounting
+  root_cause: A 2:1 share split effective 2026-08-17 was applied by the custodian but not by the accounting
+    book. Quantity differs 2x; market value agrees.
+  expected_correction_base: '0.00'
+  expected_quantity_correction: '96000'
+  verifiable_against: sec_edgar
+- scenario: FX_INVERTED_CROSS
+  fund_id: ATLAS-USE
+  isin: GB0009252882
+  expected_category: fx_rate
+  incorrect_side: accounting
+  root_cause: 'Accounting applied the GBP/USD cross inverted: used 1.355906 where the correct GBP-per-USD
+    rate on 2026-08-17 is 0.737514.'
+  expected_correction_base: '11372483.88'
+  verifiable_against: ecb_fx_reference_rates
+- scenario: PRICE_STALE
+  fund_id: ATLAS-USE
+  isin: US4581401001
+  expected_category: pricing
+  incorrect_side: accounting
+  root_cause: Accounting carried the prior close of 26.71 rather than the 2026-08-17 close of 27.18; the
+    vendor price feed did not refresh.
+  expected_correction_base: '1104500.00'
+  verifiable_against: books_and_records
+- scenario: SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE
+  fund_id: MERID-GEF
+  isin: FR0000121014
+  expected_category: settlement
+  incorrect_side: neither
+  root_cause: 'Trade TRD-2026-08-17-0041 was executed 2026-08-17 for settlement 2026-08-19. Accounting
+    recognises on trade date, the custodian on settlement date. This is a timing difference, not an error:
+    it requires an unsettled-trade reconciling item, not a correcting entry.'
+  expected_correction_base: '0.00'
+  verifiable_against: books_and_records
+- scenario: SETTLE_FAILED_TRADE
+  fund_id: ATLAS-USE
+  isin: US7170811035
+  expected_category: settlement
+  incorrect_side: accounting
+  root_cause: Trade TRD-2026-08-14-0118 failed at the custodian on 2026-08-17 but remains in the accounting
+    book as settled. The position must be reversed.
+  expected_correction_base: '-3880000.00'
+  verifiable_against: books_and_records
+- scenario: CA_ADR_DIVIDEND_GROSS_VS_NET
+  fund_id: MERID-GEF
+  isin: US0028241000
+  expected_category: corporate_action
+  incorrect_side: accounting
+  root_cause: The ABEV ADR dividend was booked gross (253750.00 USD) in the accounting book while the
+    custodian credited net of 15% withholding tax (215687.50 USD). A withholding tax receivable of 38062.50
+    USD is missing.
+  expected_correction_base: '-38062.50'
+  correction_currency: USD
+  verifiable_against: sec_edgar
+- scenario: FEE_ACCRUAL_MISSING
+  fund_id: MERID-GEF
+  expected_category: cash_fees
+  incorrect_side: accounting
+  root_cause: One day of management fee accrual (9863.01 EUR at 75bps annual on ~480m net assets) is absent
+    from the accounting book for 2026-08-17.
+  expected_correction_base: '-9863.01'
+  correction_currency: EUR
+  verifiable_against: books_and_records
+- scenario: INTEREST_ACCRUAL_MISSING
+  fund_id: ATLAS-USE
+  expected_category: cash_fees
+  incorrect_side: accounting
+  root_cause: Three days of deposit interest (7719.86 USD at 3.25% on 28.9m) was credited by the custodian
+    but not accrued in the accounting book.
+  expected_correction_base: '7719.86'
+  correction_currency: USD
+  verifiable_against: books_and_records
