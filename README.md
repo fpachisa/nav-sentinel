@@ -58,8 +58,8 @@ A model cannot declare victory here. The arithmetic either closes or it does not
 | Agent Runtime | Agent Runtime / Cloud Run | Long-running investigations dispatched asynchronously over Pub/Sub. |
 | Memory Bank | Memory Bank | Per-fund, per-security recurrence memory across NAV cycles, so a break seen last month is recognised rather than re-investigated. |
 | Agent Identity | Agent Identity + IAM | One service account per agent, minted from its manifest. No shared fleet identity, no ambient authority. |
-| Agent Gateway | Agent Gateway | Single enforcement point for five policies (below). Agents never evaluate their own permissions. |
-| Model Armor | Model Armor | Every byte of external content screened before it reaches a model context. Fail-closed. |
+| Agent Gateway | Agent Gateway | Intended single enforcement point for five policies (below). **Under remediation — see Known defects.** |
+| Model Armor | Model Armor | Screens external content before it reaches a model context. **Under remediation — the current implementation has a verified bypass; see Known defects.** |
 | Observability | Cloud Trace via OTLP | One trace per exception case. The reasoning chain *is* the audit artefact. |
 
 **Model:** `gemini-3.7-flash` on Vertex AI for investigation and drafting;
@@ -82,15 +82,29 @@ where token spend would otherwise run away.
 
 ### Why the governance is load-bearing, not decorative
 
-The corporate-actions investigator reads issuer filings from the public internet. That content
-is authored by someone else and lands directly in a model's context, which makes it a genuine
+The corporate-actions investigator reads issuer filings from the public internet. That content is
+authored by someone else and lands directly in a model's context, which makes it a genuine
 prompt-injection surface rather than a hypothetical one. `fixtures/data/` contains a poisoned
-corporate-action notice that instructs the agent to enable posting authority, skip the audit
-log and exfiltrate the investor register. Model Armor blocks it on the
-`pi_and_jailbreak` filter, and the refusal is recorded on the case trace.
+corporate-action notice instructing the agent to enable posting authority, skip the audit log and
+exfiltrate the investor register.
 
-Screening is fail-closed: if the service is unreachable, untrusted content is refused rather
-than admitted unscreened. A guardrail that degrades to *allow* under load is not a guardrail.
+**Model Armor blocks that notice in isolation and does not reliably block it inside a real document.**
+Measured against the live service, with the 1,008-byte injection held constant:
+
+| Injection position in a 19,662-byte filing | Whole-document screen |
+| :--- | :--- |
+| head | missed |
+| middle | missed |
+| tail | caught |
+
+There is also a size cliff between 40,827 and 41,329 bytes, above which the prompt-injection filter
+returns `execution_state: EXECUTION_SKIPPED` and `invocation_result: PARTIAL` while
+`filter_match_state` still reads `NO_MATCH_FOUND` — so code checking only the match state, as this
+code currently does, cannot distinguish a skipped scan from a clean one.
+
+Screening in 1KB windows with 500-byte overlap catches the injection at every position tested, with no
+false positives. That fix is in progress, together with a quarantined extractor so that untrusted prose
+never enters a privileged context at all. See [docs/PLAN.md](docs/PLAN.md) §1.
 
 ## Data
 
@@ -129,7 +143,7 @@ make bootstrap PROJECT=your-project-id REGION=us-central1
 ```
 
 This enables the required APIs, creates the Model Armor template, mints one service account
-per registry manifest with least-privilege roles, and creates the Pub/Sub topic and Firestore
+per registry manifest (see Known defects on the scope of those roles), and creates the Pub/Sub topic and Firestore
 database. It is idempotent — re-run it freely.
 
 > **Gotcha worth knowing:** Model Armor is only reachable on its *regional* endpoint. Calls to
@@ -142,7 +156,7 @@ database. It is idempotent — re-run it freely.
 make fixtures
 ```
 
-Fetches live ECB reference rates and writes the synthetic books plus
+Fetches live ECB reference rates — **network required** — and writes the synthetic books plus
 `eval/golden_breaks.yaml`.
 
 ### 4. Verify
@@ -155,7 +169,7 @@ make registry    # the published fleet and its coverage
 ### 5. Run a NAV cycle
 
 ```bash
-make demo
+make demo      # NOT YET IMPLEMENTED -- see Known defects
 ```
 
 ## Repository layout
@@ -198,20 +212,43 @@ reconciliation engine has. `tests/test_reconciliation.py` pins this.
 
 Built and verified against live Google Cloud:
 
-- [x] Deterministic reconciliation core with NAV control-total closure
-- [x] Agent Registry with capability-based runtime discovery
-- [x] Agent Gateway enforcing all five policies
-- [x] Model Armor screening, verified blocking a real prompt injection
-- [x] OpenTelemetry case traces exported to Cloud Trace
-- [x] Per-agent identity derived from registry manifests
-- [x] 32 invariant tests
-- [ ] ADK investigator agents on Gemini 3.7 Flash
-- [ ] Memory Bank recurrence recall
-- [ ] Pub/Sub async orchestration
-- [ ] Exception console UI
-- [ ] Cloud Run deployment
-- [ ] Evaluation harness scoring against `eval/golden_breaks.yaml`
+Each claim below names the test or artefact that evidences it. Items under remediation are listed as
+such rather than as complete.
+
+| Component | State | Evidence |
+| :--- | :--- | :--- |
+| Deterministic reconciliation core | works, with a known gap | `tests/test_reconciliation.py` (32 tests). The NAV control-total closure is **circular** — see [docs/PLAN.md](docs/PLAN.md) §1 |
+| Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
+| Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
+| OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
+| Agent Gateway policy enforcement | **under remediation** | P-001 is a string check on a label and P-002/P-003/P-005 trust a caller-supplied manifest; both are bypassable. No test covers the bypass |
+| Model Armor screening | **under remediation** | Verified bypass, above. **No test in the suite currently touches Model Armor** |
+| Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
+| ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
+| Memory Bank recurrence recall | not started | — |
+| Pub/Sub async orchestration | not started | `make demo` does not run |
+| Cloud Run deployment | not started | — |
+| Evaluation harness | not started | — |
+
+### Known defects
+
+Recorded openly because this repository is public and the claims above were previously overstated. Full
+detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
+
+1. **Tool allowlist bypass.** `gateway.call_tool(name, fn)` validates the *name* and executes the
+   supplied *callable*, so any function can run under a declared tool's label — and the audit log
+   records the declared name, actively falsifying the trail.
+2. **Confused deputy.** `authorize_drafting`, `authorize_posting` and `admit_untrusted_content` take the
+   acting manifest as an argument instead of resolving it from the bound identity, so a forged manifest
+   escalates to posting authority. `human_approval_ref` is an unvalidated string.
+3. **Model Armor bypass.** As described above.
+4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
+   the declared ground truth explains only a fraction of the NAV difference.
+5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
+   leaves all 32 tests passing, because `market_value_base` is a stored field nothing recomputes.
+6. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
+   one test require live network access to the ECB.
 
 ## Licence
 
-MIT
+MIT — see [LICENSE](LICENSE).
