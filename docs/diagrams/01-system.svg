@@ -14,13 +14,6 @@
         </defs>
         <rect x="0" y="0" width="1040" height="660" fill="#F1F4F7"/>
 
-        <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#7C8894" letter-spacing="1.3">
-          <text x="30" y="22">THE FLEET · ADK AGENTS ON VERTEX AI</text>
-          <text x="30" y="234">CONTROL PLANE</text>
-          <text x="30" y="438">DATA AND MODEL SERVICES</text>
-          <text x="30" y="562">TELEMETRY</text>
-        </g>
-
         <!-- fleet -->
         <g fill="none" stroke="currentColor" stroke-width="1.4">
           <rect x="30" y="76" width="116" height="54" rx="3"/>
@@ -123,10 +116,10 @@
 
         <!-- control plane down to data -->
         <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
-          <line x1="88"  y1="350" x2="88"  y2="448"/>
-          <line x1="428" y1="350" x2="454" y2="448"/>
-          <line x1="622" y1="350" x2="635" y2="448"/>
-          <line x1="880" y1="350" x2="872" y2="448"/>
+          <line x1="112" y1="350" x2="112" y2="448"/>
+          <line x1="454" y1="350" x2="454" y2="448"/>
+          <line x1="635" y1="350" x2="635" y2="448"/>
+          <line x1="872" y1="350" x2="872" y2="448"/>
         </g>
 
         <!-- data band -->
@@ -159,5 +152,19 @@
         <g stroke="#7C8894" stroke-width=".9" stroke-dasharray="3 3" fill="none" marker-end="url(#af)" color="#7C8894">
           <line x1="364" y1="350" x2="364" y2="572"/>
           <line x1="726" y1="350" x2="726" y2="572"/>
+        </g>
+      
+        <!-- band labels, drawn last over a halo so arrows pass behind the lettering -->
+        <g fill="#F1F4F7">
+          <rect x="26" y="10"  width="278" height="16"/>
+          <rect x="26" y="222" width="112" height="16"/>
+          <rect x="26" y="426" width="186" height="16"/>
+          <rect x="26" y="550" width="82"  height="16"/>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#7C8894" letter-spacing="1.3">
+          <text x="30" y="22">THE FLEET · ADK AGENTS ON VERTEX AI</text>
+          <text x="30" y="234">CONTROL PLANE</text>
+          <text x="30" y="438">DATA AND MODEL SERVICES</text>
+          <text x="30" y="562">TELEMETRY</text>
         </g>
       </svg>

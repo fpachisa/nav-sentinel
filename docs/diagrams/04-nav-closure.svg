@@ -42,8 +42,8 @@
         <text x="911" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#2C6E5A" text-anchor="middle">to the cent</text>
 
         <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#d)">
-          <line x1="174" y1="63" x2="222" y2="80"/>
-          <line x1="174" y1="127" x2="222" y2="110"/>
+          <path d="M174 63 H200 V95 H222"/>
+          <path d="M174 127 H200 V95 H222"/>
           <line x1="378" y1="95" x2="426" y2="95"/>
           <line x1="564" y1="95" x2="612" y2="95"/>
         </g>
