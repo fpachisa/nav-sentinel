@@ -550,11 +550,20 @@ footer {
         <text x="684" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">drafted by the</text>
         <text x="684" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">fleet, multi-leg</text>
 
-        <rect x="806" y="52" width="210" height="86" rx="3" fill="none" stroke="var(--closed)" stroke-width="1.8"/>
-        <text x="911" y="78" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--closed)" text-anchor="middle">Residual = 0</text>
-        <text x="911" y="98" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">Σ corrections</text>
-        <text x="911" y="112" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">= −control total</text>
-        <text x="911" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)" text-anchor="middle">to the cent</text>
+        <rect x="790" y="40" width="226" height="110" rx="3" fill="none" stroke="var(--closed)" stroke-width="1.8"/>
+        <text x="903" y="62" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--closed)" text-anchor="middle">Sign-off test</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--closed)">
+          <text x="802" y="82">the NAV difference</text>
+          <text x="1004" y="82" text-anchor="end">+5,338,120.80</text>
+          <text x="802" y="97">less what the fleet</text>
+          <text x="802" y="107">proposed to correct</text>
+          <text x="1004" y="102" text-anchor="end">−5,338,120.80</text>
+          <line x1="908" y1="112" x2="1004" y2="112" stroke="var(--closed)" stroke-width=".8"/>
+          <text x="802" y="126">residual, to the cent</text>
+          <text x="1004" y="126" text-anchor="end" font-weight="700">0.00</text>
+        </g>
+        <line x1="908" y1="131" x2="1004" y2="131" stroke="var(--closed)" stroke-width=".8"/>
+        <line x1="908" y1="134" x2="1004" y2="134" stroke="var(--closed)" stroke-width=".8"/>
 
         <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#d)">
           <path d="M174 63 H200 V95 H222"/>
@@ -562,16 +571,16 @@ footer {
           <line x1="378" y1="95" x2="426" y2="95"/>
           <line x1="564" y1="95" x2="612" y2="95"/>
         </g>
-        <line x1="750" y1="95" x2="800" y2="95" stroke="var(--closed)" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="var(--closed)"/>
+        <line x1="750" y1="95" x2="784" y2="95" stroke="var(--closed)" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="var(--closed)"/>
 
-        <path d="M303 150 Q303 214 640 214 Q911 214 911 142" stroke="var(--closed)" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="var(--closed)"/>
+        <path d="M303 150 Q303 214 640 214 Q903 214 903 156" stroke="var(--closed)" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="var(--closed)"/>
         <text x="608" y="234" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--closed)" text-anchor="middle">the control total is what the sum must reconcile against</text>
 
         <rect x="24" y="256" width="992" height="30" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
         <text x="40" y="275" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">A model cannot declare the cycle complete. Withhold any one break and the residual equals that break's impact — asserted by test.</text>
       </svg>
     </div>
-    <figcaption><b>The fleet is graded against arithmetic it cannot fudge.</b> Summing the <em>generator's</em> expected corrections would only prove the fixtures are internally consistent; summing the <em>fleet's</em> proposals is what shows the agents produced something. Leg-level correction accuracy and root-cause accuracy are reported beside a non-agentic heuristic baseline on the same cases.</figcaption>
+    <figcaption><b>The fleet is graded against arithmetic it cannot fudge.</b> Every correction is signed as the amount to add to the accounting book, so a cycle closes only when the corrections cancel the whole NAV difference and nothing is left over. A model cannot declare this done — either the statement foots or it does not. Note <em>whose</em> corrections are summed: the generator's expected values would prove only that the fixtures are self-consistent, while the fleet's own proposals are what show the agents produced something. Leg-level correction accuracy and root-cause accuracy are reported beside a non-agentic heuristic baseline on the same cases.<br><br><b>The figure states the test, not a passing result.</b> The control total is real and reproduces exactly; the fixtures do not yet satisfy the test, because two trade-date recognitions were booked without a contra cash leg. That gap is 5,208,800.00 — the unsettled purchase — and it is open as blocker B2.</figcaption>
   </figure>
 </section>
 

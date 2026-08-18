@@ -35,11 +35,20 @@
         <text x="684" y="106" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">drafted by the</text>
         <text x="684" y="118" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#7C8894" text-anchor="middle">fleet, multi-leg</text>
 
-        <rect x="806" y="52" width="210" height="86" rx="3" fill="none" stroke="#2C6E5A" stroke-width="1.8"/>
-        <text x="911" y="78" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="#2C6E5A" text-anchor="middle">Residual = 0</text>
-        <text x="911" y="98" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">Σ corrections</text>
-        <text x="911" y="112" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">= −control total</text>
-        <text x="911" y="130" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#2C6E5A" text-anchor="middle">to the cent</text>
+        <rect x="790" y="40" width="226" height="110" rx="3" fill="none" stroke="#2C6E5A" stroke-width="1.8"/>
+        <text x="903" y="62" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="#2C6E5A" text-anchor="middle">Sign-off test</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="#2C6E5A">
+          <text x="802" y="82">the NAV difference</text>
+          <text x="1004" y="82" text-anchor="end">+5,338,120.80</text>
+          <text x="802" y="97">less what the fleet</text>
+          <text x="802" y="107">proposed to correct</text>
+          <text x="1004" y="102" text-anchor="end">−5,338,120.80</text>
+          <line x1="908" y1="112" x2="1004" y2="112" stroke="#2C6E5A" stroke-width=".8"/>
+          <text x="802" y="126">residual, to the cent</text>
+          <text x="1004" y="126" text-anchor="end" font-weight="700">0.00</text>
+        </g>
+        <line x1="908" y1="131" x2="1004" y2="131" stroke="#2C6E5A" stroke-width=".8"/>
+        <line x1="908" y1="134" x2="1004" y2="134" stroke="#2C6E5A" stroke-width=".8"/>
 
         <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#d)">
           <path d="M174 63 H200 V95 H222"/>
@@ -47,9 +56,9 @@
           <line x1="378" y1="95" x2="426" y2="95"/>
           <line x1="564" y1="95" x2="612" y2="95"/>
         </g>
-        <line x1="750" y1="95" x2="800" y2="95" stroke="#2C6E5A" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="#2C6E5A"/>
+        <line x1="750" y1="95" x2="784" y2="95" stroke="#2C6E5A" stroke-width="1.6" fill="none" marker-end="url(#dc)" color="#2C6E5A"/>
 
-        <path d="M303 150 Q303 214 640 214 Q911 214 911 142" stroke="#2C6E5A" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="#2C6E5A"/>
+        <path d="M303 150 Q303 214 640 214 Q903 214 903 156" stroke="#2C6E5A" stroke-width="1.4" fill="none" stroke-dasharray="5 4" marker-end="url(#dc)" color="#2C6E5A"/>
         <text x="608" y="234" font-family="JetBrains Mono, monospace" font-size="9" fill="#2C6E5A" text-anchor="middle">the control total is what the sum must reconcile against</text>
 
         <rect x="24" y="256" width="992" height="30" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
