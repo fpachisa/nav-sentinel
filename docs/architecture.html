@@ -404,7 +404,7 @@ footer {
 
         <rect x="24" y="284" width="1000" height="32" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
         <text x="40" y="305" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">Governance log — the decision names the tool that executed, not the label the caller supplied</text>
-      </svg>
+            </svg>
     </div>
     <figcaption><b>Resolution, not delegation.</b> The gateway previously accepted a name <em>and</em> a callable and validated only the name, so any function could run under a declared tool's label while the audit record named the label. The catalogue is now a read-only mapping that refuses any key disagreeing with its own entry, and it captures function objects at import time — so rebinding a tool module afterwards cannot redirect what runs.</figcaption>
   </figure>
@@ -475,7 +475,6 @@ footer {
         <line x1="568" y1="106" x2="630" y2="106" stroke="var(--closed)" stroke-width="2" fill="none" marker-end="url(#cc)" color="var(--closed)"/>
         <line x1="806" y1="106" x2="842" y2="106" stroke="var(--closed)" stroke-width="1.5" fill="none" marker-end="url(#cc)" color="var(--closed)"/>
 
-        <text x="580" y="96" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--closed)" text-anchor="end">typed values only</text>
 
         <rect x="636" y="196" width="380" height="76" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
         <text x="826" y="218" font-family="Archivo, sans-serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="600">Why a second layer exists</text>
@@ -483,6 +482,10 @@ footer {
         <text x="826" y="250" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">it cannot stop a filing stating a false</text>
         <text x="826" y="264" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">withholding rate, so values are cross-checked</text>
         <line x1="932" y1="142" x2="932" y2="192" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="3 3" fill="none" marker-end="url(#c)" color="var(--ink-faint)"/>
+      
+        <!-- drawn last, over a ground halo: the label annotates the crossing itself -->
+        <rect x="571" y="86" width="62" height="13" fill="var(--paper-sunk)"/>
+        <text x="602" y="96" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--closed)" text-anchor="middle">typed values</text>
       </svg>
     </div>
     <figcaption><b>Prose stops at the boundary; only typed values cross it.</b> The extractor holds no tools and no registry authority, so an injection surviving screening arrives somewhere that cannot act on it. Data poisoning is a separate problem and needs a separate control — hence the cross-checks, and behind them the human approval that no agent can bypass.</figcaption>

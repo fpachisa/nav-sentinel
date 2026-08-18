@@ -68,4 +68,4 @@
 
         <rect x="24" y="284" width="1000" height="32" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
         <text x="40" y="305" font-family="JetBrains Mono, monospace" font-size="9" fill="#46525F">Governance log — the decision names the tool that executed, not the label the caller supplied</text>
-      </svg>
+            </svg>

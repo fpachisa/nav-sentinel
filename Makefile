@@ -17,9 +17,13 @@ fixtures: ## Generate synthetic books and records with seeded breaks
 test: ## Run the invariant test suite (offline)
 	$(PY) -m pytest tests/ -q
 
-verify: ## Offline gate: lint + fixtures + full invariant suite
+verify: ## Offline gate: lint + diagrams + full invariant suite
 	.venv/bin/ruff check src tests fixtures
+	$(PY) scripts/check_diagrams.py
 	$(PY) -m pytest tests/ -q
+
+diagrams: ## Re-export standalone SVGs and PNGs from docs/architecture.html
+	$(PY) scripts/export_diagrams.py
 
 compliance: ## Prove the qualifying stack requirements against live Vertex AI
 	$(PY) -m nav_sentinel.compliance

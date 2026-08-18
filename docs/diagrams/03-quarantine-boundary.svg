@@ -56,7 +56,6 @@
         <line x1="568" y1="106" x2="630" y2="106" stroke="#2C6E5A" stroke-width="2" fill="none" marker-end="url(#cc)" color="#2C6E5A"/>
         <line x1="806" y1="106" x2="842" y2="106" stroke="#2C6E5A" stroke-width="1.5" fill="none" marker-end="url(#cc)" color="#2C6E5A"/>
 
-        <text x="580" y="96" font-family="JetBrains Mono, monospace" font-size="8" fill="#2C6E5A" text-anchor="end">typed values only</text>
 
         <rect x="636" y="196" width="380" height="76" rx="3" fill="none" stroke="#7C8894" stroke-width="1.1" stroke-dasharray="4 3"/>
         <text x="826" y="218" font-family="Archivo, sans-serif" font-size="11" fill="#46525F" text-anchor="middle" font-weight="600">Why a second layer exists</text>
@@ -64,4 +63,8 @@
         <text x="826" y="250" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#46525F" text-anchor="middle">it cannot stop a filing stating a false</text>
         <text x="826" y="264" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#46525F" text-anchor="middle">withholding rate, so values are cross-checked</text>
         <line x1="932" y1="142" x2="932" y2="192" stroke="#7C8894" stroke-width="1" stroke-dasharray="3 3" fill="none" marker-end="url(#c)" color="#7C8894"/>
+      
+        <!-- drawn last, over a ground halo: the label annotates the crossing itself -->
+        <rect x="571" y="86" width="62" height="13" fill="#F1F4F7"/>
+        <text x="602" y="96" font-family="JetBrains Mono, monospace" font-size="8" fill="#2C6E5A" text-anchor="middle">typed values</text>
       </svg>
