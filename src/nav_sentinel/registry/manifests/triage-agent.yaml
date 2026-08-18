@@ -12,11 +12,13 @@ model: gemini-3.5-flash-lite   # every break passes through here, so cost per ca
 
 allowed_tools:
   - registry.discover_for_category
+  - registry.coverage
   - books_and_records.security
-  - memory.recall_recurrence
+  # memory.recall_recurrence is added in S2, together with the tool itself. A manifest must
+  # not declare a capability the catalogue cannot resolve.
 
 data_scopes:
-  read: [securities, exception_cases, memory]
+  read: [securities, registry]
   write: [exception_cases]
 
 authority:

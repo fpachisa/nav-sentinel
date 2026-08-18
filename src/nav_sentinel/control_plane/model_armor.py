@@ -45,7 +45,7 @@ class ContentBlocked(RuntimeError):
 
 def template_path() -> str:
     s = settings()
-    return f"projects/{s.project}/locations/{s.location}/templates/{s.model_armor_template}"
+    return f"projects/{s.project}/locations/{s.region}/templates/{s.model_armor_template}"
 
 
 def screen(text: str, *, source_uri: str | None = None) -> ArmorVerdict:
@@ -53,9 +53,7 @@ def screen(text: str, *, source_uri: str | None = None) -> ArmorVerdict:
     from google.cloud import modelarmor_v1 as ma
 
     s = settings()
-    client = ma.ModelArmorClient(
-        client_options={"api_endpoint": f"modelarmor.{s.location}.rep.googleapis.com"}
-    )
+    client = ma.ModelArmorClient(client_options={"api_endpoint": s.model_armor_endpoint})
 
     try:
         response = client.sanitize_user_prompt(

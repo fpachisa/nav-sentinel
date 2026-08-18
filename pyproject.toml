@@ -41,3 +41,7 @@ target-version = "py312"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "live: requires live Google Cloud credentials and network access",
+]
+addopts = "-m 'not live'"

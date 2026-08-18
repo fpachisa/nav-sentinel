@@ -68,7 +68,7 @@ def configure_tracing(*, console: bool = False) -> None:
             "service.version": "0.1.0",
             "cloud.provider": "gcp",
             "cloud.account.id": s.project,
-            "cloud.region": s.location,
+            "cloud.region": s.region,
             # Required by telemetry.googleapis.com; the export is rejected without it.
             "gcp.project_id": s.project,
         }
@@ -86,6 +86,18 @@ def configure_tracing(*, console: bool = False) -> None:
     if not exported:
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
 
+    trace.set_tracer_provider(provider)
+    _configured = True
+
+
+def use_provider(provider: TracerProvider) -> None:
+    """Install a specific provider and mark tracing configured.
+
+    Exists so tests can attach an in-memory exporter and assert on emitted spans. The
+    acceptance criteria require span attributes to be verified by test rather than read off
+    a console, which is only possible if the provider can be substituted.
+    """
+    global _configured
     trace.set_tracer_provider(provider)
     _configured = True
 

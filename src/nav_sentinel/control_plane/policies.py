@@ -72,6 +72,35 @@ def tool_allowed(manifest: AgentManifest, tool_name: str) -> PolicyDecision:
     )
 
 
+def tool_within_data_scope(manifest: AgentManifest, tool_name: str,
+                           reads: tuple[str, ...]) -> PolicyDecision:
+    """P-006: a tool may only read data domains the agent's manifest declares.
+
+    Without this, `data_scopes` was documentation. The manifests declared it, `bootstrap.sh`
+    read it to decide IAM roles, and no runtime check consulted it -- so an agent scoped to
+    positions could read the cash ledger through any tool it happened to be granted.
+    """
+    undeclared = [d for d in reads if d not in manifest.data_scopes.read]
+    if not undeclared:
+        return PolicyDecision(
+            effect=Effect.ALLOW,
+            policy_id="P-006-DATA-SCOPE",
+            reason=f"{tool_name} reads {list(reads) or 'no internal domain'}, within scope",
+            agent_ref=manifest.ref,
+            resource=tool_name,
+        )
+    return PolicyDecision(
+        effect=Effect.DENY,
+        policy_id="P-006-DATA-SCOPE",
+        reason=(
+            f"{tool_name} reads {undeclared}, which {manifest.ref} does not declare in "
+            f"data_scopes.read ({manifest.data_scopes.read})."
+        ),
+        agent_ref=manifest.ref,
+        resource=tool_name,
+    )
+
+
 def may_propose_remediation(manifest: AgentManifest) -> PolicyDecision:
     """P-002: only an agent whose manifest grants drafting authority may draft an entry."""
     if manifest.authority.may_propose_remediation:

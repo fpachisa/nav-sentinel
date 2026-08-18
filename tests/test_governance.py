@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from nav_sentinel.control_plane import gateway, identity, policies
+from nav_sentinel.tools import catalogue
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import BreakCategory, BreakType, ExceptionCase, ReconciliationBreak
 from nav_sentinel.registry import discover
@@ -88,23 +89,110 @@ class TestToolAllowlist:
     def test_declared_tool_is_permitted(self):
         fx = discover.get("fx-rates-investigator")
         with identity.acting_as(fx):
-            assert gateway.call_tool("ecb_fx.rate_on", lambda: "ok") == "ok"
+            rate = gateway.call_tool("ecb_fx.latest_rate_on_or_before", "EUR", NAV_DATE)
+        assert rate == (NAV_DATE, Decimal("1"))
 
     def test_undeclared_tool_is_denied(self):
         fx = discover.get("fx-rates-investigator")
         with identity.acting_as(fx):
             with pytest.raises(PolicyViolation) as exc:
-                gateway.call_tool("books_and_records.cash_movements", lambda: "leaked")
+                gateway.call_tool("books_and_records.cash_movements", "accounting")
         assert exc.value.decision.policy_id == "P-001-TOOL-ALLOWLIST"
 
     def test_tool_call_without_identity_is_refused(self):
         """No ambient authority: an unattributed tool call fails rather than defaulting."""
         with pytest.raises(identity.IdentityError):
-            gateway.call_tool("ecb_fx.rate_on", lambda: "ok")
+            gateway.call_tool("ecb_fx.rate_on", "USD", NAV_DATE)
+
+    def test_caller_cannot_supply_the_callable(self):
+        """B1. The gateway used to take the function as an argument and validate only the
+        name, so any callable ran under a declared tool's label while the audit record named
+        the label. Resolution now happens in the catalogue and there is no such argument."""
+        import inspect
+
+        params = list(inspect.signature(gateway.call_tool).parameters)
+        assert params[0] == "tool_name"
+        assert "fn" not in params, "call_tool must not accept a callable from the caller"
+
+        fx = discover.get("fx-rates-investigator")
+        sentinel = lambda: "arbitrary code executed"  # noqa: E731
+        with identity.acting_as(fx):
+            # The old exploit: a declared name with an undeclared function. It now runs the
+            # catalogue's function and treats the callable as a positional argument, so the
+            # swap cannot execute.
+            with pytest.raises(TypeError, match="cannot be supplied by the caller"):
+                gateway.call_tool("ecb_fx.rate_on", sentinel)
+
+        # Refused before any policy is evaluated, so no misleading ALLOW is recorded.
+        gateway.clear_decision_log()
+        with identity.acting_as(fx):
+            with pytest.raises(TypeError):
+                gateway.call_tool("ecb_fx.rate_on", sentinel)
+        assert gateway.decision_log() == [], (
+            "a rejected call must not leave ALLOW decisions in the audit log"
+        )
+
+    def test_unknown_tool_name_is_distinguishable_from_a_denial(self):
+        """A typo in a manifest must not read as a permissions problem."""
+        fx = discover.get("fx-rates-investigator")
+        with identity.acting_as(fx):
+            with pytest.raises(catalogue.UnknownTool):
+                gateway.call_tool("ecb_fx.no_such_function")
+
+    def test_every_manifest_tool_resolves_in_the_catalogue(self):
+        """A manifest may not declare a capability the catalogue cannot resolve."""
+        unresolvable = {
+            m.ref: [t for t in m.allowed_tools if t not in catalogue.CATALOGUE]
+            for m in load_manifests()
+        }
+        offenders = {k: v for k, v in unresolvable.items() if v}
+        assert not offenders, f"manifests declaring phantom tools: {offenders}"
 
     def test_every_manifest_declares_at_least_one_tool(self):
         for m in load_manifests():
             assert m.allowed_tools, f"{m.ref} declares no tools and could never do work"
+
+
+class TestDataScopeEnforcement:
+    """P-006. `data_scopes` was declared in every manifest, read by bootstrap.sh to pick IAM
+    roles, and consulted by no runtime check."""
+
+    def test_tool_outside_declared_scope_is_denied(self):
+        """cash-fees declares cash_movements but not positions; grant the tool and the scope
+        check must still refuse it."""
+        cf = discover.get("cash-fees-investigator")
+        widened = cf.model_copy(
+            update={"allowed_tools": cf.allowed_tools + ["books_and_records.positions"]}
+        )
+        decision = policies.tool_within_data_scope(
+            widened, "books_and_records.positions", ("positions",)
+        )
+        assert not decision.allowed
+        assert decision.policy_id == "P-006-DATA-SCOPE"
+
+    def test_declared_scope_is_permitted(self):
+        cf = discover.get("cash-fees-investigator")
+        assert policies.tool_within_data_scope(
+            cf, "books_and_records.cash_movements", ("cash_movements",)
+        ).allowed
+
+    def test_external_reference_tools_need_no_internal_scope(self):
+        fx = discover.get("fx-rates-investigator")
+        assert policies.tool_within_data_scope(fx, "ecb_fx.rate_on", ()).allowed
+
+    def test_every_tool_scope_is_declared_by_its_users(self):
+        """Each manifest's tools must be within its own declared scopes -- otherwise the
+        manifest is internally inconsistent and P-006 would deny at runtime."""
+        problems = []
+        for m in load_manifests():
+            for name in m.allowed_tools:
+                spec = catalogue.CATALOGUE.get(name)
+                if spec is None:
+                    continue
+                missing = [d for d in spec.reads if d not in m.data_scopes.read]
+                if missing:
+                    problems.append(f"{m.ref}: {name} needs {missing}")
+        assert not problems, problems
 
 
 class TestDraftingAuthority:
@@ -141,9 +229,12 @@ class TestDecisionLog:
     def test_decisions_are_recorded_for_audit(self, case):
         fx = discover.get("fx-rates-investigator")
         with identity.acting_as(fx):
-            gateway.call_tool("ecb_fx.rate_on", lambda: "ok")
+            gateway.call_tool("ecb_fx.latest_rate_on_or_before", "EUR", NAV_DATE)
             with pytest.raises(PolicyViolation):
                 gateway.authorize_drafting(fx)
         log = gateway.decision_log()
-        assert len(log) == 2
-        assert [d.effect.value for d in log] == ["allow", "deny"]
+        # P-001 allowlist, P-006 data scope, then the P-002 drafting refusal.
+        assert [d.policy_id for d in log] == [
+            "P-001-TOOL-ALLOWLIST", "P-006-DATA-SCOPE", "P-002-DRAFT-AUTHORITY",
+        ]
+        assert [d.effect.value for d in log] == ["allow", "allow", "deny"]
