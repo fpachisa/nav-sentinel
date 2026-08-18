@@ -12,13 +12,13 @@ is measured in its own terms and the most severe measure governs the case.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
-from typing import Callable, Protocol
 
 from nav_sentinel.config import settings
 from nav_sentinel.domain.models import ApprovalClass, ExceptionCase, NavRecord, Severity
 
-_BPS = Decimal("10000")
+_BPS = Decimal(10000)
 
 # Converts an amount in `currency` into the fund's base currency. Injected rather than
 # imported so that scoring stays a pure function and remains unit-testable offline.
@@ -31,7 +31,7 @@ def identity_to_base(amount: Decimal, currency: str) -> Decimal:
 
 def value_impact_base(case: ExceptionCase, to_base: ToBase) -> Decimal:
     """Total monetary impact of the case, in fund base currency."""
-    total = Decimal("0")
+    total = Decimal(0)
     for b in case.value_breaks:
         ccy = b.value_currency
         total += b.abs_difference if ccy is None else abs(to_base(b.difference, ccy))

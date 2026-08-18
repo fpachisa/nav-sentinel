@@ -14,8 +14,16 @@ venv: ## Create the virtual environment and install dependencies
 fixtures: ## Generate synthetic books and records with seeded breaks
 	$(PY) fixtures/generate.py
 
-test: ## Run the invariant test suite
+test: ## Run the invariant test suite (offline)
 	$(PY) -m pytest tests/ -q
+
+verify: ## Offline gate: lint + fixtures + full invariant suite
+	.venv/bin/ruff check src tests fixtures
+	$(PY) -m pytest tests/ -q
+
+compliance: ## Prove the qualifying stack requirements against live Vertex AI
+	$(PY) -m nav_sentinel.compliance
+	$(PY) -m pytest tests/ -q -m live
 
 lint: ## Lint
 	.venv/bin/ruff check src tests fixtures

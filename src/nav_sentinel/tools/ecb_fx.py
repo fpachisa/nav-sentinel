@@ -53,7 +53,7 @@ def fetch_rates(
 def rate_on(currency: str, day: date) -> Decimal | None:
     """Rate published for exactly this day, or None if the ECB published none."""
     if currency == "EUR":
-        return Decimal("1")
+        return Decimal(1)
     rates = fetch_rates([currency], day - timedelta(days=10), day)
     return rates.get((currency, day))
 
@@ -64,7 +64,7 @@ def latest_rate_on_or_before(currency: str, day: date) -> tuple[date, Decimal] |
     The gap between this date and `day` is precisely what a stale-rate break looks like.
     """
     if currency == "EUR":
-        return (day, Decimal("1"))
+        return (day, Decimal(1))
     rates = fetch_rates([currency], day - timedelta(days=14), day)
     candidates = sorted((d for (c, d) in rates if c == currency and d <= day), reverse=True)
     if not candidates:
@@ -77,7 +77,7 @@ def cross_rate(from_ccy: str, to_ccy: str, day: date) -> Decimal | None:
     """Cross via EUR, the way an accounting system should. Getting this inverted is a
     classic break, so the investigator needs the correct form to compare against."""
     if from_ccy == to_ccy:
-        return Decimal("1")
+        return Decimal(1)
     f = latest_rate_on_or_before(from_ccy, day)
     t = latest_rate_on_or_before(to_ccy, day)
     if not f or not t:

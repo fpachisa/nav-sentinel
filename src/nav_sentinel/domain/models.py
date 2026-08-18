@@ -13,7 +13,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-
 # --------------------------------------------------------------------------- enums
 
 
@@ -90,7 +89,7 @@ class Fund(BaseModel):
     base_currency: str
     domicile: str
     shares_outstanding: Decimal
-    fee_bps_annual: Decimal = Decimal("75")
+    fee_bps_annual: Decimal = Decimal(75)
 
 
 class Position(BaseModel):
@@ -144,7 +143,7 @@ class NavRecord(BaseModel):
     @property
     def nav_per_share(self) -> Decimal:
         if self.shares_outstanding == 0:
-            return Decimal("0")
+            return Decimal(0)
         return self.net_assets / self.shares_outstanding
 
 
@@ -217,8 +216,8 @@ class RootCauseHypothesis(BaseModel):
 class JournalEntryLine(BaseModel):
     account: str
     currency: str
-    debit: Decimal = Decimal("0")
-    credit: Decimal = Decimal("0")
+    debit: Decimal = Decimal(0)
+    credit: Decimal = Decimal(0)
     narrative: str = ""
 
 

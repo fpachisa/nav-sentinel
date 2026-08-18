@@ -18,8 +18,10 @@ rather than of an agent's good intentions.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable
+from types import MappingProxyType
 
 from nav_sentinel.registry import discover
 from nav_sentinel.tools import books_and_records as bnr
@@ -65,15 +67,40 @@ _SPECS: tuple[ToolSpec, ...] = (
              description="Which categories currently have an authorised investigator."),
 
     # --- third-party filings: free text, authored by someone else ----------------------
-    ToolSpec("edgar.recent_filings", edgar.recent_filings, (),
-             description="Filing metadata for an issuer. Metadata only, no document body."),
-    ToolSpec("edgar.search_filings", edgar.search_filings, (),
-             description="Full-text search across EDGAR. Metadata only."),
+    # Metadata, but still filer-authored: `issuer` comes from the filing's own `name` /
+    # `display_names`, and `description` from `primaryDocDescription`, both chosen by the
+    # filer. Untrusted for the same reason the document body is.
+    ToolSpec("edgar.recent_filings", edgar.recent_filings, (), untrusted_output=True,
+             description="Filing metadata for an issuer. Filer-authored strings."),
+    ToolSpec("edgar.search_filings", edgar.search_filings, (), untrusted_output=True,
+             description="Full-text search across EDGAR. Filer-authored strings."),
     ToolSpec("edgar.fetch_filing_text", edgar.fetch_filing_text, (), untrusted_output=True,
              description="Raw filing text. Attacker-controllable; screened by the gateway."),
 )
 
-CATALOGUE: dict[str, ToolSpec] = {spec.name: spec for spec in _SPECS}
+#: Read-only. A plain dict here would let in-process code swap a spec and run arbitrary
+#: code under a declared tool's label -- the original bypass through a different door.
+#: Tests that need a different tool use `override()`, which is explicit and scoped.
+CATALOGUE: MappingProxyType[str, ToolSpec] = MappingProxyType(
+    {spec.name: spec for spec in _SPECS}
+)
+
+_overrides: dict[str, ToolSpec] = {}
+
+
+@contextmanager
+def override(name: str, spec: ToolSpec) -> Iterator[None]:
+    """Temporarily substitute one tool. For tests only, and deliberately narrow: it is
+    scoped, it is named, and it cannot be reached by an agent emitting tool-call data."""
+    previous = _overrides.get(name)
+    _overrides[name] = spec
+    try:
+        yield
+    finally:
+        if previous is None:
+            _overrides.pop(name, None)
+        else:
+            _overrides[name] = previous
 
 
 class UnknownTool(KeyError):
@@ -84,17 +111,29 @@ class UnknownTool(KeyError):
     a permissions problem.
     """
 
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"{name!r} is not in the tool catalogue. Add a ToolSpec in "
-            f"nav_sentinel.tools.catalogue; it cannot be supplied at call time."
-        )
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        # KeyError.__str__ applies repr() to its argument, so the message would render
+        # wrapped in quotes with escaped inner quotes.
+        return self.args[0] if self.args else ""
 
 
 def resolve(name: str) -> ToolSpec:
-    spec = CATALOGUE.get(name)
+    spec = _overrides.get(name) or CATALOGUE.get(name)
     if spec is None:
-        raise UnknownTool(name)
+        raise UnknownTool(
+            f"{name!r} is not in the tool catalogue. Add a ToolSpec in "
+            f"nav_sentinel.tools.catalogue; it cannot be supplied at call time."
+        )
+    if spec.name != name:
+        # A key that disagrees with its spec would let the audit log name one tool while
+        # another ran. Refuse rather than record a false attribution.
+        raise UnknownTool(
+            f"catalogue key {name!r} maps to a spec named {spec.name!r}; refusing to "
+            f"execute under a mismatched label"
+        )
     return spec
 
 

@@ -17,17 +17,16 @@ same authoritative public source a fund accountant would.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import yaml
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from nav_sentinel.tools import ecb_fx  # noqa: E402
+from nav_sentinel.tools import ecb_fx
 
 DATA = Path(__file__).parent / "data"
 EVAL = Path(__file__).resolve().parents[1] / "eval"
@@ -105,7 +104,7 @@ FUND_BY_ID = {f["fund_id"]: f for f in FUNDS}
 def local_per_base(local_ccy: str, base_ccy: str, day: date) -> Decimal:
     """Units of `local_ccy` per one unit of `base_ccy`, via the ECB's EUR cross."""
     if local_ccy == base_ccy:
-        return Decimal("1")
+        return Decimal(1)
     l = ecb_fx.latest_rate_on_or_before(local_ccy, day)
     b = ecb_fx.latest_rate_on_or_before(base_ccy, day)
     if l is None or b is None:
@@ -188,9 +187,9 @@ def build() -> dict:
         # Scenario 3 -- inverted FX cross on a GBP holding in a USD-base fund.
         elif (fund_id, isin) == ("ATLAS-USE", "GB0009252882"):
             correct = local_per_base("GBP", "USD", NAV_DATE)
-            acc_kwargs["fx_override"] = Decimal("1") / correct
+            acc_kwargs["fx_override"] = Decimal(1) / correct
             q, p = Decimal(quantity), Decimal(price)
-            delta = money(q * p / (Decimal("1") / correct)) - money(q * p / correct)
+            delta = money(q * p / (Decimal(1) / correct)) - money(q * p / correct)
             note = {
                 "scenario": "FX_INVERTED_CROSS",
                 "fund_id": fund_id,
@@ -199,7 +198,7 @@ def build() -> dict:
                 "incorrect_side": "accounting",
                 "root_cause": (
                     f"Accounting applied the GBP/USD cross inverted: used "
-                    f"{(Decimal('1')/correct).quantize(Decimal('0.000001'))} where the correct "
+                    f"{(Decimal(1)/correct).quantize(Decimal('0.000001'))} where the correct "
                     f"GBP-per-USD rate on {NAV_DATE} is {correct.quantize(Decimal('0.000001'))}."
                 ),
                 "expected_correction_base": str(-delta),
@@ -318,7 +317,7 @@ def build() -> dict:
                            "Opening cash", src))
 
     # Scenario 7 -- ADR dividend booked gross by accounting, net of 15% withholding by custodian.
-    gross = Decimal("1450000") * Decimal("0.1750")     # 253,750.00 USD
+    gross = Decimal(1450000) * Decimal("0.1750")     # 253,750.00 USD
     withholding = money(gross * Decimal("0.15"))
     net = money(gross - withholding)
     acc_cash.append(cash("CSH-M-DIV-ABEV", "MERID-GEF", "USD", str(money(gross)), "dividend",
@@ -342,7 +341,7 @@ def build() -> dict:
     })
 
     # Scenario 8 -- one day of management fee accrual missing from the accounting book.
-    daily_fee = money(Decimal("480000000") * Decimal("75") / Decimal("10000") / Decimal("365"))
+    daily_fee = money(Decimal(480000000) * Decimal(75) / Decimal(10000) / Decimal(365))
     cus_cash.append(cash("CSH-M-FEE-0817", "MERID-GEF", "EUR", str(-daily_fee), "fee",
                          "Management fee accrual 2026-08-17", "custodian"))
     golden.append({
@@ -360,7 +359,7 @@ def build() -> dict:
     })
 
     # Scenario 9 -- deposit interest credited by the custodian, not yet accrued by accounting.
-    interest = money(Decimal("28900000") * Decimal("0.0325") / Decimal("365") * Decimal("3"))
+    interest = money(Decimal(28900000) * Decimal("0.0325") / Decimal(365) * Decimal(3))
     cus_cash.append(cash("CSH-A-INT-0817", "ATLAS-USE", "USD", str(interest), "interest",
                          "Deposit interest 2026-08-14 to 2026-08-17", "custodian"))
     golden.append({

@@ -25,7 +25,7 @@ NAV_DATE = date(2026, 8, 17)
 def _pos(fund, isin, qty, mv, source, ccy="USD"):
     return Position(
         fund_id=fund, isin=isin, as_of=NAV_DATE, quantity=Decimal(qty),
-        local_price=Decimal("1"), local_currency=ccy, fx_rate=Decimal("1"),
+        local_price=Decimal(1), local_currency=ccy, fx_rate=Decimal(1),
         market_value_base=Decimal(mv), source=source,
     )
 
@@ -44,8 +44,8 @@ class TestPositionAggregation:
         breaks = tolerance.detect_position_breaks(accounting, custodian)
         qty = next(b for b in breaks if b.break_type == BreakType.POSITION_QUANTITY)
 
-        assert qty.accounting_value == Decimal("150"), "lots must aggregate, not overwrite"
-        assert qty.difference == Decimal("50")
+        assert qty.accounting_value == Decimal(150), "lots must aggregate, not overwrite"
+        assert qty.difference == Decimal(50)
 
     def test_no_break_when_lots_sum_to_custodian(self):
         accounting = [
@@ -68,7 +68,7 @@ class TestMaterialityUnits:
         case = group_into_cases(breaks, "F1", NAV_DATE)[0]
         assert case.quantity_breaks, "expected a quantity break"
         assert case.value_breaks == [], "a quantity difference carries no monetary value"
-        assert signed_impact_base(case) == Decimal("0")
+        assert signed_impact_base(case) == Decimal(0)
 
     def test_split_has_quantity_break_but_zero_nav_impact(self):
         """A 2:1 split unapplied on one side: quantity differs 2x, value agrees."""

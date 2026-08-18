@@ -10,16 +10,23 @@ one prompt away from deciding it has them.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from nav_sentinel.control_plane import identity, policies, telemetry
-from nav_sentinel.tools import catalogue
 from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
 from nav_sentinel.domain.models import ExceptionCase
 from nav_sentinel.registry.models import AgentManifest
+from nav_sentinel.tools import catalogue
+
 
 # Every decision, in order, for the life of the process. The exception console renders this
 # as the governance log and the demo reads from it directly.
+class ContentUnscreenable(RuntimeError):
+    """An untrusted tool returned a value the screener cannot inspect. Fail closed."""
+
+
 _decision_log: list[PolicyDecision] = []
 
 
@@ -56,7 +63,23 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
     scope. All four are failures, not warnings.
     """
     manifest = identity.current()
-    spec = catalogue.resolve(tool_name)
+    try:
+        spec = catalogue.resolve(tool_name)
+    except catalogue.UnknownTool:
+        # Recorded, then re-raised. "Agent X attempted tool Y, which does not exist" is a
+        # governance event -- an agent enumerating tool names must not be invisible in the
+        # log. Still UnknownTool rather than PolicyViolation, so a manifest typo remains
+        # distinguishable from a refusal to use a real tool.
+        _record(
+            PolicyDecision(
+                effect=Effect.DENY,
+                policy_id="P-001-TOOL-ALLOWLIST",
+                reason=f"{tool_name!r} does not exist in the tool catalogue",
+                agent_ref=manifest.ref,
+                resource=tool_name,
+            )
+        )
+        raise
 
     # Refuse callable arguments outright. Resolution from the catalogue already makes the old
     # swap impossible, but without this the attempt is consumed as a tool argument and fails
@@ -72,15 +95,18 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
             f"by the caller."
         )
 
-    _enforce(policies.tool_allowed(manifest, tool_name))
-    _enforce(policies.tool_within_data_scope(manifest, tool_name, spec.reads))
+    # Everything downstream names spec.name -- what actually runs -- rather than the key the
+    # caller passed, so the audit record cannot describe a different tool than executed.
+    resolved = spec.name
+    _enforce(policies.tool_allowed(manifest, resolved))
+    _enforce(policies.tool_within_data_scope(manifest, resolved, spec.reads))
 
     with telemetry.span(
         "gateway.tool_call",
         **{
             "nav.agent.ref": manifest.ref,
             "nav.agent.service_account": identity.service_account_email(manifest),
-            "nav.tool.name": tool_name,
+            "nav.tool.name": resolved,
             "nav.tool.reads": list(spec.reads),
             "nav.tool.untrusted_output": spec.untrusted_output,
         },
@@ -89,9 +115,44 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
 
     # Screening is bound to the tool that fetched the bytes, not to an agent's self-declared
     # flag. An agent cannot forget to screen, because it never had the option.
-    if spec.untrusted_output and isinstance(result, str):
-        return admit_untrusted_content(result, source_uri=f"tool:{tool_name}")
+    if spec.untrusted_output:
+        return _screen_untrusted_result(result, source_uri=f"tool:{resolved}")
     return result
+
+
+def _screen_untrusted_result(value: Any, *, source_uri: str, _depth: int = 0) -> Any:
+    """Screen every string reachable in an untrusted tool's return value.
+
+    An earlier version screened only a bare `str`, so a tool returning a dict or a list of
+    strings bypassed screening entirely while still logging ALLOW. Attacker-controllable text
+    routinely arrives inside a structure -- a filing's `description` field, a list of search
+    hits -- so the shape of the container must not decide whether a control applies.
+
+    Un-screenable types are refused rather than passed through: a control that silently
+    ignores what it does not understand is not a control.
+    """
+    if _depth > 6:
+        raise ContentUnscreenable("untrusted value nests more deeply than 6 levels")
+
+    if isinstance(value, str):
+        return admit_untrusted_content(value, source_uri=source_uri)
+    if isinstance(value, (int, float, bool, type(None), Decimal, date, datetime)):
+        return value
+    if isinstance(value, dict):
+        return {
+            _screen_untrusted_result(k, source_uri=source_uri, _depth=_depth + 1):
+            _screen_untrusted_result(v, source_uri=source_uri, _depth=_depth + 1)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        screened = [
+            _screen_untrusted_result(v, source_uri=source_uri, _depth=_depth + 1) for v in value
+        ]
+        return type(value)(screened) if not isinstance(value, set) else set(screened)
+    raise ContentUnscreenable(
+        f"a tool declared untrusted_output returned {type(value).__name__}, which cannot be "
+        f"screened. Return a string or a structure of primitives, or screen it explicitly."
+    )
 
 
 def authorize_drafting(manifest: AgentManifest) -> PolicyDecision:

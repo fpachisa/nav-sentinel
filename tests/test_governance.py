@@ -9,11 +9,11 @@ from decimal import Decimal
 import pytest
 
 from nav_sentinel.control_plane import gateway, identity, policies
-from nav_sentinel.tools import catalogue
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import BreakCategory, BreakType, ExceptionCase, ReconciliationBreak
 from nav_sentinel.registry import discover
 from nav_sentinel.registry.models import load_manifests
+from nav_sentinel.tools import catalogue
 
 NAV_DATE = date(2026, 8, 17)
 
@@ -32,8 +32,8 @@ def case():
             ReconciliationBreak(
                 break_id="BRK-1", fund_id="F1", as_of=NAV_DATE,
                 break_type=BreakType.MARKET_VALUE, isin="ISIN1",
-                accounting_value=Decimal("1000"), custodian_value=Decimal("900"),
-                tolerance_applied=Decimal("1"),
+                accounting_value=Decimal(1000), custodian_value=Decimal(900),
+                tolerance_applied=Decimal(1),
             )
         ],
     )
@@ -79,9 +79,8 @@ class TestNoAgentHoldsPostingAuthority:
     def test_posting_is_denied_even_with_a_human_approval(self, case):
         """Approval alone is insufficient: the agent must also hold the authority, and none do."""
         fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
-            with pytest.raises(PolicyViolation) as exc:
-                gateway.authorize_posting(fx, case, human_approval_ref="APPR-123")
+        with identity.acting_as(fx), pytest.raises(PolicyViolation) as exc:
+            gateway.authorize_posting(fx, case, human_approval_ref="APPR-123")
         assert exc.value.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
 
 
@@ -90,13 +89,12 @@ class TestToolAllowlist:
         fx = discover.get("fx-rates-investigator")
         with identity.acting_as(fx):
             rate = gateway.call_tool("ecb_fx.latest_rate_on_or_before", "EUR", NAV_DATE)
-        assert rate == (NAV_DATE, Decimal("1"))
+        assert rate == (NAV_DATE, Decimal(1))
 
     def test_undeclared_tool_is_denied(self):
         fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
-            with pytest.raises(PolicyViolation) as exc:
-                gateway.call_tool("books_and_records.cash_movements", "accounting")
+        with identity.acting_as(fx), pytest.raises(PolicyViolation) as exc:
+            gateway.call_tool("books_and_records.cash_movements", "accounting")
         assert exc.value.decision.policy_id == "P-001-TOOL-ALLOWLIST"
 
     def test_tool_call_without_identity_is_refused(self):
@@ -115,7 +113,7 @@ class TestToolAllowlist:
         assert "fn" not in params, "call_tool must not accept a callable from the caller"
 
         fx = discover.get("fx-rates-investigator")
-        sentinel = lambda: "arbitrary code executed"  # noqa: E731
+        sentinel = lambda: "arbitrary code executed"
         with identity.acting_as(fx):
             # The old exploit: a declared name with an undeclared function. It now runs the
             # catalogue's function and treats the callable as a positional argument, so the
@@ -125,9 +123,8 @@ class TestToolAllowlist:
 
         # Refused before any policy is evaluated, so no misleading ALLOW is recorded.
         gateway.clear_decision_log()
-        with identity.acting_as(fx):
-            with pytest.raises(TypeError):
-                gateway.call_tool("ecb_fx.rate_on", sentinel)
+        with identity.acting_as(fx), pytest.raises(TypeError):
+            gateway.call_tool("ecb_fx.rate_on", sentinel)
         assert gateway.decision_log() == [], (
             "a rejected call must not leave ALLOW decisions in the audit log"
         )
@@ -135,9 +132,8 @@ class TestToolAllowlist:
     def test_unknown_tool_name_is_distinguishable_from_a_denial(self):
         """A typo in a manifest must not read as a permissions problem."""
         fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
-            with pytest.raises(catalogue.UnknownTool):
-                gateway.call_tool("ecb_fx.no_such_function")
+        with identity.acting_as(fx), pytest.raises(catalogue.UnknownTool):
+            gateway.call_tool("ecb_fx.no_such_function")
 
     def test_every_manifest_tool_resolves_in_the_catalogue(self):
         """A manifest may not declare a capability the catalogue cannot resolve."""
@@ -238,3 +234,161 @@ class TestDecisionLog:
             "P-001-TOOL-ALLOWLIST", "P-006-DATA-SCOPE", "P-002-DRAFT-AUTHORITY",
         ]
         assert [d.effect.value for d in log] == ["allow", "allow", "deny"]
+
+
+class TestUntrustedOutputScreening:
+    """The gateway screens what an untrusted tool returned, rather than trusting an agent to
+    remember. These pin the three behaviours the control depends on; before them, a commit
+    that added Model-Armor-dependent control flow left the suite still touching none of it."""
+
+    @pytest.fixture
+    def stub_armor(self, monkeypatch):
+        """Substitute the screener so these run offline. The live service is exercised by
+        the `live` variant below; what is under test here is the gateway's wiring."""
+        from nav_sentinel.control_plane import model_armor
+
+        def fake_screen(text, *, source_uri=None):
+            if "Ignore all previous instructions" in text:
+                raise model_armor.ContentBlocked(
+                    model_armor.ArmorVerdict(True, "MATCH_FOUND", ("pi_and_jailbreak",)),
+                    source_uri,
+                )
+            return model_armor.ArmorVerdict(False, "NO_MATCH_FOUND")
+
+        monkeypatch.setattr(model_armor, "screen", fake_screen)
+        return fake_screen
+
+    @pytest.fixture
+    def poison(self):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1]
+                / "fixtures" / "data" / "ca_notice_abev_poisoned.txt").read_text()
+
+    def test_tool_output_is_screened_and_the_block_is_audited(self, stub_armor, poison):
+        """A block is the fleet's most important governance event. It must appear in the
+        decision log, not only as an exception on a trace."""
+        from nav_sentinel.control_plane import model_armor
+
+        ca = discover.get("corporate-actions-investigator")
+        spec = catalogue.ToolSpec(
+            "edgar.fetch_filing_text", lambda *a, **k: poison, (), untrusted_output=True
+        )
+        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+            with pytest.raises(model_armor.ContentBlocked):
+                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+
+        denials = [d for d in gateway.decision_log()
+                   if d.effect.value == "deny" and d.policy_id == "P-005-UNTRUSTED-INGEST"]
+        assert denials, "the Model Armor block was not recorded in the governance log"
+        assert "pi_and_jailbreak" in denials[-1].reason
+
+    @pytest.mark.parametrize("shape", ["dict", "list", "nested"])
+    def test_screening_does_not_depend_on_the_container_shape(self, stub_armor, poison, shape):
+        """Screening only a bare `str` meant a tool returning a dict or a list bypassed the
+        control entirely while still logging ALLOW."""
+        from nav_sentinel.control_plane import model_armor
+
+        payloads = {"dict": {"body": poison}, "list": [poison],
+                    "nested": {"hits": [{"description": poison}]}}
+        ca = discover.get("corporate-actions-investigator")
+        spec = catalogue.ToolSpec(
+            "edgar.fetch_filing_text", lambda *a, **k: payloads[shape], (),
+            untrusted_output=True,
+        )
+        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+            with pytest.raises(model_armor.ContentBlocked):
+                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+
+    def test_unscreenable_return_type_is_refused(self, stub_armor):
+        """Fail closed: a control that ignores what it cannot inspect is not a control."""
+        class Opaque:
+            pass
+
+        ca = discover.get("corporate-actions-investigator")
+        spec = catalogue.ToolSpec(
+            "edgar.fetch_filing_text", lambda *a, **k: Opaque(), (), untrusted_output=True
+        )
+        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+            with pytest.raises(gateway.ContentUnscreenable):
+                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+
+    def test_screening_cannot_be_opted_out_of_by_a_manifest_flag(self, stub_armor, poison):
+        """admit_untrusted_content used to take the acting manifest as an argument and return
+        the text unscreened whenever that manifest said `untrusted_inputs: false`. It now
+        resolves identity, and screening is driven by the content rather than by any flag --
+        so even an agent whose manifest disclaims untrusted input is still screened."""
+        from nav_sentinel.control_plane import model_armor
+
+        ca = discover.get("corporate-actions-investigator")
+        disclaiming = ca.model_copy(
+            update={"untrusted_inputs": False, "requires_model_armor": False}
+        )
+        for label, manifest in (("declared", ca), ("disclaiming", disclaiming)):
+            with identity.acting_as(manifest):
+                with pytest.raises(model_armor.ContentBlocked):
+                    gateway.admit_untrusted_content(poison, source_uri=f"x:{label}")
+
+    def test_inconsistent_manifest_is_denied_by_p005(self, stub_armor, poison):
+        """An agent that declares untrusted inputs while disclaiming the screening
+        requirement is refused outright, before any content is admitted."""
+        ca = discover.get("corporate-actions-investigator")
+        inconsistent = ca.model_copy(update={"requires_model_armor": False})
+        with identity.acting_as(inconsistent), pytest.raises(PolicyViolation) as exc:
+            gateway.admit_untrusted_content(poison, source_uri="x")
+        assert exc.value.decision.policy_id == "P-005-UNTRUSTED-INGEST"
+
+    def test_screening_requires_a_bound_identity(self, stub_armor, poison):
+        with pytest.raises(identity.IdentityError):
+            gateway.admit_untrusted_content(poison, source_uri="x")
+
+    def test_clean_content_is_admitted_unchanged(self, stub_armor):
+        ca = discover.get("corporate-actions-investigator")
+        with identity.acting_as(ca):
+            out = gateway.admit_untrusted_content("CORPORATE ACTION NOTICE\nGross Rate: 0.175")
+        assert "Gross Rate" in out
+
+
+class TestCatalogueIntegrity:
+    """B1's residual doors."""
+
+    def test_catalogue_cannot_be_mutated(self):
+        """A plain dict would let in-process code swap a spec and run arbitrary code under a
+        declared tool's label -- the original bypass through another door."""
+        with pytest.raises(TypeError):
+            catalogue.CATALOGUE["ecb_fx.rate_on"] = catalogue.ToolSpec("x", lambda: None)
+
+    def test_a_key_disagreeing_with_its_spec_is_refused(self):
+        """Otherwise the audit log could name one tool while another executed."""
+        bad = catalogue.ToolSpec("totally.other.tool", lambda *a, **k: "PWNED")
+        with catalogue.override("ecb_fx.rate_on", bad):
+            with pytest.raises(catalogue.UnknownTool, match="mismatched label"):
+                catalogue.resolve("ecb_fx.rate_on")
+
+    def test_monkeypatching_a_tool_module_cannot_redirect_execution(self, monkeypatch):
+        """The structural property that makes resolution trustworthy: the catalogue captured
+        the function objects at import time, so rebinding a module attribute afterwards does
+        not change what runs."""
+        from nav_sentinel.tools import ecb_fx
+
+        monkeypatch.setattr(ecb_fx, "rate_on", lambda *a, **k: "PWNED-via-module-attr")
+        fx = discover.get("fx-rates-investigator")
+        with identity.acting_as(fx):
+            result = gateway.call_tool("ecb_fx.rate_on", "EUR", NAV_DATE)
+        assert result == Decimal(1), "the catalogue must run the function it captured"
+
+    def test_an_attempt_on_a_nonexistent_tool_is_audited(self):
+        """An agent enumerating tool names must not be invisible in the governance log."""
+        gateway.clear_decision_log()
+        fx = discover.get("fx-rates-investigator")
+        with identity.acting_as(fx), pytest.raises(catalogue.UnknownTool):
+            gateway.call_tool("ecb_fx.no_such_function")
+        log = gateway.decision_log()
+        assert log and log[-1].effect.value == "deny"
+        assert "does not exist" in log[-1].reason
+
+    def test_unknown_tool_message_is_not_repr_wrapped(self):
+        """UnknownTool subclasses KeyError, whose __str__ applies repr() to its argument."""
+        with pytest.raises(catalogue.UnknownTool) as exc:
+            catalogue.resolve("nope.nope")
+        assert not str(exc.value).startswith("\"")

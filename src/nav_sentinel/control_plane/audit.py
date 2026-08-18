@@ -10,8 +10,8 @@ but "show me everything that happened to this NAV adjustment, and why".
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from opentelemetry import trace
 

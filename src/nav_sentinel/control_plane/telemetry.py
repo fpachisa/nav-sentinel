@@ -12,9 +12,10 @@ telemetry for engineers, but the reverse is not reliably true.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -37,7 +38,7 @@ def _otlp_exporter():
     Google's telemetry endpoint, authenticated with application default credentials.
     """
     import google.auth
-    import google.auth.transport.grpc  # noqa: F401  (registers the transport)
+    import google.auth.transport.grpc
     import google.auth.transport.requests
     import grpc
     from google.auth.transport.grpc import AuthMetadataPlugin
@@ -80,7 +81,10 @@ def configure_tracing(*, console: bool = False) -> None:
         try:
             provider.add_span_processor(BatchSpanProcessor(_otlp_exporter()))
             exported = True
-        except Exception as exc:  # pragma: no cover - depends on ambient credentials
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover
+            # Deliberately broad: credentials, network and endpoint problems all surface
+            # differently here, and none of them should stop a local run from producing a
+            # reasoning trace. The fallback is console export, never silence.
             logger.warning("Cloud Trace exporter unavailable (%s); falling back to console", exc)
 
     if not exported:

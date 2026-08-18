@@ -17,7 +17,7 @@ from itertools import count
 
 from pydantic import BaseModel, Field
 
-from nav_sentinel.domain.materiality import ToBase, identity_to_base, value_impact_base
+from nav_sentinel.domain.materiality import ToBase, identity_to_base
 from nav_sentinel.domain.models import (
     BreakType,
     ExceptionCase,
@@ -73,7 +73,7 @@ def signed_impact_base(case: ExceptionCase, to_base: ToBase = identity_to_base) 
 
     Positive means the accounting book is overstated relative to the custodian.
     """
-    total = Decimal("0")
+    total = Decimal(0)
     for b in case.value_breaks:
         ccy = b.value_currency
         total += b.difference if ccy is None else to_base(b.difference, ccy)
@@ -102,7 +102,7 @@ class NavCycle(BaseModel):
 
     def explained_total(self, to_base: ToBase = identity_to_base) -> Decimal:
         return sum(
-            (signed_impact_base(c, to_base) for c in self.cases), Decimal("0")
+            (signed_impact_base(c, to_base) for c in self.cases), Decimal(0)
         )
 
     def residual(self, to_base: ToBase = identity_to_base) -> Decimal:

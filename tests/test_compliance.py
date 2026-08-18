@@ -8,14 +8,9 @@ stays runnable, but `make verify` runs it.
 from __future__ import annotations
 
 import pytest
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from nav_sentinel import compliance
 from nav_sentinel.config import Settings, configure_sdk_environment, settings
-from nav_sentinel.control_plane import telemetry
 
 
 class TestLocationSplit:
@@ -60,11 +55,35 @@ class TestModelTiers:
 
 class TestPreflight:
     def test_vertex_transport_is_required(self, monkeypatch):
+        """Uses the offline path so the failure is about Vertex, not about gcloud. Previously
+        this ran the gcloud check first and passed or failed for an unrelated reason."""
         bad = Settings(GOOGLE_GENAI_USE_VERTEXAI=False)
         monkeypatch.setattr(compliance, "settings", lambda: bad)
         with pytest.raises(compliance.ComplianceFailure, match="Vertex"):
-            compliance.preflight()
+            compliance.preflight(check_cli=False)
 
+    def test_configured_models_must_meet_the_version_floor(self, monkeypatch):
+        """The probe is the qualifying gate. It previously certified Gemini 2.5 as
+        compliant, because nothing checked the floor outside a test that parsed the
+        configured id."""
+        bad = Settings(NAV_MODEL_REASONING="gemini-2.5-flash")
+        monkeypatch.setattr(compliance, "settings", lambda: bad)
+        with pytest.raises(compliance.ComplianceFailure, match="below the Gemini 3.5 floor"):
+            compliance.preflight(check_cli=False)
+
+    def test_regional_model_location_is_fatal_not_advisory(self, monkeypatch):
+        bad = Settings(GOOGLE_CLOUD_LOCATION="us-central1")
+        monkeypatch.setattr(compliance, "settings", lambda: bad)
+        with pytest.raises(compliance.ComplianceFailure, match="404 NOT_FOUND regionally"):
+            compliance.preflight(check_cli=False)
+
+    def test_version_parsing_handles_two_digit_minors(self):
+        """float("3.10") is 3.1, which would rank gemini-3.10 below gemini-3.5."""
+        assert compliance.parse_model_version("gemini-3.10-flash") > (3, 5)
+        assert compliance.parse_model_version("gemini-3.5-flash-lite") == (3, 5)
+        assert compliance.parse_model_version("gemini-2.5-flash") < (3, 5)
+
+    @pytest.mark.live
     def test_gcloud_project_mismatch_is_fatal(self, monkeypatch):
         """Deploy scripts shell out to gcloud, which carries its own active configuration.
         A mismatch provisions the wrong project and surfaces much later as a permissions
@@ -77,8 +96,11 @@ class TestPreflight:
             compliance.preflight()
 
     def test_preflight_passes_in_a_correct_environment(self):
-        notes = compliance.preflight()
-        assert any("gcloud project matches" in n for n in notes)
+        """Offline path: no gcloud, no network. Every check here is fatal by design, so a
+        pass means every condition held rather than that warnings were tolerated."""
+        notes = compliance.preflight(check_cli=False)
+        assert any("model_location is 'global'" in n for n in notes)
+        assert any("floor" in n for n in notes)
         assert not any(n.startswith("WARNING") for n in notes), notes
 
 
@@ -98,28 +120,13 @@ class TestSdkEnvironmentBridge:
         assert os.environ["GOOGLE_GENAI_USE_VERTEXAI"] == "true"
 
 
-@pytest.fixture(scope="module")
-def span_exporter():
-    """One provider per process.
-
-    OpenTelemetry's set_tracer_provider takes effect only on the first call; later calls are
-    ignored. A per-test provider therefore silently exports into the first test's exporter,
-    which reads as "no span emitted" in every test after the first.
-    """
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider(resource=Resource.create({"service.name": "nav-sentinel-test"}))
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    telemetry.use_provider(provider)
-    return exporter
-
-
 @pytest.mark.live
 class TestLiveProbe:
     """Requires Vertex AI credentials. This is the evidence, not a smoke test."""
 
     @pytest.mark.parametrize("tier", ["model_reasoning", "model_classify"])
-    def test_returned_model_version_is_recorded_on_a_span(self, tier, span_exporter):
-        span_exporter.clear()
+    def test_returned_model_version_is_recorded_on_a_span(self, tier, spans):
+        span_exporter = spans
         model_id = getattr(settings(), tier)
         probe = compliance.probe(model_id)
 
@@ -138,11 +145,10 @@ class TestLiveProbe:
         assert attrs["nav.compliance.framework"] == "google-adk"
         assert attrs["nav.compliance.model_location"] == "global"
 
-    def test_gemini_3x_is_unavailable_regionally(self, span_exporter):
+    def test_gemini_3x_is_unavailable_regionally(self):
         """Pins the finding that cost real diagnostic time: the Gemini 3.x family resolves
         only at 'global'. If Google later serves it regionally this test fails and the
         two-location split in config.py can be simplified."""
-        import os
 
         from google import genai
         from google.genai import types

@@ -38,6 +38,11 @@ packages = ["src/nav_sentinel"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+# Nested `with identity.acting_as(...)` / `with pytest.raises(...)` reads more clearly than a
+# combined statement: the identity binding is the setup and the raises is the assertion.
+"tests/**" = ["SIM117"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"

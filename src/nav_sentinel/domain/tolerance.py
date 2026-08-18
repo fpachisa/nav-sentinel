@@ -45,11 +45,11 @@ class _Aggregate:
     silently discard lots and under-report the break.
     """
 
-    __slots__ = ("quantity", "market_value_base", "local_currency", "as_of", "rows")
+    __slots__ = ("as_of", "local_currency", "market_value_base", "quantity", "rows")
 
     def __init__(self, p: Position) -> None:
-        self.quantity = Decimal("0")
-        self.market_value_base = Decimal("0")
+        self.quantity = Decimal(0)
+        self.market_value_base = Decimal(0)
         self.local_currency = p.local_currency
         self.as_of = p.as_of
         self.rows = 0
@@ -87,8 +87,8 @@ def detect_position_breaks(
         as_of = (a or c).as_of  # type: ignore[union-attr]
         stamp = as_of.isoformat()
 
-        a_qty = a.quantity if a else Decimal("0")
-        c_qty = c.quantity if c else Decimal("0")
+        a_qty = a.quantity if a else Decimal(0)
+        c_qty = c.quantity if c else Decimal(0)
         if abs(a_qty - c_qty) > QUANTITY_TOLERANCE:
             breaks.append(
                 ReconciliationBreak(
@@ -103,8 +103,8 @@ def detect_position_breaks(
                 )
             )
 
-        a_mv = a.market_value_base if a else Decimal("0")
-        c_mv = c.market_value_base if c else Decimal("0")
+        a_mv = a.market_value_base if a else Decimal(0)
+        c_mv = c.market_value_base if c else Decimal(0)
         if abs(a_mv - c_mv) > MARKET_VALUE_TOLERANCE_BASE:
             breaks.append(
                 ReconciliationBreak(
@@ -132,7 +132,7 @@ def detect_cash_breaks(
         out: dict[tuple[str, str], Decimal] = {}
         for m in movements:
             key = (m.fund_id, m.currency)
-            out[key] = out.get(key, Decimal("0")) + m.amount
+            out[key] = out.get(key, Decimal(0)) + m.amount
         return out
 
     acc, cus = totals(accounting), totals(custodian)
@@ -144,7 +144,7 @@ def detect_cash_breaks(
     breaks: list[ReconciliationBreak] = []
     for key in sorted(acc.keys() | cus.keys()):
         fund_id, ccy = key
-        a, c = acc.get(key, Decimal("0")), cus.get(key, Decimal("0"))
+        a, c = acc.get(key, Decimal(0)), cus.get(key, Decimal(0))
         if abs(a - c) > CASH_TOLERANCE_BASE:
             breaks.append(
                 ReconciliationBreak(
