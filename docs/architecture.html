@@ -336,7 +336,7 @@ footer {
 
   <figure>
     <div class="canvas">
-      <svg viewBox="0 0 1040 300" role="img"
+      <svg viewBox="0 0 1040 340" role="img"
         aria-label="An agent emits a tool name and arguments. The gateway resolves identity from context, reads the manifest from the registry, checks the allowlist and data scope, resolves the name to a callable in a frozen catalogue, executes it, and screens the result if the tool is marked untrusted. Denials at any step are recorded and raised.">
         <defs>
           <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -388,8 +388,8 @@ footer {
           <line x1="154" y1="125" x2="210" y2="125"/>
           <line x1="880" y1="125" x2="932" y2="125"/>
         </g>
-        <text x="182" y="112" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">name</text>
-        <text x="182" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">+ args</text>
+        <text x="174" y="112" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">name</text>
+        <text x="174" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">+ args</text>
 
         <g stroke="var(--accent)" stroke-width="1" fill="none" marker-end="url(#b)" color="var(--accent)">
           <line x1="334" y1="126" x2="352" y2="126"/>
@@ -398,12 +398,12 @@ footer {
           <line x1="754" y1="126" x2="772" y2="126"/>
         </g>
 
-        <line x1="555" y1="164" x2="555" y2="238" stroke="var(--deny)" stroke-width="1.5" fill="none" marker-end="url(#bd)"/>
-        <text x="566" y="196" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--deny)">deny → recorded, then raised</text>
-        <text x="566" y="212" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)">a refused call leaves no ALLOW in the log</text>
+        <line x1="555" y1="164" x2="555" y2="278" stroke="var(--deny)" stroke-width="1.5" fill="none" marker-end="url(#bd)"/>
+        <text x="568" y="232" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--deny)">deny → recorded, then raised</text>
+        <text x="568" y="246" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)">a refused call leaves no ALLOW in the log</text>
 
-        <rect x="24" y="238" width="1000" height="30" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
-        <text x="40" y="257" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">Governance log — the decision names the tool that executed, not the label the caller supplied</text>
+        <rect x="24" y="284" width="1000" height="32" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="40" y="305" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-soft)">Governance log — the decision names the tool that executed, not the label the caller supplied</text>
       </svg>
     </div>
     <figcaption><b>Resolution, not delegation.</b> The gateway previously accepted a name <em>and</em> a callable and validated only the name, so any function could run under a declared tool's label while the audit record named the label. The catalogue is now a read-only mapping that refuses any key disagreeing with its own entry, and it captures function objects at import time — so rebinding a tool module afterwards cannot redirect what runs.</figcaption>
