@@ -556,4 +556,6 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | Plan v3.2 | **APPROVE WITH CHANGES** — 3 blockers | — | — | superseded |
 | Plan v3.3 | **APPROVE WITH CHANGES** — 3 blockers | — | — | superseded |
 | Plan v3.4 | **in progress** | — | — | — |
-| S0-R | pending | — | — | — |
+| S0-R.9 + .10 seam | covered by v3.2–v3.4 reviews | done | **APPROVE WITH CHANGES** — applied | **yes** |
+| S0-R.2 identity + approvals | covered by plan reviews | done | pending | — |
+| S0-R (remainder: .3–.8) | pending | — | — | — |

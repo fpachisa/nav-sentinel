@@ -169,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 87 invariant tests, including "no agent may post"
+make test        # 98 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -228,7 +228,7 @@ such rather than as complete.
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
-| Agent Gateway policy enforcement | partly closed | P-001 and P-006 resolve from a frozen catalogue and the bound identity, with bypass tests (`TestCatalogueIntegrity`, `TestDataScopeEnforcement`). **P-002 and P-003 still accept a caller-supplied manifest** — open as B3, see [docs/PLAN.md](docs/PLAN.md) |
+| Agent Gateway policy enforcement | works | All six policies resolve from a frozen catalogue and the bound identity. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved` |
 | Model Armor screening | **under remediation** | Verified bypass, above. Tests cover the gateway's wiring (`test_governance.py::TestUntrustedOutputScreening`) but **every one of them monkeypatches `model_armor.screen`** — no test exercises the live service or its real detection behaviour |
 | Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
@@ -245,14 +245,16 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 1. **Tool allowlist bypass.** `gateway.call_tool(name, fn)` validates the *name* and executes the
    supplied *callable*, so any function can run under a declared tool's label — and the audit log
    records the declared name, actively falsifying the trail.
-2. **Confused deputy.** `authorize_drafting`, `authorize_posting` and `admit_untrusted_content` take the
-   acting manifest as an argument instead of resolving it from the bound identity, so a forged manifest
-   escalates to posting authority. `human_approval_ref` is an unvalidated string.
+2. ~~**Confused deputy.**~~ **Closed.** `acting_as` now takes an agent reference and resolves the
+   manifest from the published registry, so a forged one cannot enter the context; every
+   `authorize_*` takes its subject from the bound identity; and `human_approval_ref` is resolved
+   against an append-only approvals store, checked against the case *and* the band it was granted
+   under.
 3. **Model Armor bypass.** As described above.
 4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
    the declared ground truth explains only a fraction of the NAV difference.
 5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
-   leaves all 87 tests passing, because `market_value_base` is a stored field nothing recomputes.
+   leaves all 98 tests passing, because `market_value_base` is a stored field nothing recomputes.
 6. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
    one test require live network access to the ECB.
 

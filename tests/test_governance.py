@@ -8,12 +8,12 @@ from decimal import Decimal
 
 import pytest
 
-from nav_sentinel.control_plane import gateway, identity, packs, policies
+from nav_sentinel.control_plane import approvals, gateway, identity, packs, policies
 from nav_sentinel.control_plane.governance import CaseFacts, Impact
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import BreakType, ExceptionCase, ReconciliationBreak
 from nav_sentinel.registry import discover
-from nav_sentinel.registry.models import load_manifests
+from nav_sentinel.registry.models import Authority, load_manifests
 
 NAV_DATE = date(2026, 8, 17)
 
@@ -80,22 +80,19 @@ class TestNoAgentHoldsPostingAuthority:
 
     def test_posting_is_denied_even_with_a_human_approval(self, case):
         """Approval alone is insufficient: the agent must also hold the authority, and none do."""
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(PolicyViolation) as exc:
-            gateway.authorize_posting(fx, case.to_facts(), human_approval_ref="APPR-123")
+        with identity.acting_as("fx-rates-investigator"), pytest.raises(PolicyViolation) as exc:
+            gateway.authorize_posting(case.to_facts(), human_approval_ref="APPR-123")
         assert exc.value.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
 
 
 class TestToolAllowlist:
     def test_declared_tool_is_permitted(self):
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
+        with identity.acting_as("fx-rates-investigator"):
             rate = gateway.call_tool("ecb_fx.latest_rate_on_or_before", "EUR", NAV_DATE)
         assert rate == (NAV_DATE, Decimal(1))
 
     def test_undeclared_tool_is_denied(self):
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(PolicyViolation) as exc:
+        with identity.acting_as("fx-rates-investigator"), pytest.raises(PolicyViolation) as exc:
             gateway.call_tool("books_and_records.cash_movements", "accounting")
         assert exc.value.decision.policy_id == "P-001-TOOL-ALLOWLIST"
 
@@ -114,9 +111,8 @@ class TestToolAllowlist:
         assert params[0] == "tool_name"
         assert "fn" not in params, "call_tool must not accept a callable from the caller"
 
-        fx = discover.get("fx-rates-investigator")
         sentinel = lambda: "arbitrary code executed"
-        with identity.acting_as(fx):
+        with identity.acting_as("fx-rates-investigator"):
             # The old exploit: a declared name with an undeclared function. It now runs the
             # catalogue's function and treats the callable as a positional argument, so the
             # swap cannot execute.
@@ -125,7 +121,7 @@ class TestToolAllowlist:
 
         # Refused before any policy is evaluated, so no misleading ALLOW is recorded.
         gateway.clear_decision_log()
-        with identity.acting_as(fx), pytest.raises(TypeError):
+        with identity.acting_as("fx-rates-investigator"), pytest.raises(TypeError):
             gateway.call_tool("ecb_fx.rate_on", sentinel)
         assert gateway.decision_log() == [], (
             "a rejected call must not leave ALLOW decisions in the audit log"
@@ -133,8 +129,7 @@ class TestToolAllowlist:
 
     def test_unknown_tool_name_is_distinguishable_from_a_denial(self):
         """A typo in a manifest must not read as a permissions problem."""
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(packs.UnknownTool):
+        with identity.acting_as("fx-rates-investigator"), pytest.raises(packs.UnknownTool):
             gateway.call_tool("ecb_fx.no_such_function")
 
     def test_every_manifest_tool_resolves_in_the_catalogue(self):
@@ -201,8 +196,8 @@ class TestDraftingAuthority:
             assert not m.authority.may_propose_remediation, f"{m.ref} may draft entries"
 
     def test_remediation_agent_may_draft(self):
-        rem = discover.get("remediation-agent")
-        assert gateway.authorize_drafting(rem).allowed
+        with identity.acting_as("remediation-agent"):
+            assert gateway.authorize_drafting().allowed
 
 
 class TestUntrustedIngest:
@@ -225,11 +220,10 @@ class TestUntrustedIngest:
 
 class TestDecisionLog:
     def test_decisions_are_recorded_for_audit(self, case):
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
+        with identity.acting_as("fx-rates-investigator"):
             gateway.call_tool("ecb_fx.latest_rate_on_or_before", "EUR", NAV_DATE)
             with pytest.raises(PolicyViolation):
-                gateway.authorize_drafting(fx)
+                gateway.authorize_drafting()
         log = gateway.decision_log()
         # P-001 allowlist, P-006 data scope, then the P-002 drafting refusal.
         assert [d.policy_id for d in log] == [
@@ -272,11 +266,10 @@ class TestUntrustedOutputScreening:
         decision log, not only as an exception on a trace."""
         from nav_sentinel.control_plane import model_armor
 
-        ca = discover.get("corporate-actions-investigator")
         spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: poison, (), untrusted_output=True
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
             with pytest.raises(model_armor.ContentBlocked):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -293,12 +286,11 @@ class TestUntrustedOutputScreening:
 
         payloads = {"dict": {"body": poison}, "list": [poison],
                     "nested": {"hits": [{"description": poison}]}}
-        ca = discover.get("corporate-actions-investigator")
         spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: payloads[shape], (),
             untrusted_output=True,
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
             with pytest.raises(model_armor.ContentBlocked):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -307,11 +299,10 @@ class TestUntrustedOutputScreening:
         class Opaque:
             pass
 
-        ca = discover.get("corporate-actions-investigator")
         spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: Opaque(), (), untrusted_output=True
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
             with pytest.raises(gateway.ContentUnscreenable):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -320,33 +311,37 @@ class TestUntrustedOutputScreening:
         the text unscreened whenever that manifest said `untrusted_inputs: false`. It now
         resolves identity, and screening is driven by the content rather than by any flag --
         so even an agent whose manifest disclaims untrusted input is still screened."""
+        import inspect
+
         from nav_sentinel.control_plane import model_armor
 
-        ca = discover.get("corporate-actions-investigator")
-        disclaiming = ca.model_copy(
-            update={"untrusted_inputs": False, "requires_model_armor": False}
-        )
-        for label, manifest in (("declared", ca), ("disclaiming", disclaiming)):
-            with identity.acting_as(manifest):
-                with pytest.raises(model_armor.ContentBlocked):
-                    gateway.admit_untrusted_content(poison, source_uri=f"x:{label}")
+        # Binding a mutated manifest is no longer possible at all -- identity resolves from the
+        # registry -- so the statement is now structural: there is no argument through which a
+        # manifest reaches this decision, and no flag a process can set to skip it.
+
+        assert "manifest" not in inspect.signature(gateway.admit_untrusted_content).parameters
+        with identity.acting_as("corporate-actions-investigator"):
+            with pytest.raises(model_armor.ContentBlocked):
+                gateway.admit_untrusted_content(poison, source_uri="x")
 
     def test_inconsistent_manifest_is_denied_by_p005(self, stub_armor, poison):
         """An agent that declares untrusted inputs while disclaiming the screening
         requirement is refused outright, before any content is admitted."""
-        ca = discover.get("corporate-actions-investigator")
-        inconsistent = ca.model_copy(update={"requires_model_armor": False})
-        with identity.acting_as(inconsistent), pytest.raises(PolicyViolation) as exc:
-            gateway.admit_untrusted_content(poison, source_uri="x")
-        assert exc.value.decision.policy_id == "P-005-UNTRUSTED-INGEST"
+        inconsistent = discover.get("corporate-actions-investigator").model_copy(
+            update={"requires_model_armor": False}
+        )
+        # P-005 is evaluated against the published manifest, so the inconsistent combination is
+        # tested at the policy rather than by binding a forged identity.
+        decision = policies.untrusted_ingest_requires_armor(inconsistent)
+        assert not decision.allowed
+        assert decision.policy_id == "P-005-UNTRUSTED-INGEST"
 
     def test_screening_requires_a_bound_identity(self, stub_armor, poison):
         with pytest.raises(identity.IdentityError):
             gateway.admit_untrusted_content(poison, source_uri="x")
 
     def test_clean_content_is_admitted_unchanged(self, stub_armor):
-        ca = discover.get("corporate-actions-investigator")
-        with identity.acting_as(ca):
+        with identity.acting_as("corporate-actions-investigator"):
             out = gateway.admit_untrusted_content("CORPORATE ACTION NOTICE\nGross Rate: 0.175")
         assert "Gross Rate" in out
 
@@ -374,16 +369,14 @@ class TestCatalogueIntegrity:
         from nav_sentinel.tools import ecb_fx
 
         monkeypatch.setattr(ecb_fx, "rate_on", lambda *a, **k: "PWNED-via-module-attr")
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx):
+        with identity.acting_as("fx-rates-investigator"):
             result = gateway.call_tool("ecb_fx.rate_on", "EUR", NAV_DATE)
         assert result == Decimal(1), "the catalogue must run the function it captured"
 
     def test_an_attempt_on_a_nonexistent_tool_is_audited(self):
         """An agent enumerating tool names must not be invisible in the governance log."""
         gateway.clear_decision_log()
-        fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(packs.UnknownTool):
+        with identity.acting_as("fx-rates-investigator"), pytest.raises(packs.UnknownTool):
             gateway.call_tool("ecb_fx.no_such_function")
         log = gateway.decision_log()
         assert log and log[-1].effect.value == "deny"
@@ -502,3 +495,104 @@ class TestAutonomousCeiling:
         for m in load_manifests():
             for bps in ("0", "0.1", "4.9", "5000"):
                 assert not policies.may_post_entry(m, self._facts(bps), None).allowed
+
+
+class TestIdentityCannotBeForged:
+    """B3. `acting_as` took a manifest object, so the caller supplied the very document that
+    described its own authority. It now takes a reference and resolves it."""
+
+    def test_a_manifest_object_is_refused_with_a_useful_error(self):
+        forged = discover.get("fx-rates-investigator").model_copy(
+            update={"authority": Authority(may_propose_remediation=True, may_post_entries=True)}
+        )
+        with pytest.raises(identity.IdentityError, match="not a AgentManifest"):
+            with identity.acting_as(forged):
+                pass
+
+    def test_an_unpublished_reference_is_refused(self):
+        with pytest.raises(identity.IdentityError, match="not published"):
+            with identity.acting_as("agent-that-does-not-exist"):
+                pass
+
+    def test_a_version_pin_the_registry_does_not_publish_is_refused(self):
+        """Silently binding a different version would let an attacker pin to a version whose
+        manifest granted more, and get the current one without noticing — or the reverse."""
+        with pytest.raises(identity.IdentityError, match="pinned to a version"):
+            with identity.acting_as("fx-rates-investigator@9.9.9"):
+                pass
+
+    def test_authorize_functions_take_no_subject(self):
+        import inspect
+
+        assert list(inspect.signature(gateway.authorize_drafting).parameters) == []
+        assert "manifest" not in inspect.signature(gateway.authorize_posting).parameters
+
+
+class TestApprovalReferencesAreResolved:
+    """P-003 accepted `human_approval_ref` as a bare string, so an agent could invent one.
+
+    The published fleet denies on authority before reaching this check, which is why these tests
+    grant posting authority: without that the validation path is never exercised.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_store(self):
+        store = approvals.InMemoryApprovalStore()
+        approvals.use_store(store)
+        yield
+        store.clear()
+
+    def _poster(self):
+        """An agent granted posting authority, published so identity can resolve it."""
+        return discover.get("remediation-agent").model_copy(
+            update={"authority": Authority(may_propose_remediation=True, may_post_entries=True)}
+        )
+
+    def _facts(self, bps="5.41", case_id="C-APPR"):
+        return CaseFacts(
+            case_id=case_id, subject_id="F1", as_of=NAV_DATE, capability="nav.fx_rate",
+            impact=Impact(value=Decimal(bps), unit="bps"), status="remediation_proposed",
+        )
+
+    def test_an_invented_reference_is_denied(self):
+        d = policies.may_post_entry(self._poster(), self._facts(), "APPR-invented")
+        assert not d.allowed
+        assert "does not resolve" in d.reason
+
+    def test_an_approval_for_a_different_case_is_denied(self):
+        rec = approvals.grant("SOME-OTHER-CASE", policies.ApprovalClass.CIO_ESCALATION, ("alice",))
+        d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
+        assert not d.allowed
+        assert "not C-APPR" in d.reason
+
+    def test_an_approval_granted_at_a_lower_band_is_denied(self):
+        """A case re-scored upward must not carry its old signature. 5.41bps bands to
+        cio_escalation; an approval granted at single_reviewer cannot authorise it."""
+        rec = approvals.grant("C-APPR", policies.ApprovalClass.SINGLE_REVIEWER, ("alice",))
+        d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
+        assert not d.allowed
+        assert "granted at single_reviewer" in d.reason
+
+    def test_four_eyes_needs_two_distinct_approvers(self):
+        rec = approvals.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, ("alice", "alice"))
+        d = policies.may_post_entry(self._poster(), self._facts("2"), rec.ref)
+        assert not d.allowed
+        assert "requires 2" in d.reason
+
+    def test_a_matching_approval_is_allowed(self):
+        rec = approvals.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, ("cio",))
+        d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
+        assert d.allowed, d.reason
+        assert d.metadata["approvers"] == "cio"
+
+    def test_approval_records_are_immutable(self):
+        rec = approvals.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, ("a", "b"))
+        with pytest.raises(ValueError, match="already exists"):
+            approvals.store().put(rec)
+
+    def test_the_published_fleet_still_cannot_post_with_a_valid_approval(self):
+        """Authority is checked before the approval, so a correct signature does not confer
+        authority the manifest does not grant."""
+        rec = approvals.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, ("cio",))
+        for m in load_manifests():
+            assert not policies.may_post_entry(m, self._facts(), rec.ref).allowed

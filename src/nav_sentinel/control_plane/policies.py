@@ -7,6 +7,7 @@ misstate. The gateway is the only place a decision is made.
 
 from __future__ import annotations
 
+from nav_sentinel.control_plane import approvals
 from nav_sentinel.control_plane.governance import (
     ApprovalClass,
     CaseFacts,
@@ -110,7 +111,9 @@ def may_propose_remediation(manifest: AgentManifest) -> PolicyDecision:
     )
 
 
-def may_post_entry(
+def may_post_entry(  # noqa: PLR0911 -- one return per denial reason; the audit record must
+    #                     state exactly which condition failed, and collapsing them into a
+    #                     single exit would lose that.
     manifest: AgentManifest, facts: CaseFacts, human_approval_ref: str | None,
     thresholds: ThresholdSet | None = None,
 ) -> PolicyDecision:
@@ -167,12 +170,51 @@ def may_post_entry(
             resource=f"ledger:{facts.case_id}",
             metadata={"band": band.value},
         )
+    # The reference is resolved, not believed. It was accepted as a bare string, so an agent
+    # could invent one: `human_approval_ref="APPR-anything"` returned ALLOW against a record
+    # that did not exist.
+    record = approvals.resolve(human_approval_ref)
+    if record is None:
+        return PolicyDecision(
+            effect=Effect.DENY,
+            policy_id="P-003-NO-AUTONOMOUS-POSTING",
+            reason=(
+                f"approval reference {human_approval_ref!r} does not resolve to a recorded "
+                f"approval."
+            ),
+            agent_ref=manifest.ref,
+            resource=f"ledger:{facts.case_id}",
+        )
+    if record.case_id != facts.case_id:
+        return PolicyDecision(
+            effect=Effect.DENY,
+            policy_id="P-003-NO-AUTONOMOUS-POSTING",
+            reason=(
+                f"approval {record.ref} was granted for case {record.case_id}, not "
+                f"{facts.case_id}."
+            ),
+            agent_ref=manifest.ref,
+            resource=f"ledger:{facts.case_id}",
+        )
+
+    band = band_for(facts.impact, thresholds)
+    satisfied, why = record.satisfies(band)
+    if not satisfied:
+        return PolicyDecision(
+            effect=Effect.DENY,
+            policy_id="P-003-NO-AUTONOMOUS-POSTING",
+            reason=why,
+            agent_ref=manifest.ref,
+            resource=f"ledger:{facts.case_id}",
+            metadata={"band": band.value, "granted_band": record.granted_band.value},
+        )
     return PolicyDecision(
         effect=Effect.ALLOW,
         policy_id="P-003-NO-AUTONOMOUS-POSTING",
-        reason=f"Human approval {human_approval_ref} recorded.",
+        reason=why,
         agent_ref=manifest.ref,
         resource=f"ledger:{facts.case_id}",
+        metadata={"band": band.value, "approvers": ",".join(record.approvers)},
     )
 
 

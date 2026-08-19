@@ -17,7 +17,6 @@ from typing import Any
 from nav_sentinel.control_plane import identity, packs, policies, telemetry
 from nav_sentinel.control_plane.governance import CaseFacts
 from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
-from nav_sentinel.registry.models import AgentManifest
 
 
 # Every decision, in order, for the life of the process. The exception console renders this
@@ -154,16 +153,27 @@ def _screen_untrusted_result(value: Any, *, source_uri: str, _depth: int = 0) ->
     )
 
 
-def authorize_drafting(manifest: AgentManifest) -> PolicyDecision:
-    return _enforce(policies.may_propose_remediation(manifest))
+def authorize_drafting() -> PolicyDecision:
+    """P-002. Subject resolved from the bound identity, never passed in.
+
+    This took the manifest as an argument, so the decision was driven by whichever document the
+    caller handed over -- a copy with `may_propose_remediation` set true was enough to escalate.
+    """
+    return _enforce(policies.may_propose_remediation(identity.current()))
 
 
 def authorize_posting(
-    manifest: AgentManifest, facts: CaseFacts, human_approval_ref: str | None = None
+    facts: CaseFacts, human_approval_ref: str | None = None
 ) -> PolicyDecision:
-    """Always evaluated before any write to the ledger. With the fleet as published, this
-    denies unconditionally -- which is the intended behaviour, not a limitation."""
-    return _enforce(policies.may_post_entry(manifest, facts, human_approval_ref))
+    """P-003. The last gate before the ledger.
+
+    Subject resolved from the bound identity; the approval reference is resolved against the
+    approvals store rather than trusted as a string. With the fleet as published this denies
+    unconditionally, which is the intended behaviour rather than a limitation.
+    """
+    return _enforce(
+        policies.may_post_entry(identity.current(), facts, human_approval_ref)
+    )
 
 
 def route_for_approval(facts: CaseFacts) -> PolicyDecision:
