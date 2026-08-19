@@ -2,11 +2,11 @@
 
 **Deadline:** 31 Aug 2026, 17:00 PDT · **Plan date:** 18 Aug 2026 · **Remaining:** 12 days, both weekends worked
 **Track:** C — Fortified Enterprise Fleet · **Entrant:** individual
-**Supersedes:** v3.2 (APPROVE WITH CHANGES — 3 blockers), v3.1, v2 (REJECTED), v1
+**Supersedes:** v3.3 (APPROVE WITH CHANGES — 3 blockers), v3.2, v3.1, v2 (REJECTED), v1
 
 ---
 
-## 1. What the three gates established
+## 1. What five gates established
 
 | Gate | Verdict |
 | :--- | :--- |
@@ -97,7 +97,7 @@ failing is a far stronger Best-Architectural-Design artefact than "we enabled Mo
 | B1 | Tool allowlist evaded by caller-supplied callable; P-001 writes a **false** audit record | `call_tool("ecb_fx.rate_on", bnr.cash_movements)` returned cash rows; log said `allow … resource=ecb_fx.rate_on` |
 | B2 | Fixture books violate double entry | Σ golden = −129,320.80 vs required −5,338,120.80; gap = 5,208,800.00 = the unsettled LVMH buy with no contra leg |
 | B3 | `authorize_*` trust a caller-supplied manifest | forged manifest escalated drafting **and** posting; `human_approval_ref` is an unvalidated string |
-| B4 | Control total blind to the FX chain | every `fx_rate` set to `999999.99999999` → **32/32 tests green** |
+| B4 | Control total blind to the FX chain | every `fx_rate` set to `999999.99999999` → **all tests still green** (32/32 when found; 70/70 when last re-checked, so the blocker is live, not historical) |
 
 ### The control total, honestly
 
@@ -142,16 +142,18 @@ Dropping to three investigators retires the pricing and cash-fees categories. Th
 
 | | Hours |
 | :--- | :--- |
-| Build — §5 | 63.1 |
-| Build — §5b platform sections (S0-R.9 4.5, S0-R.10 1.0, S9 7.0, S10 2.0, figure 5 1.5) | 16.0 |
+| Build — §5 (S5 split into S5a 1.5 + S5b 2.5) | 63.1 |
+| Build — §5b platform sections (S0-R.9 4.5, S0-R.10 1.0, S9 **4.0**, S10 2.0, figure 5 1.5) | 13.0 |
 | Rework reserve — 9 code gates × 2.5h | 22.5 |
-| **Commitment** | **101.6** |
+| **Commitment** | **98.6** |
 | Already complete ahead of the calendar — S0a 1.5, S0-R.1 2.0, README patch 0.25, architecture figures 1.5 | −5.3 |
-| **Remaining** | **96.3** |
+| **Remaining** | **93.3** |
 | Capacity — 12 days, both weekends, 8.5h/day | 102.0 |
-| **Margin** | **5.7h (5.6%)** |
+| **Margin** | **8.8h (8.6%)** |
 
-§5b now costs 16h of build. It is retained on an explicit instruction that timeline is not the
+§5b now costs 13h of build, down from 16h: §5c's shot list showed the TA investigator and
+registrar cassette buy zero screen time, so 2.5h came out on measured grounds rather than
+negotiation. §5b costs 13h of build. It is retained on an explicit instruction that timeline is not the
 binding constraint on this project, and because the extensibility story is a headline selling point
 that must be **visible in the video** rather than merely true in the test suite.
 
@@ -161,13 +163,13 @@ lines below; at 7h/day this plan is 7h under water and the contradiction hid tha
 demanding rate and it is the rate this scope requires — if it does not hold, the §3 response
 releases in order.
 
-Of the 22.5h reserve, **10.2h is scheduled in-line** in §7 and **12.3h is deliberately unallocated**
+Of the 22.5h reserve, **12.2h is scheduled in-line** in §7 and **10.3h is deliberately unallocated**
 — rework lands on whichever gate produces findings, and pretending to know which day would be false
 precision.
 
 **2.5h per gate is a budget fitted to capacity, not an estimate derived from history — and the
 distinction matters.** The five gates so far produced 15 blockers and 55 majors at roughly 10h of
-re-planning each. At that rate **two gates exhaust the entire 22.5h reserve and the 5.7h margin with it.**
+re-planning each. At that rate **two gates exhaust the entire 22.5h reserve and the 8.8h margin with it.**
 The reserve is a bet that remediating narrower, already-planned sections costs a quarter of what
 re-planning the whole project cost. That bet may lose, which is what §3's ordered response is for.
 
@@ -196,7 +198,7 @@ water, and the contradiction concealed that. One figure now, and it is the deman
 requires.
 
 There is also **no slack day.** v3.0 claimed the final two days carried no build work; that was
-false, and v3.2 repeated the claim in §7 while its own table contradicted it. The 5.7h margin is the
+false, and v3.2 repeated the claim in §7 while its own table contradicted it. The 8.8h margin is the
 slack. What de-risks a late S7 is that **S7a banks the mandatory Cloud Run proof on 23 August**,
 eight days before the deadline.
 
@@ -245,9 +247,10 @@ to S4/S5 because S7a already banked the mandatory proof. S4 depends on S1.1 only
 | S2 | Memory (shim) | 1.0 | **M** | Firestore recurrence collection behind a Memory-Bank-shaped interface, labelled as such. **Promoted to mandatory:** its criterion — cycle 2 makes zero external fetches and ≥50% fewer tool calls — is the most direct "friction removed" measurement in the plan, and friction removed is the 40% axis. Funded by cutting the volume run. |
 | S3 | Orchestration | 5.0 | M | Pub/Sub dispatch, detection trigger, cycle runner. |
 | S4 | Remediation & approval | 4.0 | **M** | Multi-leg proposals (`JournalEntry`, `ReconcilingItem`, `QuantityRestatement` — two of six outcomes are not journals); `balances` grouped **by currency**; approval as a Firestore record + CLI. Mandatory because the 40% proof needs fleet-proposed corrections. |
-| S5 | Evaluation | 4.0 | M | **Headline metric: leg-level correction accuracy and root-cause accuracy** against S0-R.5's `expected_corrections` golden — a pass-through stub cannot fake either. `Σ fleet corrections == −control_total` is demoted to a **closure invariant**, because `signed_impact_base` already computes it deterministically and a stub returning its negation satisfies it with no model call. Heuristic baseline scored on the same golden **and on perturbed/ambiguous cases**, with the framing pre-committed before the number is seen. Two adversarial cases: one **pricing** break (correctly triaged, then refused by the registry for want of an authorised agent — this is what makes the three-investigator cut a demonstrated control rather than a rationalisation) and one where the **custodian** is the incorrect side. |
-| S7 | Deployment | 6.0 | M | Cloud Run under per-agent SAs, IaC, `make teardown`, **budget alert**, ingress authentication (fund NAV data must not be publicly readable), Pub/Sub push OIDC, no secrets in image. Fix `bootstrap.sh` role-binding idempotency — it `continue`s on an existing SA and never reconciles roles, so "re-run it freely" is false. |
-| S8a | Reproducibility + Devpost text | 3.5 | M | README verbatim in a clean container; **Devpost technical description** (mandatory, omitted from v1 and v2 — problem, features, technology inventory, data sources, findings/challenges/learnings); checklist mapped 1:1 with an evidence column. |
+| S5a | Eval harness + side-by-side report shell | 1.5 | M |
+| S5b | Metrics, heuristic baseline, perturbed variants | 2.5 | M | **Headline metric: leg-level correction accuracy and root-cause accuracy** against S0-R.5's `expected_corrections` golden — a pass-through stub cannot fake either. `Σ fleet corrections == −control_total` is demoted to a **closure invariant**, because `signed_impact_base` already computes it deterministically and a stub returning its negation satisfies it with no model call. Heuristic baseline scored on the same golden **and on perturbed/ambiguous cases**, with the framing pre-committed before the number is seen. Two adversarial cases: one **pricing** break (correctly triaged, then refused by the registry for want of an authorised agent — this is what makes the three-investigator cut a demonstrated control rather than a rationalisation) and one where the **custodian** is the incorrect side. |
+| S7 | Deployment | 6.0 | M | Cloud Run under per-agent SAs, IaC, `make teardown` — **verified against a throwaway resource prefix, not executed against the demo deployment**, since the recording is the following day and the brief's own guidance is to tear down after capturing proof — **budget alert**, ingress authentication (fund NAV data must not be publicly readable), Pub/Sub push OIDC, no secrets in image. Fix `bootstrap.sh` role-binding idempotency — it `continue`s on an existing SA and never reconciles roles, so "re-run it freely" is false. |
+| S8a | Reproducibility + Devpost text | 3.5 | M | Includes a stated decision on the **hosted URL**: forfeited when the console was cut. "Optional but highly encouraged" in the brief, so the blank field is explained rather than left blank. | README verbatim in a clean container; **Devpost technical description** (mandatory, omitted from v1 and v2 — problem, features, technology inventory, data sources, findings/challenges/learnings); checklist mapped 1:1 with an evidence column. |
 | S8b | Demo script, rehearsal, record | 3.5 | M | Script, **rehearsal before the take**, then record. Pre-captured Console screenshots are for navigation only and must never stand in for the agent run — the briefing requires a live, unedited demonstration. |
 | — | Architecture diagram | 1.5 | M | Drafted **day 1**, so it can discipline the S3/S7 decisions it describes. Counted once (v2 double-counted it). |
 | — | CI (GitHub Actions, `make verify` offline) | 0.5 | S | ~30 min once S0c makes the suite offline, and it continuously protects the "reproduces byte-identically" claim. The rubric names production-mindset explicitly. |
@@ -257,11 +260,14 @@ to S4/S5 because S7a already banked the mandatory proof. S4 depends on S1.1 only
 
 ### S8.0 — README honesty patch · 0.25h · **19 August** · M
 Deferring this to the final day is not defensible: the repo is **public now**, the claims are false, and
-**no test in the 32-test suite touches Model Armor at all**. The plan applies exactly this standard to
+**no test touched Model Armor at all**. The plan applies exactly this standard to
 itself in S0-R.4 — relabel the EDGAR cassette because citing live EDGAR "would be dishonest" — so it
 cannot exempt the one artefact judges actually read. The 15-minute patch lands 19 August; the full rewrite
-stays in S8a. Every `[x]` in the Status section must name the test or trace that evidences it. The following claims are currently false and must be rewritten, not merely supplemented: "Agent Gateway enforcing all five policies" (B1/B3 defeat four of them), "Model Armor screening, verified blocking a real prompt injection" and "Screening is fail-closed" (§1), "least-privilege… only the declared scopes" (project-level `roles/datastore.user`), the MIT declaration with no `LICENSE` file, and README step 3's "fetches live ECB reference rates",
-which contradicts S8a's offline criterion. Also delete the Gemini 3.5 aside — it reads as pre-emptive excuse-making; name the verified versions instead.
+stays in S8a. Every `[x]` in the Status section must name the test or trace that evidences it.
+
+Everything v3.2 listed here was already fixed in `65a7539`, and the list then rotted a second way: it kept citing "the 32-test suite" after the suite reached 70, and the README carried the same stale figure in three places plus a "no test touches Model Armor" disclaimer that its own later commits had falsified. Both classes are now guarded by `tests/test_readme_claims.py`, which asserts every stated count matches collection and that the Model Armor disclaimer neither understates coverage that exists nor overstates what stubbed tests prove.
+
+**Two claims survive and are still to fix:** the Gemini 3.5 aside at `README.md:75`, which reads as pre-emptive excuse-making, and step 3's "fetches live ECB reference rates", which contradicts S8a's offline criterion.
 
 ---
 
@@ -317,11 +323,13 @@ immutable module-level singleton plus its test seam and every caller.
 | Concept | Why it leaks | Resolution |
 | :--- | :--- | :--- |
 | `ApprovalClass` | Governance vocabulary, not fund accounting | Moves to **`control_plane/governance.py`**, which imports nothing from the package. The registry capability-string change lands **first**, removing `registry → domain`, so no cycle can form. |
-| `ExceptionCase` | 11 members read, 4 of them fund-specific | **Not** protocol-ised — a Protocol satisfied by `ExceptionCase` still admits one. The process hands over a flat `CaseFacts` value: `case_id, subject_id, as_of, item_count, recurrence_key, status: str, capability: str, band: ApprovalClass, impact: (Decimal, unit: str)`. Every member is a primitive or a control-plane type; `trace_id` is returned, not written back. `audit.py` stamps a mapping it was handed. |
+| `ExceptionCase` | 11 members read, 4 of them fund-specific | **Not** protocol-ised — a Protocol satisfied by `ExceptionCase` still admits one. The process hands over a flat `CaseFacts`: `case_id, subject_id, as_of, item_count, recurrence_key, status: str, capability: str, severity: str, impact: (Decimal, unit: str)`; `trace_id` is returned, not written back.<br><br>**No `band` field.** v3.3 carried one, which is caller-supplied governance — B3 reappearing on the governance axis — and the section then contradicted itself by also saying the control plane derives the band. The process supplies a unit-tagged magnitude; `policies.band_for` returns the band.<br><br>**A `pydantic.BaseModel`, `frozen=True`, `extra="forbid"` — not a dataclass.** Pydantic coerces a `StrEnum` to `str`, so a domain enum cannot be smuggled in through `status` or `capability`; a frozen dataclass passes it through intact with `.value` still live and every static check green. The mechanism decides whether that hole is open.<br><br>**`as_span_attributes()` is owned by `control_plane`** — not a mapping handed in, which would put the `nav.*` keys under process control, make the audit record non-uniform, and be invisible to both S0-R.10 checks. `severity` is retained rather than silently dropped from the span. |
 | `BreakCategory` | A closed enum cannot route a second process | `handles_capabilities: list[str]`, namespaced (`nav.fx_rate`, `ta.subscription_in_transit`). `coverage()` takes its namespace from registered packs; `registry/cli.py` stops calling `.value`. |
 | `max_autonomous_bps` | A bps ceiling in a process-agnostic registry | `max_autonomous_impact: {value, unit}`; the existing zero-headroom test asserts on the value. |
 | bps materiality | Units differ per process | **The control plane owns the threshold table and derives the band itself**: `policies.band_for(impact: Decimal, unit: str, policy: ThresholdSet) -> ApprovalClass`. The process supplies a unit-tagged magnitude and nothing else. Pulled out of S10 so it cannot be lost with it — v3.2 made S0-R.9 depend on a section sitting at descope rung 2. |
 | `gateway -> tools.catalogue` | The catalogue is a hardcoded 17-entry singleton | The **port** moves to `control_plane` — `register(pack)` returning an immutable view. Specs stay in the packs. |
+| **Manifest sourcing** | `registry/models.py:20` sets `MANIFEST_DIR = Path(__file__).parent / "manifests"`, so **a new process's manifest is a new file inside `registry/`** — S9's headline zero-diff artefact would contradict itself on screen | `register(pack)` carries the pack's manifest directory; `load_manifests()` aggregates over `packs.manifest_dirs()`; `MANIFEST_DIR` becomes the NAV pack's own. `coverage()` takes its capability universe from **registered packs, not published manifests** — otherwise an uncovered capability disappears instead of reporting NONE, and shot 10's governance beat becomes inexpressible. |
+| `discover_for_category` | Published as a *governed tool name* (`tools/catalogue.py:64`) and declared in `triage-agent.yaml` | Renaming touches `registry/{models,discover,cli}.py`, `tools/catalogue.py`, seven manifests, two tests. Inside the 4.5h, but named so it is not discovered mid-change. |
 
 **Acceptance:** `ApprovalClass` is defined in `control_plane/governance.py`; every module imports
 cleanly in isolation in both orders; no capability string is unnamespaced; `control_plane` contains
@@ -332,28 +340,33 @@ no reference to `case.fund_id`, `case.breaks`, `case.category`, `case.severity`,
 
 - **Transitive** import closure, not one hop: `control_plane` and `registry` must not *reach* any
   process package. One-hop misses `gateway → tools → domain` and `identity → registry → domain`.
-- **Forbidden-attribute scan** over `control_plane/` for the six domain-shaped members above. This
-  is what catches the enum reads that carry no import, and what keeps S0-R.9 fixed.
+- **Allow-list attribute scan**, not a deny-list: the attribute names `control_plane/` reads off its
+  case parameter must be a **subset of `CaseFacts.model_fields`**. A six-name deny-list was
+  incomplete (`hypotheses`, `proposal`, `value_breaks`, `prior_occurrences`, `created_at` all
+  reachable) and self-colliding, since `status` was both forbidden and a declared field. An
+  allow-list is complete by construction. `getattr` on the facts parameter is forbidden outright.
 - **Synthetic-process conformance test**: drive `case_trace`, `route_for_approval` and
   `may_post_entry` over a non-NAV case defined in the test file. Proves the seam without a second
   product, and survives every ladder rung.
+- **Span-attribute uniformity test**: the root-span attribute key set for a TA case equals a NAV
+  case's. That is what "the same governance log runs over it" actually means.
+- A **composition root** outside `control_plane/` and `registry/` imports both and calls
+  `register()`. `if TYPE_CHECKING:` imports count as violations — stated now so the first
+  implementer cannot exempt them to make the check pass.
 
-### S9 — Transfer agency process pack · 7h · S
+### S9 — Transfer agency process pack · 4h · S
 
-Re-budgeted from 5h against the plan's own rates: models 0.5 · detection 1.0 · fixtures with contra
-legs 2.0 · investigator 1.5 · manifests and routing 0.6 · golden and closure 1.0 · `make eval`
-side-by-side 0.4.
+Re-cut to 4.0h by §5c's shot list: models 0.5 · detection 1.0 · fixtures with contra legs 1.5 ·
+manifest and routing 0.4 · golden and shares closure 0.6. The side-by-side eval row moves to S5a.
+
+**The TA investigator and the registrar cassette are cut** — 2.5h buying zero screen time. v3.3
+added them so the TA agent would not "read on camera as the weak agent"; §5c shows it never reaches
+camera. `subscription_in_transit` is corrected by *arithmetic* — add the in-transit shares — so TA
+needs no model, and a fleet reserving judgement for where judgement is required is a better claim
+than one putting an LLM on every step.
 
 Shares in issue per the registrar against per fund accounting. Capabilities
 `ta.subscription_in_transit`, `ta.redemption_unprocessed`, `ta.switch_not_booked`.
-
-**It gets an untrusted external evidence source**, which v3.2 did not give it: a registrar
-statement, ingested through the same windowed Model Armor screening and the same quarantined
-extractor as an EDGAR filing. Without this the TA investigator could cite only internal records —
-exactly the verdict shape S1's acceptance criterion fails, and it would read on camera as the weak
-agent. With it, the demo shows the quarantine boundary generalising to a second document type,
-which is the strongest architectural asset the project has. Served from a committed cassette and
-labelled a fixture, on the same honesty rule as the EDGAR evidence in S0-R.4.
 
 The control total is denominated in **shares** — the point being that it proves the band derivation
 is unit-driven rather than covertly tied to basis points, and exercises closure in a second unit.
@@ -372,8 +385,10 @@ residual                       0
 1. `git diff --stat` for the S9 commit shows **zero lines** in `control_plane/`, `registry/` and
    `telemetry`. Recorded in the README and shown on screen.
 2. `make registry` lists both packs with namespaced capabilities.
-3. One TA case clears end to end with cited evidence from the registrar statement, and its trace
-   opens in the same Cloud Trace view as a NAV case.
+3. A TA case is detected, banded, routed and audited, its trace opening in the same Cloud Trace view
+   as a NAV case with the **same root-span attribute keys**. One TA capability deliberately has no
+   authorised investigator and the registry reports **NONE** rather than routing it — shot 10's
+   governance beat, at no extra cost.
 4. `make eval` reports both processes side by side.
 
 ### S10 — Per-tenant policy · 2h · S
@@ -400,13 +415,56 @@ read `nav.case.impact_bps`.
 
 ---
 
+## 5c. The 240 seconds
+
+The plan argued about what a four-minute video can carry without ever writing the four minutes
+down. This is that budget. It is the instrument that decides S9's scope, because on-camera time is
+the binding constraint on demo-driven scope, not build hours.
+
+| # | Shot | s | Why it cannot be cut |
+| :--- | :--- | :--- | :--- |
+| 1 | The NAV window, the breaks, what it costs a fund accountant | 20 | The brief requires problem and value |
+| 2 | Cycle triggered; detection opens exceptions from tolerance rules | 20 | Shows the deterministic floor |
+| 3 | Triage classifies, then **discovers** the specialist through the registry | 15 | The registry claim, live |
+| 4 | FX investigator resolves the stale rate against real ECB data, cites the rate **and its date** | 35 | The 40% axis. This is the fleet doing the work |
+| 5 | Corporate actions ingests a filing; **Model Armor blocks the poisoned notice**; the extractor takes only typed values | 35 | The strongest architectural asset |
+| 6 | Remediation drafts a multi-leg correction; the gateway **refuses to post it** | 25 | The governance thesis in one beat |
+| 7 | Sign-off statement foots; residual 0.00 | 20 | Definition of done, uncheatable |
+| 8 | **Cloud Run, Cloud Trace, the case's reasoning chain in the Console** | 25 | Mandatory. Non-negotiable |
+| 9 | Architecture: the control plane band, then the seam | 20 | The 30% axis |
+| 10 | A second process on the same control plane — `git diff --stat`, `make registry`, `make eval` | 15 | §5b's whole claim, in three artefacts |
+| 11 | Reproducibility: `make verify`, the eval numbers | 10 | The 30% axis |
+| | **Total** | **240** | |
+
+### What this settles
+
+**S9 gets 15 seconds, and they are all artefacts rather than a walkthrough.** The three items in
+shot 10 — a diff, a registry listing, a two-row eval table — need a second process that *runs*. They
+do not need a Gemini investigator for it, and they do not need a second prompt-injection
+demonstration: nobody shows two, and at the 10 seconds a TA investigator would get, no viewer can
+tell whether its evidence was external.
+
+So the registrar cassette and the TA investigator buy **zero incremental screen time** for 2.5h of
+the 7h. v3.3 added them to stop the TA agent "reading on camera as the weak agent"; the shot list
+shows it never appears on camera at all. That was scope defended by argument rather than measured.
+
+**S9 is re-cut to 4.0h** (§5b), and the honest architectural point improves rather than weakens:
+transfer agency's `subscription_in_transit` correction is *arithmetic* — add the in-transit shares.
+It needs no model. A fleet that uses judgement where judgement is required and deterministic logic
+where it is not is a better claim than one that puts an LLM on every step.
+
+Shot 10 also absorbs the S1.5 governance beat at no extra cost: TA declares a capability with no
+authorised investigator, and the registry reports **NONE** rather than silently routing it.
+
+---
+
 ## 6. Acceptance criteria
 
 | Section | Criterion |
 | :--- | :--- |
 | S0a | The Vertex response's returned model version string appears in a Cloud Trace span attribute, **asserted by a test**, for both model IDs. |
 | S0-R | `Σ golden == −control_total`; `market_value_base == q × p ÷ fx_rate` per row; withholding any break makes `is_complete()` False **and** the residual equals that break to the cent; all four exploits raise — forged manifest, swapped callable, unresolvable approval ref, and tool call with no identity bound. |
-| S0-R.7 | Windowed screening raises `ContentBlocked` for the injection at **head, middle and tail** of a genuine filing, at 20KB and at 200KB — the head and middle cases are unachievable without windowing, which is why v3.0's criterion could not be met by its own fix. Zero false positives across the clean windows of a real filing. A response with `EXECUTION_SKIPPED` or `invocation_result != SUCCESS` raises regardless of `match_state`. |
+| S0-R.7 | Marked `-m live`, with a recorded window-verdict cassette for the offline suite: head/middle/tail at 20KB and 200KB in 1KB windows is roughly 400 sanitize calls per screen, which can neither sit in `make verify` (S0c and S8a require it offline) nor be run casually against the $150 credit. Windowed screening raises `ContentBlocked` for the injection at **head, middle and tail** of a genuine filing, at 20KB and at 200KB — the head and middle cases are unachievable without windowing, which is why v3.0's criterion could not be met by its own fix. Zero false positives across the clean windows of a real filing. A response with `EXECUTION_SKIPPED` or `invocation_result != SUCCESS` raises regardless of `match_state`. |
 | S0-R.7 (extractor) | **Falsifiable, replacing v3.0's tautology** ("returns a valid record or escalates" admitted every outcome): extraction from the *poisoned* notice must yield the **same typed values** as the clean notice; and a value outside plausibility bounds, or disagreeing with books-and-records, must escalate the case rather than produce a proposal. |
 | S1 | Every verdict cites ≥1 `EvidenceItem` with non-null `source_uri` **and** `retrieved_at`; an FX verdict must cite the ECB rate **and the rate date used**; a corporate-action verdict citing only `books_and_records` fails. An **AST-scan test** asserts no module under `agents/` imports `nav_sentinel.tools.*` directly. |
 | S1.5 | Triage classifies ≥5 of 6, and any miss returns `UNCLASSIFIED` with confidence < 0.5, never a confident wrong category. Republishing a manifest changes routing **without a process restart**. The **pricing** adversarial case is triaged correctly and then refused by the registry as having no authorised investigator — and `test_every_break_category_has_an_authorised_investigator` is inverted to assert exactly that gap, rather than deleted. |
@@ -434,18 +492,23 @@ banked the mandatory Cloud Run proof on 23 August, and that the 29 August rehear
 | Aug 23 | Sun | S7a vertical slice — **mandatory Cloud Run proof banked** · Devpost skeleton, credit, social | 6.3 |
 | Aug 24 | Mon | S1.1 contract · S1 FX investigator | 6.0 |
 | Aug 25 | Tue | S1 corporate actions · S1.5 triage · S2a Firestore | 6.0 |
-| Aug 26 | Wed | S3 orchestration · CI | 8.0 |
+| Aug 26 | Wed | S3 orchestration · **S5a eval harness** · CI | 8.5 |
 | Aug 27 | Thu | S4 remediation · S2 memory shim · **S10 per-tenant policy** | 8.5 |
 | Aug 28 | Fri | **S9 transfer agency pack** · security pass | 8.5 |
-| Aug 29 | Sat | S7 deployment · figure 5 — **code freeze 18:00** · demo rehearsal | 8.5 |
-| Aug 30 | Sun | S5 eval + baseline · S8a Devpost · S8b record · **submit** | 8.5 |
+| Aug 29 | Sat | S7 deployment · figure 5 · **S8a Devpost text** — **code freeze 18:00** · rehearsal | 8.5 |
+| Aug 30 | Sun | **S5b metrics + baseline** · S8b record · **submit** | 7.0 |
 
-Scheduled: **83.3h** across the twelve days. Build in §5 and §5b totals 74.1h, so 9.2h of in-line rework sits in the calendar and **13.3h of the 22.5h reserve stays unallocated** — rework lands on whichever gate produces findings. Gross commitment is 96.6h; the 19–20 August rows are already complete as of 18 August, so 91.3h remains against 96.0h of capacity.
+Scheduled: **88.3h** across the twelve days. Build in §5 and §5b totals 76.1h, so 12.2h of in-line
+rework sits in the calendar and **10.3h of the 22.5h reserve stays unallocated** — rework lands on
+whichever gate produces findings. Gross commitment is 98.6h; 5.3h of the 19 August row is already
+complete as of 18 August, so 93.3h remains against 102.0h of capacity. The 3h released by S9's
+re-cut goes to **30 August**, which the v3.3 review showed was 1.5–2.5h over-committed while
+carrying the eval metrics, the Devpost description, the recording and the submission.
 
 **S4 → S5 now precede S7**, so the deployed artefact is the final fleet. A late S7 is tolerable precisely
 because S7a banks the mandatory proof on 23 August.
 
-No day exceeds 8h. v2 scheduled 15h on Aug 27 while criticising v1 for scheduling 14h.
+No day exceeds 8.5h. v2 scheduled 15h on Aug 27 while criticising v1 for scheduling 14h.
 
 ---
 
@@ -458,7 +521,7 @@ No day exceeds 8h. v2 scheduled 15h on Aug 27 while criticising v1 for schedulin
 | Governance claims falsifiable in ten minutes | **High** | S0-R.1/.2 plus four exploit tests |
 | Model Armor cannot stop contextual injection | **High** | Accepted as a property of the service; mitigated structurally by quarantined extraction, not by configuration |
 | 40% axis unevidenced | **High** | `Σ fleet corrections == −control_total` + heuristic baseline; S4 promoted to mandatory |
-| 5.6% margin at a demanding 8.5h/day rate | **High** | Response pre-decided in §3, observable trigger, checked daily at 18:00 |
+| 8.6% margin at a demanding 8.5h/day rate | **High** | Response pre-decided in §3, observable trigger, checked daily at 18:00 |
 | Eval N too small to quote | **Accepted** | The volume run is **cut**, so there is no denominator fix. Accuracy is reported on N=6 (+2 adversarial) and stated as **indicative only** — one miss is 16.7%. The defensible claims are leg-level structure and evidence citation, which a heuristic cannot produce at any N. |
 | Live demo fails on the take | Med | 29 Aug rehearsal, pre-captured Console navigation, S7a's proof already banked |
 | The platform claim is disprovable by grep today | **High** | S0-R.9 plus the AST test; S9 proves it by diff, not assertion |
@@ -491,5 +554,6 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | S0a | covered by v3 review | done | **APPROVE WITH CHANGES** — applied | **yes** |
 | S0-R.1 | covered by v3 review | done | **APPROVE WITH CHANGES** — applied | **yes** |
 | Plan v3.2 | **APPROVE WITH CHANGES** — 3 blockers | — | — | superseded |
-| Plan v3.3 | **in progress** | — | — | — |
+| Plan v3.3 | **APPROVE WITH CHANGES** — 3 blockers | — | — | superseded |
+| Plan v3.4 | **in progress** | — | — | — |
 | S0-R | pending | — | — | — |
