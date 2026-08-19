@@ -7,9 +7,9 @@ The fleet's models are reserved for explaining *why* they disagree.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from decimal import Decimal
-from itertools import count
 
 from nav_sentinel.domain.models import (
     BreakType,
@@ -26,11 +26,15 @@ MARKET_VALUE_TOLERANCE_BASE = Decimal("1.00")
 CASH_TOLERANCE_BASE = Decimal("1.00")
 NAV_PER_SHARE_TOLERANCE = Decimal("0.0001")
 
-_counter = count(1)
+def _break_id(*parts: object) -> str:
+    """A content-derived break id.
 
-
-def _next_id(as_of: str) -> str:
-    return f"BRK-{as_of}-{next(_counter):05d}"
+    Was a process counter, so the same break got a different id on every run and a retried cycle
+    produced duplicate audit records under new ids. It also made "make verify reproduces the eval
+    numbers byte-identically" unachievable, which S8a asserts.
+    """
+    digest = hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:12]
+    return f"BRK-{digest}"
 
 
 def _key(p: Position) -> tuple[str, str]:
@@ -101,7 +105,7 @@ def detect_position_breaks(
         if abs(a_qty - c_qty) > QUANTITY_TOLERANCE:
             breaks.append(
                 ReconciliationBreak(
-                    break_id=_next_id(stamp),
+                    break_id=_break_id(fund_id, stamp, isin, "quantity"),
                     fund_id=fund_id,
                     as_of=as_of,
                     break_type=BreakType.POSITION_QUANTITY,
@@ -117,7 +121,7 @@ def detect_position_breaks(
         if abs(a_mv - c_mv) > MARKET_VALUE_TOLERANCE_BASE:
             breaks.append(
                 ReconciliationBreak(
-                    break_id=_next_id(stamp),
+                    break_id=_break_id(fund_id, stamp, isin, "value"),
                     fund_id=fund_id,
                     as_of=as_of,
                     break_type=BreakType.MARKET_VALUE,
@@ -164,7 +168,7 @@ def detect_cash_breaks(
         if abs(a - c) > CASH_TOLERANCE_BASE:
             breaks.append(
                 ReconciliationBreak(
-                    break_id=_next_id(as_of.isoformat()),
+                    break_id=_break_id(fund_id, as_of, ccy, "cash"),
                     fund_id=fund_id,
                     as_of=as_of,
                     break_type=BreakType.CASH_BALANCE,
@@ -186,17 +190,65 @@ def detect_nav_breaks(
         custodian = [n for n in custodian if n.as_of == as_of]
     acc = {(n.fund_id, n.as_of): n for n in accounting}
     cus = {(n.fund_id, n.as_of): n for n in custodian}
+
     breaks: list[ReconciliationBreak] = []
-    for key in sorted(acc.keys() & cus.keys()):
+    # Union, not intersection. Intersecting meant a NAV record present on only one side produced
+    # no break at all -- and the NAV record *is* the control total, so the project's central
+    # mechanism silently reported nothing to explain.
+    for key in sorted(acc.keys() | cus.keys()):
         fund_id, as_of = key
-        a, c = acc[key], cus[key]
-        if abs(a.nav_per_share - c.nav_per_share) > NAV_PER_SHARE_TOLERANCE:
+        a, c = acc.get(key), cus.get(key)
+        if a is None or c is None:
+            missing = "accounting" if a is None else "custodian"
+            present = c if a is None else a
             breaks.append(
                 ReconciliationBreak(
-                    break_id=_next_id(as_of.isoformat()),
+                    break_id=_break_id("nav", fund_id, as_of, f"missing:{missing}"),
                     fund_id=fund_id,
                     as_of=as_of,
                     break_type=BreakType.NAV_PER_SHARE,
+                    currency=None,
+                    accounting_value=Decimal(0) if a is None else a.nav_per_share,
+                    custodian_value=Decimal(0) if c is None else c.nav_per_share,
+                    tolerance_applied=Decimal(0),
+                    note=(
+                        f"No {missing} NAV record for {fund_id} at {as_of}. The other side "
+                        f"reports {present.nav_per_share} per share. A cycle cannot be signed "
+                        f"off against a control total that exists on one side only."
+                    ),
+                )
+            )
+            continue
+
+        if a.shares_outstanding == 0 or c.shares_outstanding == 0:
+            breaks.append(
+                ReconciliationBreak(
+                    break_id=_break_id("nav", fund_id, as_of, "zero_shares"),
+                    fund_id=fund_id,
+                    as_of=as_of,
+                    break_type=BreakType.NAV_PER_SHARE,
+                    currency=None,
+                    accounting_value=a.net_assets,
+                    custodian_value=c.net_assets,
+                    tolerance_applied=Decimal(0),
+                    note=(
+                        "Shares outstanding is zero on at least one side, so NAV per share is "
+                        "not computable. Comparing net assets instead; `nav_per_share` returning "
+                        "zero would have masked the difference entirely."
+                    ),
+                )
+            )
+            continue
+
+        difference = a.nav_per_share - c.nav_per_share
+        if abs(difference) > NAV_PER_SHARE_TOLERANCE:
+            breaks.append(
+                ReconciliationBreak(
+                    break_id=_break_id("nav", fund_id, as_of, "per_share"),
+                    fund_id=fund_id,
+                    as_of=as_of,
+                    break_type=BreakType.NAV_PER_SHARE,
+                    currency=None,
                     accounting_value=a.nav_per_share,
                     custodian_value=c.nav_per_share,
                     tolerance_applied=NAV_PER_SHARE_TOLERANCE,

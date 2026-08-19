@@ -54,12 +54,27 @@ def _headers() -> dict[str, str]:
 
 
 def _throttled() -> None:
+    """Wait our turn, without holding the lock while waiting.
+
+    The previous version slept inside `with _throttle:`, so every other caller blocked on the
+    mutex for the duration of the sleep -- and under the asynchronous runtime S3 introduces that
+    stalls the event loop rather than one thread. The lock now only guards the reservation; the
+    sleep happens outside it.
+    """
     global _last_call
-    with _throttle:
-        elapsed = time.monotonic() - _last_call
-        if elapsed < _MIN_INTERVAL:
-            time.sleep(_MIN_INTERVAL - elapsed)
-        _last_call = time.monotonic()
+    while True:
+        with _throttle:
+            now = time.monotonic()
+            wait = _MIN_INTERVAL - (now - _last_call)
+            if wait <= 0:
+                _last_call = now
+                return
+            # Reserve our slot before releasing, so concurrent callers queue rather than all
+            # waking to the same instant and firing together.
+            _last_call = _last_call + _MIN_INTERVAL
+            wait = _last_call - now
+        time.sleep(wait)
+        return
 
 
 def _get(url: str, params: dict | None = None, *, attempts: int = 4) -> httpx.Response:

@@ -173,6 +173,9 @@ class ReconciliationBreak(BaseModel):
     accounting_value: Decimal
     custodian_value: Decimal
     tolerance_applied: Decimal
+    #: Set when the break needs stating rather than just measuring -- a record present on one
+    #: side only, or a quantity that makes the usual comparison undefined.
+    note: str = ""
 
     @property
     def difference(self) -> Decimal:

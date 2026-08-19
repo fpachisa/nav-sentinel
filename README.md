@@ -169,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 113 invariant tests, including "no agent may post"
+make test        # 129 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
