@@ -1,87 +1,143 @@
-nav_date: '2026-08-17'
-scenarios:
-- scenario: FX_STALE_RATE
-  fund_id: MERID-GEF
-  isin: US0378331005
-  expected_category: fx_rate
-  incorrect_side: accounting
-  root_cause: Accounting valued the USD position using the ECB reference rate for 2026-08-14 (1.1567)
-    instead of 2026-08-17 (1.1593).
-  expected_correction_base: '-86625.48'
-  verifiable_against: ecb_fx_reference_rates
-- scenario: CA_STOCK_SPLIT_NOT_APPLIED
-  fund_id: MERID-GEF
-  isin: US5949181045
-  expected_category: corporate_action
-  incorrect_side: accounting
-  root_cause: A 2:1 share split effective 2026-08-17 was applied by the custodian but not by the accounting
-    book. Quantity differs 2x; market value agrees.
-  expected_correction_base: '0.00'
-  expected_quantity_correction: '96000'
-  verifiable_against: sec_edgar
-- scenario: FX_INVERTED_CROSS
-  fund_id: ATLAS-USE
-  isin: GB0009252882
-  expected_category: fx_rate
-  incorrect_side: accounting
-  root_cause: 'Accounting applied the GBP/USD cross inverted: used 1.355906 where the correct GBP-per-USD
-    rate on 2026-08-17 is 0.737514.'
-  expected_correction_base: '11372483.88'
-  verifiable_against: ecb_fx_reference_rates
-- scenario: PRICE_STALE
-  fund_id: ATLAS-USE
-  isin: US4581401001
-  expected_category: pricing
-  incorrect_side: accounting
-  root_cause: Accounting carried the prior close of 26.71 rather than the 2026-08-17 close of 27.18; the
-    vendor price feed did not refresh.
-  expected_correction_base: '1104500.00'
-  verifiable_against: books_and_records
-- scenario: SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE
-  fund_id: MERID-GEF
-  isin: FR0000121014
-  expected_category: settlement
-  incorrect_side: neither
-  root_cause: 'Trade TRD-2026-08-17-0041 was executed 2026-08-17 for settlement 2026-08-19. Accounting
-    recognises on trade date, the custodian on settlement date. This is a timing difference, not an error:
-    it requires an unsettled-trade reconciling item, not a correcting entry.'
-  expected_correction_base: '0.00'
-  verifiable_against: books_and_records
-- scenario: SETTLE_FAILED_TRADE
-  fund_id: ATLAS-USE
-  isin: US7170811035
-  expected_category: settlement
-  incorrect_side: accounting
-  root_cause: Trade TRD-2026-08-14-0118 failed at the custodian on 2026-08-17 but remains in the accounting
-    book as settled. The position must be reversed.
-  expected_correction_base: '-3880000.00'
-  verifiable_against: books_and_records
-- scenario: CA_ADR_DIVIDEND_GROSS_VS_NET
-  fund_id: MERID-GEF
-  isin: US0028241000
-  expected_category: corporate_action
-  incorrect_side: accounting
-  root_cause: The ABEV ADR dividend was booked gross (253750.00 USD) in the accounting book while the
-    custodian credited net of 15% withholding tax (215687.50 USD). A withholding tax receivable of 38062.50
-    USD is missing.
-  expected_correction_base: '-38062.50'
-  correction_currency: USD
-  verifiable_against: sec_edgar
-- scenario: FEE_ACCRUAL_MISSING
-  fund_id: MERID-GEF
-  expected_category: cash_fees
-  incorrect_side: accounting
-  root_cause: One day of management fee accrual (9863.01 EUR at 75bps annual on ~480m net assets) is absent
-    from the accounting book for 2026-08-17.
-  expected_correction_base: '-9863.01'
-  correction_currency: EUR
-  verifiable_against: books_and_records
-- scenario: INTEREST_ACCRUAL_MISSING
-  fund_id: ATLAS-USE
-  expected_category: cash_fees
-  incorrect_side: accounting
-  root_cause: Three days of deposit interest (7719.86 USD at 3.25% on 28.9m) was credited by the custodian
-    but not accrued in the accounting book.
-  expected_correction_base: '7719.86'
-  correction_currency: USD
-  verifiable_against: books_and_records
+fund_id: MERID-GEF
+base_currency: EUR
+cycles:
+- nav_date: '2026-07-17'
+  control_total: '33285.97'
+  scenarios:
+  - scenario: CA_ADR_DIVIDEND_GROSS_VS_NET
+    capability: nav.corporate_action
+    isin: US02319V1035
+    incorrect_side: accounting
+    root_cause: Accounting recognised the gross ADR dividend of USD 253750.00 as cash received. The custodian
+      credited USD 215687.50, net of 15% Brazilian withholding of USD 38062.50. The withholding is non-reclaimable
+      under the applicable treaty, so it is an expense rather than a receivable and net assets fall.
+    expected_corrections:
+    - leg: cash
+      account: cash_at_bank
+      currency: USD
+      amount: '-38062.50'
+    verifiable_against: sec_edgar_fixture
+    evidence_must_cite:
+    - filing
+    - gross_rate
+    - withholding_pct
+    recurs: true
+- nav_date: '2026-08-17'
+  control_total: '-4529562.69'
+  scenarios:
+  - scenario: FX_STALE_RATE
+    capability: nav.fx_rate
+    isin: US0378331005
+    incorrect_side: accounting
+    root_cause: Accounting revalued the USD position at the ECB reference rate for 2026-08-14 (1.15670000)
+      instead of 2026-08-17 (1.15930000).
+    expected_corrections:
+    - leg: securities
+      account: investments_at_market
+      currency: EUR
+      amount: '-86625.48'
+    verifiable_against: ecb_fx_reference_rates
+    evidence_must_cite:
+    - rate
+    - rate_date
+  - scenario: FX_INVERTED_CROSS
+    capability: nav.fx_rate
+    isin: GB00BN7SWP63
+    incorrect_side: accounting
+    root_cause: 'Accounting inverted the cross: applied 1.16959064 (EUR per GBP) where 0.85500000 (GBP
+      per EUR) was required.'
+    expected_corrections:
+    - leg: securities
+      account: investments_at_market
+      currency: EUR
+      amount: '4649020.49'
+    verifiable_against: ecb_fx_reference_rates
+    evidence_must_cite:
+    - rate
+    - rate_date
+  - scenario: CA_STOCK_SPLIT_NOT_APPLIED
+    capability: nav.corporate_action
+    isin: US5949181045
+    incorrect_side: accounting
+    root_cause: A 2:1 share split effective 2026-08-17 was applied by the custodian and not by the accounting
+      book. Quantity differs 2x; market value agrees exactly.
+    expected_corrections:
+    - leg: quantity_restatement
+      account: stock_record
+      currency: null
+      amount: '0.00'
+      quantity: '96000.0000'
+    verifiable_against: sec_edgar_fixture
+    evidence_must_cite:
+    - filing
+  - scenario: CA_ADR_DIVIDEND_GROSS_VS_NET
+    capability: nav.corporate_action
+    isin: US02319V1035
+    incorrect_side: accounting
+    root_cause: Accounting recognised the gross ADR dividend of USD 253750.00 as cash received. The custodian
+      credited USD 215687.50, net of 15% Brazilian withholding of USD 38062.50. The withholding is non-reclaimable
+      under the applicable treaty, so it is an expense rather than a receivable and net assets fall.
+    expected_corrections:
+    - leg: cash
+      account: cash_at_bank
+      currency: USD
+      amount: '-38062.50'
+    verifiable_against: sec_edgar_fixture
+    evidence_must_cite:
+    - filing
+    - gross_rate
+    - withholding_pct
+    recurs: true
+  - scenario: SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE
+    capability: nav.settlement
+    isin: FR0000121014
+    incorrect_side: neither
+    root_cause: A purchase of 8500.0000 shares traded 2026-08-17 settles 2026-08-19. Accounting recognises
+      on trade date, correctly; the custodian recognises on settlement. Both legs are booked, so net assets
+      are unaffected.
+    expected_corrections: []
+    reconciling_item: true
+    distinguished_by: settlement_date is in the future, so the trade will settle. Compare SETTLE_FAILED_TRADE,
+      whose settlement date has passed.
+    verifiable_against: books_and_records
+    evidence_must_cite:
+    - trade
+    - settlement_date
+  - scenario: SETTLE_FAILED_TRADE
+    capability: nav.settlement
+    isin: US7170811035
+    incorrect_side: accounting
+    root_cause: A purchase of 120000.0000 shares failed to settle on 2026-08-14. The stock was never delivered,
+      so accounting is carrying a position the fund does not own. Both legs must be reversed.
+    expected_corrections:
+    - leg: securities
+      account: investments_at_market
+      currency: USD
+      amount: '-3724800.00'
+    - leg: cash
+      account: cash_at_bank
+      currency: USD
+      amount: '3724800.00'
+    reconciling_item: false
+    distinguished_by: settlement_date has passed and status is failed. Compare SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE,
+      whose settlement date is in the future.
+    verifiable_against: books_and_records
+    evidence_must_cite:
+    - trade
+    - settlement_date
+notes: 'Corrections are signed as the amount to add to the accounting book. The generator refuses to emit
+  a cycle unless *posting* every declared correction onto the accounting side reconciles it exactly to
+  the custodian''s. Each correction is derived from its scenario''s own parameters -- a published rate
+  difference, a withholding percentage, a trade consideration -- not by subtracting one book from the
+  other, so that assertion is not an identity.
+
+
+  Summing the corrections after translating each to base currency is a weaker, different test and lands
+  within one cent: money(a/r) - money(b/r) is not money((a-b)/r), and a foreign-currency correction rounds
+  once while the balance it affects rounds once too. Posting-and-recomputing avoids the double rounding;
+  the summed form is quoted with a two-cent tolerance and should not be tightened, because the residue
+  is arithmetic, not error.
+
+
+  Three of the six scenarios in the current cycle carry no monetary correction: a quantity-only split,
+  a timing difference that is not an error, and a failed trade whose two legs net to zero.'

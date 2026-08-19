@@ -169,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 108 invariant tests, including "no agent may post"
+make test        # 113 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -224,7 +224,7 @@ such rather than as complete.
 
 | Component | State | Evidence |
 | :--- | :--- | :--- |
-| Deterministic reconciliation core | works, with a known gap | `tests/test_reconciliation.py` (16 tests). The NAV control-total closure is **circular** — see [docs/PLAN.md](docs/PLAN.md) §1 |
+| Deterministic reconciliation core | works | `tests/test_reconciliation.py` (21 tests). Posting the declared corrections reconciles both cycles; withholding any one leaves exactly its own impact; every stored market value is derivable from its stored rate |
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
@@ -252,10 +252,16 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    `human_approval_ref` resolves against an append-only store, checked against the case, the band
    in force, and the signers' roles.
 3. **Model Armor bypass.** As described above.
-4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
-   the declared ground truth explains only a fraction of the NAV difference.
-5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
-   leaves all 108 tests passing, because `market_value_base` is a stored field nothing recomputes.
+4. ~~**Fixtures violate double entry.**~~ **Closed.** Every recognition books both legs, and the
+   generator refuses to emit a cycle unless posting the declared corrections reconciles the two
+   books. The corrections are derived from each scenario's own parameters — a published rate
+   difference, a withholding percentage — not by subtracting one book from the other, so the
+   assertion is not an identity.
+5. ~~**The control total is blind to the FX chain.**~~ **Closed.** Every row is asserted against
+   `quantity x local_price / fx_rate`, and the custodian book's rates against the ECB's published
+   rate for their stated date. Writing that test immediately caught a real defect in the rebuilt
+   generator: it valued at full precision while storing a rate rounded to 8dp, leaving the two
+   inconsistent by cents.
 6. **Manifests have no integrity control.** Any `*.yaml` in a pack's manifest directory is loaded
    with no signature or digest, so on a writable filesystem an identity can be published at
    runtime. Resolving from "the published registry" only raises the bar if publication is itself

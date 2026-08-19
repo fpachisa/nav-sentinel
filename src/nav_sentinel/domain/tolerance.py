@@ -7,6 +7,7 @@ The fleet's models are reserved for explaining *why* they disagree.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from itertools import count
 
@@ -74,9 +75,17 @@ def _aggregate(positions: list[Position]) -> dict[tuple[str, str], _Aggregate]:
 
 
 def detect_position_breaks(
-    accounting: list[Position], custodian: list[Position]
+    accounting: list[Position], custodian: list[Position], as_of: date
 ) -> list[ReconciliationBreak]:
-    """Compare position quantity and base-currency market value, side by side."""
+    """Compare position quantity and base-currency market value for one valuation date.
+
+    `as_of` is required, not optional. `_aggregate` sums every row for a (fund, isin) regardless
+    of date, so once the fixtures carried two NAV cycles an unfiltered call reported a holding at
+    twice its size. That produced no break here only because both sides aggregated identically --
+    correct by luck, which is the worst kind.
+    """
+    accounting = [p for p in accounting if p.as_of == as_of]
+    custodian = [p for p in custodian if p.as_of == as_of]
     acc = _aggregate(accounting)
     cus = _aggregate(custodian)
     breaks: list[ReconciliationBreak] = []
@@ -124,9 +133,16 @@ def detect_position_breaks(
 
 
 def detect_cash_breaks(
-    accounting: list[CashMovement], custodian: list[CashMovement]
+    accounting: list[CashMovement], custodian: list[CashMovement], as_of: date
 ) -> list[ReconciliationBreak]:
-    """Compare cash balances per currency. A missing dividend on one side shows up here."""
+    """Compare cash balances per currency as at `as_of`.
+
+    A balance, not a lifetime total: movements after the valuation date belong to the next cycle,
+    and summing them all compared two different things. The previous version had no date filter at
+    all and stamped its breaks with a global maximum across funds.
+    """
+    accounting = [m for m in accounting if m.value_date <= as_of]
+    custodian = [m for m in custodian if m.value_date <= as_of]
 
     def totals(movements: list[CashMovement]) -> dict[tuple[str, str], Decimal]:
         out: dict[tuple[str, str], Decimal] = {}
@@ -162,8 +178,12 @@ def detect_cash_breaks(
 
 
 def detect_nav_breaks(
-    accounting: list[NavRecord], custodian: list[NavRecord]
+    accounting: list[NavRecord], custodian: list[NavRecord], as_of: date | None = None
 ) -> list[ReconciliationBreak]:
+    """The control total. Optional `as_of` because a NAV record is already date-keyed."""
+    if as_of is not None:
+        accounting = [n for n in accounting if n.as_of == as_of]
+        custodian = [n for n in custodian if n.as_of == as_of]
     acc = {(n.fund_id, n.as_of): n for n in accounting}
     cus = {(n.fund_id, n.as_of): n for n in custodian}
     breaks: list[ReconciliationBreak] = []

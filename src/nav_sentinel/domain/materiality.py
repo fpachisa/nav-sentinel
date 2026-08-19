@@ -76,7 +76,32 @@ def severity_for(bps: float) -> Severity:
     return Severity.CRITICAL
 
 
-def approval_class_for(bps: float) -> ApprovalClass:
+def approval_class_for(bps: float, *, has_quantity_break: bool = False) -> ApprovalClass:
+    """Route by monetary materiality, with a floor for stock-record breaks.
+
+    A quantity break never auto-clears whatever its value impact. A 2:1 split unapplied on one
+    side moves no money and yet drives wrong dividend entitlement, wrong future valuation and a
+    stock-record control failure. No administrator clears one, and the previous version scored it
+    0.0bps and auto-cleared it -- with a test asserting that as correct.
+    """
+    if has_quantity_break:
+        return max(
+            ApprovalClass.SINGLE_REVIEWER,
+            _by_bps(bps),
+            key=_SEVERITY_ORDER.__getitem__,
+        )
+    return _by_bps(bps)
+
+
+_SEVERITY_ORDER = {
+    ApprovalClass.AUTO_CLEAR: 0,
+    ApprovalClass.SINGLE_REVIEWER: 1,
+    ApprovalClass.FOUR_EYES: 2,
+    ApprovalClass.CIO_ESCALATION: 3,
+}
+
+
+def _by_bps(bps: float) -> ApprovalClass:
     s = settings()
     if bps <= s.auto_clear_max_bps:
         return ApprovalClass.AUTO_CLEAR
@@ -103,5 +128,5 @@ def score(
     bps = max(measures) if measures else 0.0
     case.nav_impact_bps = round(bps, 4)
     case.severity = severity_for(bps)
-    case.approval_class = approval_class_for(bps)
+    case.approval_class = approval_class_for(bps, has_quantity_break=bool(case.quantity_breaks))
     return case
