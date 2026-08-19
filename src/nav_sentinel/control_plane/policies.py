@@ -7,47 +7,34 @@ misstate. The gateway is the only place a decision is made.
 
 from __future__ import annotations
 
-from enum import StrEnum
-
-from pydantic import BaseModel
-
-from nav_sentinel.domain.models import ApprovalClass, ExceptionCase
+from nav_sentinel.control_plane.governance import (
+    ApprovalClass,
+    CaseFacts,
+    Effect,
+    Impact,
+    PolicyDecision,
+    PolicyViolation,
+    ThresholdSet,
+)
+from nav_sentinel.control_plane.packs import thresholds_for
 from nav_sentinel.registry.models import AgentManifest
 
-
-class Effect(StrEnum):
-    ALLOW = "allow"
-    DENY = "deny"
-
-
-class PolicyDecision(BaseModel):
-    effect: Effect
-    policy_id: str
-    reason: str
-    agent_ref: str
-    resource: str
-
-    @property
-    def allowed(self) -> bool:
-        return self.effect is Effect.ALLOW
-
-    def as_span_attributes(self) -> dict[str, str]:
-        return {
-            "nav.policy.effect": self.effect.value,
-            "nav.policy.id": self.policy_id,
-            "nav.policy.reason": self.reason,
-            "nav.agent.ref": self.agent_ref,
-            "nav.policy.resource": self.resource,
-        }
-
-
-class PolicyViolation(RuntimeError):
-    def __init__(self, decision: PolicyDecision) -> None:
-        super().__init__(f"[{decision.policy_id}] {decision.reason}")
-        self.decision = decision
-
-
-# --------------------------------------------------------------------------- policies
+__all__ = [
+    "ApprovalClass",
+    "CaseFacts",
+    "Effect",
+    "Impact",
+    "PolicyDecision",
+    "PolicyViolation",
+    "ThresholdSet",
+    "approval_route",
+    "band_for",
+    "may_post_entry",
+    "may_propose_remediation",
+    "tool_allowed",
+    "tool_within_data_scope",
+    "untrusted_ingest_requires_armor",
+]
 
 
 def tool_allowed(manifest: AgentManifest, tool_name: str) -> PolicyDecision:
@@ -124,13 +111,18 @@ def may_propose_remediation(manifest: AgentManifest) -> PolicyDecision:
 
 
 def may_post_entry(
-    manifest: AgentManifest, case: ExceptionCase, human_approval_ref: str | None
+    manifest: AgentManifest, facts: CaseFacts, human_approval_ref: str | None,
+    thresholds: ThresholdSet | None = None,
 ) -> PolicyDecision:
     """P-003: nothing posts to the books without a recorded human approval.
 
-    The hard control. `max_autonomous_bps` is zero for every published agent, so this
-    denies on authority before it ever reaches the approval check -- but both are evaluated
-    so that the audit record states exactly which condition failed.
+    The hard control. No published agent holds posting authority, so this denies on authority
+    before reaching the approval check -- but every condition is evaluated so the audit record
+    states exactly which one failed.
+
+    The authority ceiling is consulted here. It previously existed in the manifest schema, was
+    asserted to be zero by a test, and was read by no policy at all: declarative rather than
+    enforced.
     """
     if not manifest.authority.may_post_entries:
         return PolicyDecision(
@@ -141,35 +133,84 @@ def may_post_entry(
                 "posting authority; entries reach the ledger only through the approval queue."
             ),
             agent_ref=manifest.ref,
-            resource=f"ledger:{case.case_id}",
+            resource=f"ledger:{facts.case_id}",
+        )
+    if manifest.authority.clears_autonomously(facts.impact):
+        return PolicyDecision(
+            effect=Effect.ALLOW,
+            policy_id="P-003-NO-AUTONOMOUS-POSTING",
+            reason=(
+                f"{facts.impact} is within {manifest.ref}'s autonomous ceiling of "
+                f"{manifest.authority.max_autonomous_impact}."
+            ),
+            agent_ref=manifest.ref,
+            resource=f"ledger:{facts.case_id}",
         )
     if human_approval_ref is None:
         return PolicyDecision(
             effect=Effect.DENY,
             policy_id="P-003-NO-AUTONOMOUS-POSTING",
-            reason="No human approval reference recorded against this case.",
+            reason=(
+                f"No human approval reference recorded, and {facts.impact} exceeds "
+                f"{manifest.ref}'s autonomous ceiling."
+            ),
             agent_ref=manifest.ref,
-            resource=f"ledger:{case.case_id}",
+            resource=f"ledger:{facts.case_id}",
         )
     return PolicyDecision(
         effect=Effect.ALLOW,
         policy_id="P-003-NO-AUTONOMOUS-POSTING",
         reason=f"Human approval {human_approval_ref} recorded.",
         agent_ref=manifest.ref,
-        resource=f"ledger:{case.case_id}",
+        resource=f"ledger:{facts.case_id}",
     )
 
 
-def approval_route(case: ExceptionCase) -> PolicyDecision:
-    """P-004: materiality determines who must sign off. Computed, never inferred."""
-    cls = case.approval_class or ApprovalClass.CIO_ESCALATION
-    bps = case.nav_impact_bps or 0.0
+def band_for(impact: Impact, thresholds: ThresholdSet | None = None) -> ApprovalClass:
+    """Derive who must approve, from a unit-tagged magnitude and the tenant's thresholds.
+
+    The control plane derives the band; the process supplies only the magnitude and its unit.
+    Accepting a process-computed band would be caller-supplied governance — the same defect as a
+    caller-supplied manifest, one level up — and it is what the previous implementation did:
+    P-004 documented itself as "computed, never inferred" while reading a field the domain had
+    already set.
+
+    An unrecognised unit escalates. A process measuring impact in something the control plane
+    has no thresholds for cannot be auto-cleared on the strength of that.
+    """
+    thresholds = thresholds or thresholds_for(impact.unit)
+    if thresholds is None:
+        return ApprovalClass.CIO_ESCALATION
+
+    magnitude = abs(impact.value)
+    if magnitude < thresholds.auto_clear_below:
+        return ApprovalClass.AUTO_CLEAR
+    if magnitude < thresholds.single_reviewer_below:
+        return ApprovalClass.SINGLE_REVIEWER
+    if magnitude < thresholds.four_eyes_below:
+        return ApprovalClass.FOUR_EYES
+    return ApprovalClass.CIO_ESCALATION
+
+
+def approval_route(facts: CaseFacts, thresholds: ThresholdSet | None = None) -> PolicyDecision:
+    """P-004: route a case to its approval class.
+
+    Always an ALLOW: routing is not a permission question, it is a statement of who must sign.
+    The decision is recorded so the audit trail carries the band and the magnitude that produced
+    it.
+    """
+    band = band_for(facts.impact, thresholds)
     return PolicyDecision(
         effect=Effect.ALLOW,
-        policy_id="P-004-MATERIALITY-ROUTING",
-        reason=f"{bps:.4f}bps of NAV routes to {cls.value}",
-        agent_ref="agent-gateway",
-        resource=f"case:{case.case_id}",
+        policy_id="P-004-APPROVAL-ROUTE",
+        reason=f"{facts.impact} routes to {band.value}",
+        resource=facts.case_id,
+        metadata={
+            "band": band.value,
+            "impact_value": str(facts.impact.value),
+            "impact_unit": facts.impact.unit,
+            "capability": facts.capability,
+        },
     )
 
 

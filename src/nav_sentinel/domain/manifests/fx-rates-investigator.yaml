@@ -1,6 +1,6 @@
 # Agent Registry manifest.
 # Published to the registry at deploy time; Triage discovers agents by matching
-# `handles_categories` and honours `data_scopes` when granting tool access.
+# `handles_capabilities` and honours `data_scopes` when granting tool access.
 agent_id: fx-rates-investigator
 version: 1.3.0
 display_name: FX & Rates Investigator
@@ -10,7 +10,7 @@ description: >
   wrong fixing date, inverted crosses and missing TARGET-holiday handling. Verifies against
   European Central Bank euro foreign-exchange reference rates.
 
-handles_categories: [fx_rate]
+handles_capabilities: [nav.fx_rate]
 model: gemini-3.7-flash
 
 # Least privilege. The registry is the single declaration of what this agent may touch;
@@ -32,7 +32,8 @@ data_scopes:
 authority:
   may_propose_remediation: false
   may_post_entries: false
-  max_autonomous_bps: 0.0
+  # No autonomy at any size, in any unit. See Authority.max_autonomous_impact.
+  max_autonomous_impact: null
 
 untrusted_inputs: false        # ECB data is structured and authoritative
 requires_model_armor: false

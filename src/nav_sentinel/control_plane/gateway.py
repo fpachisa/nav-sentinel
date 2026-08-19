@@ -14,11 +14,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from nav_sentinel.control_plane import identity, policies, telemetry
+from nav_sentinel.control_plane import identity, packs, policies, telemetry
+from nav_sentinel.control_plane.governance import CaseFacts
 from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
-from nav_sentinel.domain.models import ExceptionCase
 from nav_sentinel.registry.models import AgentManifest
-from nav_sentinel.tools import catalogue
 
 
 # Every decision, in order, for the life of the process. The exception console renders this
@@ -64,8 +63,8 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
     """
     manifest = identity.current()
     try:
-        spec = catalogue.resolve(tool_name)
-    except catalogue.UnknownTool:
+        spec = packs.resolve(tool_name)
+    except packs.UnknownTool:
         # Recorded, then re-raised. "Agent X attempted tool Y, which does not exist" is a
         # governance event -- an agent enumerating tool names must not be invisible in the
         # log. Still UnknownTool rather than PolicyViolation, so a manifest typo remains
@@ -74,7 +73,7 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
             PolicyDecision(
                 effect=Effect.DENY,
                 policy_id="P-001-TOOL-ALLOWLIST",
-                reason=f"{tool_name!r} does not exist in the tool catalogue",
+                reason=f"{tool_name!r} does not exist in any registered process pack",
                 agent_ref=manifest.ref,
                 resource=tool_name,
             )
@@ -160,15 +159,15 @@ def authorize_drafting(manifest: AgentManifest) -> PolicyDecision:
 
 
 def authorize_posting(
-    manifest: AgentManifest, case: ExceptionCase, human_approval_ref: str | None = None
+    manifest: AgentManifest, facts: CaseFacts, human_approval_ref: str | None = None
 ) -> PolicyDecision:
     """Always evaluated before any write to the ledger. With the fleet as published, this
     denies unconditionally -- which is the intended behaviour, not a limitation."""
-    return _enforce(policies.may_post_entry(manifest, case, human_approval_ref))
+    return _enforce(policies.may_post_entry(manifest, facts, human_approval_ref))
 
 
-def route_for_approval(case: ExceptionCase) -> PolicyDecision:
-    return _record(policies.approval_route(case))
+def route_for_approval(facts: CaseFacts) -> PolicyDecision:
+    return _record(policies.approval_route(facts))
 
 
 def admit_untrusted_content(text: str, *, source_uri: str | None = None) -> str:

@@ -7,11 +7,11 @@ description: >
   to discover which specialist is authorised to investigate it. Materiality and approval
   class are computed deterministically, not inferred.
 
-handles_categories: [unclassified]
+handles_capabilities: [nav.unclassified]
 model: gemini-3.5-flash-lite   # every break passes through here, so cost per call matters
 
 allowed_tools:
-  - registry.discover_for_category
+  - registry.discover_for_capability
   - registry.coverage
   - books_and_records.security
   # memory.recall_recurrence is added in S2, together with the tool itself. A manifest must
@@ -24,7 +24,8 @@ data_scopes:
 authority:
   may_propose_remediation: false
   may_post_entries: false
-  max_autonomous_bps: 0.0
+  # No autonomy at any size, in any unit. See Authority.max_autonomous_impact.
+  max_autonomous_impact: null
 
 untrusted_inputs: false
 requires_model_armor: false

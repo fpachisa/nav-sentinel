@@ -25,7 +25,7 @@ def main() -> None:
         table.add_row(
             m.ref,
             identity.service_account_email(m).split("@")[0],
-            ", ".join(c.value for c in m.handles_categories) or "-",
+            ", ".join(m.handles_capabilities) or "-",
             str(len(m.allowed_tools)),
             "yes" if m.requires_model_armor else "-",
             "yes" if m.authority.may_propose_remediation else "-",
@@ -33,7 +33,7 @@ def main() -> None:
         )
     console.print(table)
 
-    cov = Table(title="Coverage by break category", header_style="bold")
+    cov = Table(title="Coverage by capability", header_style="bold")
     cov.add_column("Category")
     cov.add_column("Authorised investigator")
     for cat, ref in discover.coverage().items():

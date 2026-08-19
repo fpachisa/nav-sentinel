@@ -7,7 +7,7 @@ description: >
   withholding on depositary receipts), share splits, spin-offs and mergers. Reads issuer
   filings from SEC EDGAR.
 
-handles_categories: [corporate_action]
+handles_capabilities: [nav.corporate_action]
 model: gemini-3.7-flash
 
 allowed_tools:
@@ -25,7 +25,8 @@ data_scopes:
 authority:
   may_propose_remediation: false
   may_post_entries: false
-  max_autonomous_bps: 0.0
+  # No autonomy at any size, in any unit. See Authority.max_autonomous_impact.
+  max_autonomous_impact: null
 
 # This agent ingests issuer-authored documents from the public internet. That content is
 # untrusted by definition, so every fetch is screened by Model Armor before it reaches

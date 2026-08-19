@@ -13,12 +13,20 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+# Governance vocabulary belongs to the control plane, not to fund accounting. Imported here so
+# the domain speaks it; defined there so the control plane never imports a domain type.
+from nav_sentinel.control_plane.governance import ApprovalClass, CaseFacts, Impact
+
 # --------------------------------------------------------------------------- enums
 
 
 class BreakCategory(StrEnum):
-    """Root-cause families. Each maps to exactly one specialist investigator in the
-    Agent Registry, which is how Triage performs capability-based routing."""
+    """Root-cause families, in this process's own vocabulary.
+
+    Crossing the seam they become namespaced capability strings (`nav.fx_rate`) via
+    `capability`, so a second process cannot collide on a bare category name. The registry no
+    longer holds this enum — it could never have routed for a second process.
+    """
 
     CORPORATE_ACTION = "corporate_action"
     FX_RATE = "fx_rate"
@@ -56,15 +64,6 @@ class ExceptionStatus(StrEnum):
     REJECTED = "rejected"
     AUTO_CLEARED = "auto_cleared"
     ESCALATED = "escalated"
-
-
-class ApprovalClass(StrEnum):
-    """Determined by materiality. Enforced at the Agent Gateway, not inside the agents."""
-
-    AUTO_CLEAR = "auto_clear"
-    SINGLE_REVIEWER = "single_reviewer"
-    FOUR_EYES = "four_eyes"
-    CIO_ESCALATION = "cio_escalation"
 
 
 # ------------------------------------------------------------------ books & records
@@ -279,3 +278,27 @@ class ExceptionCase(BaseModel):
     @property
     def nav_per_share_breaks(self) -> list[ReconciliationBreak]:
         return [b for b in self.breaks if b.break_type == BreakType.NAV_PER_SHARE]
+
+    @property
+    def capability(self) -> str:
+        """This case's category as a namespaced capability string."""
+        return f"nav.{self.category.value}"
+
+    def to_facts(self) -> CaseFacts:
+        """Hand the control plane exactly what it is permitted to know.
+
+        Deliberately lossy. `fund_id` becomes an opaque `subject_id`, `breaks` becomes a count,
+        and the three domain enums become plain strings. The control plane cannot reach back
+        through any of them, which is what makes it hostable by a second process.
+        """
+        return CaseFacts(
+            case_id=self.case_id,
+            subject_id=self.fund_id,
+            as_of=self.as_of,
+            capability=self.capability,
+            impact=Impact(value=Decimal(str(self.nav_impact_bps or 0)), unit="bps"),
+            status=self.status.value,
+            severity=self.severity.value if self.severity else None,
+            item_count=len(self.breaks),
+            recurrence_key=self.recurrence_key,
+        )

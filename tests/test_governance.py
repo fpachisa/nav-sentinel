@@ -8,12 +8,11 @@ from decimal import Decimal
 
 import pytest
 
-from nav_sentinel.control_plane import gateway, identity, policies
+from nav_sentinel.control_plane import gateway, identity, packs, policies
 from nav_sentinel.control_plane.policies import PolicyViolation
-from nav_sentinel.domain.models import BreakCategory, BreakType, ExceptionCase, ReconciliationBreak
+from nav_sentinel.domain.models import BreakType, ExceptionCase, ReconciliationBreak
 from nav_sentinel.registry import discover
 from nav_sentinel.registry.models import load_manifests
-from nav_sentinel.tools import catalogue
 
 NAV_DATE = date(2026, 8, 17)
 
@@ -49,14 +48,14 @@ class TestRegistry:
             assert len(m.service_account_id) <= 30, f"{m.agent_id} exceeds the 30-char limit"
 
     def test_discovery_selects_highest_version(self):
-        m = discover.discover_for_category(BreakCategory.CORPORATE_ACTION)
+        m = discover.discover_for_capability("nav.corporate_action")
         assert m is not None and m.agent_id == "corporate-actions-investigator"
 
     def test_unclassified_has_no_specialist(self):
         """Triage handles unclassified work; no investigator should claim it."""
         specialists = [
             m for m in load_manifests()
-            if BreakCategory.UNCLASSIFIED in m.handles_categories
+            if "nav.unclassified" in m.handles_capabilities
             and m.agent_id != "triage-agent"
         ]
         assert specialists == []
@@ -70,11 +69,13 @@ class TestNoAgentHoldsPostingAuthority:
         offenders = [m.ref for m in load_manifests() if m.authority.may_post_entries]
         assert offenders == [], f"agents holding posting authority: {offenders}"
 
-    def test_no_published_agent_has_autonomous_bps_headroom(self):
-        offenders = [
-            m.ref for m in load_manifests() if m.authority.max_autonomous_bps > 0.0
-        ]
-        assert offenders == [], f"agents with autonomous adjustment headroom: {offenders}"
+    def test_no_published_agent_has_autonomous_headroom(self):
+        """The ceiling is now enforced by P-003, not merely declared. A null ceiling means no
+        adjustment of any size clears without a human, in any unit."""
+        for m in load_manifests():
+            assert m.authority.max_autonomous_impact is None, (
+                f"{m.ref} declares an autonomous ceiling of {m.authority.max_autonomous_impact}"
+            )
 
     def test_posting_is_denied_even_with_a_human_approval(self, case):
         """Approval alone is insufficient: the agent must also hold the authority, and none do."""
@@ -132,13 +133,13 @@ class TestToolAllowlist:
     def test_unknown_tool_name_is_distinguishable_from_a_denial(self):
         """A typo in a manifest must not read as a permissions problem."""
         fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(catalogue.UnknownTool):
+        with identity.acting_as(fx), pytest.raises(packs.UnknownTool):
             gateway.call_tool("ecb_fx.no_such_function")
 
     def test_every_manifest_tool_resolves_in_the_catalogue(self):
         """A manifest may not declare a capability the catalogue cannot resolve."""
         unresolvable = {
-            m.ref: [t for t in m.allowed_tools if t not in catalogue.CATALOGUE]
+            m.ref: [t for t in m.allowed_tools if t not in packs.catalogue()]
             for m in load_manifests()
         }
         offenders = {k: v for k, v in unresolvable.items() if v}
@@ -182,7 +183,7 @@ class TestDataScopeEnforcement:
         problems = []
         for m in load_manifests():
             for name in m.allowed_tools:
-                spec = catalogue.CATALOGUE.get(name)
+                spec = packs.catalogue().get(name)
                 if spec is None:
                     continue
                 missing = [d for d in spec.reads if d not in m.data_scopes.read]
@@ -271,10 +272,10 @@ class TestUntrustedOutputScreening:
         from nav_sentinel.control_plane import model_armor
 
         ca = discover.get("corporate-actions-investigator")
-        spec = catalogue.ToolSpec(
+        spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: poison, (), untrusted_output=True
         )
-        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
             with pytest.raises(model_armor.ContentBlocked):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -292,11 +293,11 @@ class TestUntrustedOutputScreening:
         payloads = {"dict": {"body": poison}, "list": [poison],
                     "nested": {"hits": [{"description": poison}]}}
         ca = discover.get("corporate-actions-investigator")
-        spec = catalogue.ToolSpec(
+        spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: payloads[shape], (),
             untrusted_output=True,
         )
-        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
             with pytest.raises(model_armor.ContentBlocked):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -306,10 +307,10 @@ class TestUntrustedOutputScreening:
             pass
 
         ca = discover.get("corporate-actions-investigator")
-        spec = catalogue.ToolSpec(
+        spec = packs.ToolSpec(
             "edgar.fetch_filing_text", lambda *a, **k: Opaque(), (), untrusted_output=True
         )
-        with catalogue.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
+        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as(ca):
             with pytest.raises(gateway.ContentUnscreenable):
                 gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
 
@@ -356,14 +357,14 @@ class TestCatalogueIntegrity:
         """A plain dict would let in-process code swap a spec and run arbitrary code under a
         declared tool's label -- the original bypass through another door."""
         with pytest.raises(TypeError):
-            catalogue.CATALOGUE["ecb_fx.rate_on"] = catalogue.ToolSpec("x", lambda: None)
+            packs.catalogue()["ecb_fx.rate_on"] = packs.ToolSpec("x", lambda: None)
 
     def test_a_key_disagreeing_with_its_spec_is_refused(self):
         """Otherwise the audit log could name one tool while another executed."""
-        bad = catalogue.ToolSpec("totally.other.tool", lambda *a, **k: "PWNED")
-        with catalogue.override("ecb_fx.rate_on", bad):
-            with pytest.raises(catalogue.UnknownTool, match="mismatched label"):
-                catalogue.resolve("ecb_fx.rate_on")
+        bad = packs.ToolSpec("totally.other.tool", lambda *a, **k: "PWNED")
+        with packs.override("ecb_fx.rate_on", bad):
+            with pytest.raises(packs.UnknownTool, match="mismatched label"):
+                packs.resolve("ecb_fx.rate_on")
 
     def test_monkeypatching_a_tool_module_cannot_redirect_execution(self, monkeypatch):
         """The structural property that makes resolution trustworthy: the catalogue captured
@@ -381,7 +382,7 @@ class TestCatalogueIntegrity:
         """An agent enumerating tool names must not be invisible in the governance log."""
         gateway.clear_decision_log()
         fx = discover.get("fx-rates-investigator")
-        with identity.acting_as(fx), pytest.raises(catalogue.UnknownTool):
+        with identity.acting_as(fx), pytest.raises(packs.UnknownTool):
             gateway.call_tool("ecb_fx.no_such_function")
         log = gateway.decision_log()
         assert log and log[-1].effect.value == "deny"
@@ -389,6 +390,6 @@ class TestCatalogueIntegrity:
 
     def test_unknown_tool_message_is_not_repr_wrapped(self):
         """UnknownTool subclasses KeyError, whose __str__ applies repr() to its argument."""
-        with pytest.raises(catalogue.UnknownTool) as exc:
-            catalogue.resolve("nope.nope")
+        with pytest.raises(packs.UnknownTool) as exc:
+            packs.resolve("nope.nope")
         assert not str(exc.value).startswith("\"")

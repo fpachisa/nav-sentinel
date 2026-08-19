@@ -486,8 +486,8 @@ banked the mandatory Cloud Run proof on 23 August, and that the 29 August rehear
 | Date | Day | Work | h |
 | :--- | :--- | :--- | :--- |
 | Aug 19 | Wed | S0a stack proof · **README honesty patch + LICENSE** · architecture diagram · S0-R.1 | 6.0 |
-| Aug 20 | Thu | S0-R.2 (incl. approvals slice) · S0-R.3 fixtures | 6.0 |
-| Aug 21 | Fri | **S0-R.9 decouple** (before the fixtures it revocabularises) · S0-R.7 screening + extractor | 8.5 |
+| Aug 20 | Thu | **S0-R.9 decouple** — before anything is authored in a vocabulary it changes | 6.0 |
+| Aug 21 | Fri | S0-R.2 (incl. approvals slice) · S0-R.3 fixtures · S0-R.7 screening + extractor | 8.5 |
 | Aug 22 | Sat | S0-R.4 · .5 · .6 · .8 · **S0-R.10 enforced seam** · S0c — **S0-R gate must close** | 8.5 |
 | Aug 23 | Sun | S7a vertical slice — **mandatory Cloud Run proof banked** · Devpost skeleton, credit, social | 6.3 |
 | Aug 24 | Mon | S1.1 contract · S1 FX investigator | 6.0 |

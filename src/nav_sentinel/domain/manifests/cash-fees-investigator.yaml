@@ -6,7 +6,7 @@ description: >
   Resolves breaks in cash and accrual accounting: management and performance fee accruals,
   expense caps, deposit interest, and unmatched cash movements.
 
-handles_categories: [cash_fees]
+handles_capabilities: [nav.cash_fees]
 model: gemini-3.7-flash
 
 allowed_tools:
@@ -21,7 +21,8 @@ data_scopes:
 authority:
   may_propose_remediation: false
   may_post_entries: false
-  max_autonomous_bps: 0.0
+  # No autonomy at any size, in any unit. See Authority.max_autonomous_impact.
+  max_autonomous_impact: null
 
 untrusted_inputs: false
 requires_model_armor: false

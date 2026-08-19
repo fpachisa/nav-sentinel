@@ -19,9 +19,20 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from nav_sentinel import composition
 from nav_sentinel.control_plane import telemetry
 
 _EXPORTER = InMemorySpanExporter()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _processes() -> None:
+    """Register every process pack once per session.
+
+    Without this the registry raises rather than quietly reporting an empty fleet, which is the
+    behaviour we want in production and which makes the dependency explicit here.
+    """
+    composition.configure()
 
 
 @pytest.fixture(scope="session", autouse=True)

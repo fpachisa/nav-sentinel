@@ -3,7 +3,7 @@
 A manifest is the single authoritative declaration of what an agent is and what it may do.
 Three things read it, which is what keeps it honest rather than decorative:
 
-  * Triage, at runtime, to discover which specialist handles a given break category.
+  * Triage, at runtime, to discover which specialist handles a given capability.
   * The Agent Gateway, on every tool call, to deny anything outside `allowed_tools`.
   * Deployment, to mint one service account per agent with exactly these data scopes.
 """
@@ -15,15 +15,23 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from nav_sentinel.domain.models import BreakCategory
-
-MANIFEST_DIR = Path(__file__).parent / "manifests"
+from nav_sentinel.control_plane import packs
+from nav_sentinel.control_plane.governance import Impact
 
 
 class Authority(BaseModel):
     may_propose_remediation: bool = False
     may_post_entries: bool = False
-    max_autonomous_bps: float = 0.0
+    #: The largest impact this agent may clear without a human, tagged with its unit. Was
+    #: `max_autonomous_bps` — a basis-point field in a process-agnostic registry, meaningless to
+    #: a process whose control total is denominated in shares. Zero means no autonomy at any size.
+    max_autonomous_impact: Impact | None = None
+
+    def clears_autonomously(self, impact: Impact) -> bool:
+        ceiling = self.max_autonomous_impact
+        if ceiling is None or ceiling.unit != impact.unit:
+            return False
+        return abs(impact.value) <= abs(ceiling.value)
 
 
 class DataScopes(BaseModel):
@@ -41,7 +49,9 @@ class AgentManifest(BaseModel):
     display_name: str
     owner: str
     description: str
-    handles_categories: list[BreakCategory] = Field(default_factory=list)
+    #: Namespaced capability strings, e.g. "nav.fx_rate". Was a closed enum of one domain's
+    #: categories, which could never route for a second process.
+    handles_capabilities: list[str] = Field(default_factory=list)
     model: str
     allowed_tools: list[str] = Field(default_factory=list)
     data_scopes: DataScopes = Field(default_factory=DataScopes)
@@ -61,12 +71,39 @@ class AgentManifest(BaseModel):
         return f"nav-{self.agent_id}"[:30].rstrip("-")
 
 
-def load_manifests(directory: Path | None = None) -> list[AgentManifest]:
-    directory = directory or MANIFEST_DIR
-    out: list[AgentManifest] = []
-    for path in sorted(directory.glob("*.yaml")):
-        out.append(AgentManifest(**yaml.safe_load(path.read_text())))
-    return out
+def load_manifests(directories: tuple[Path, ...] | Path | None = None) -> list[AgentManifest]:
+    """Load every published manifest.
+
+    Manifests are sourced from the *registered process packs*, not from a directory inside this
+    package. That matters for a specific reason: while `MANIFEST_DIR` pointed at
+    `registry/manifests/`, adding a process meant adding a file under `registry/` — which would
+    have falsified the claim that a new process changes nothing here.
+    """
+    if directories is None:
+        if not packs.registered():
+            raise RuntimeError(
+                "No process pack is registered, so there are no manifests to load. Call "
+                "nav_sentinel.composition.configure() at your entry point. Returning an empty "
+                "registry here would look indistinguishable from a fleet with no agents."
+            )
+        dirs = packs.manifest_dirs()
+    elif isinstance(directories, Path):
+        dirs = (directories,)
+    else:
+        dirs = directories
+
+    manifests: list[AgentManifest] = []
+    seen: dict[str, Path] = {}
+    for directory in dirs:
+        for path in sorted(directory.glob("*.yaml")):
+            manifest = AgentManifest.model_validate(yaml.safe_load(path.read_text()))
+            if manifest.ref in seen:
+                raise ValueError(
+                    f"{manifest.ref} is published twice: {seen[manifest.ref]} and {path}"
+                )
+            seen[manifest.ref] = path
+            manifests.append(manifest)
+    return manifests
 
 
 def load_manifest(agent_id: str, directory: Path | None = None) -> AgentManifest:

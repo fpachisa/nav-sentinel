@@ -7,7 +7,7 @@ description: >
   chain attached. Entries are balanced and their expected residual stated, so the proposal
   can be checked arithmetically before any human reviews it.
 
-handles_categories: []
+handles_capabilities: []
 model: gemini-3.7-flash
 
 allowed_tools:
@@ -20,11 +20,12 @@ data_scopes:
   write: [remediation_proposals]
 
 # The only agent permitted to draft an entry -- and still not permitted to post one.
-# max_autonomous_bps of zero means no adjustment of any size clears without a human.
+# A null ceiling means no adjustment of any size clears without a human, in any unit.
 authority:
   may_propose_remediation: true
   may_post_entries: false
-  max_autonomous_bps: 0.0
+  # No autonomy at any size, in any unit. See Authority.max_autonomous_impact.
+  max_autonomous_impact: null
 
 untrusted_inputs: false
 requires_model_armor: false
