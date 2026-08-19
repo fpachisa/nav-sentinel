@@ -561,4 +561,4 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | S0-R.3–.6 fixtures + closure | covered by plan reviews | done | pending | — |
 | S0-R.10 enforced seam | covered by plan reviews | done | pending | — |
 | S0-R.8 promoted minors | covered by plan reviews | done | pending | — |
-| S0-R.7 windowed screening + extractor | pending | — | — | — |
+| S0-R.7 windowed screening + extractor | covered by plan reviews | done | pending | — |

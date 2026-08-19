@@ -169,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 129 invariant tests, including "no agent may post"
+make test        # 144 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -229,7 +229,7 @@ such rather than as complete.
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
 | Agent Gateway policy enforcement | works, within a stated boundary | All six policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
-| Model Armor screening | **under remediation** | Verified bypass, above. Tests cover the gateway's wiring (`test_governance.py::TestUntrustedOutputScreening`) but **every one of them monkeypatches `model_armor.screen`** — no test exercises the live service or its real detection behaviour |
+| Model Armor screening | works, and is **not** the boundary | Windowed, gated on all three response fields, fails closed four distinguishable ways. Detection is content-sensitive: the same injection is caught alone and missed 0/8 beside one particular filing paragraph, so screening reduces what gets through rather than stopping it. Coverage is of two kinds — the gateway-wiring tests **stub** `model_armor.screen`, and two `live` tests exercise the real service. The boundary is the quarantined extractor, `tests/test_quarantine.py` |
 | Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
 | Memory Bank recurrence recall | not started | — |

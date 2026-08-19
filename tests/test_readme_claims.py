@@ -68,10 +68,29 @@ class TestClaimedCoverage:
         assert not (touching and says_none), (
             f"README says no test touches Model Armor, but {touching} do"
         )
-        if touching:
-            assert "monkeypatch" in README, (
-                "tests touch Model Armor but the README does not disclose that they stub the "
-                "service rather than exercising it"
+        if not touching:
+            return
+
+        # Two kinds of coverage now exist and the README must distinguish them, because "tested"
+        # means something different for each: a stubbed test proves the gateway's wiring, a live
+        # one proves the service's behaviour.
+        stubs = any(
+            "monkeypatch" in (ROOT / "tests" / name).read_text()
+            and "model_armor" in (ROOT / "tests" / name).read_text()
+            for name in touching
+        )
+        live = any(
+            "mark.live" in (ROOT / "tests" / name).read_text()
+            and "model_armor" in (ROOT / "tests" / name).read_text()
+            for name in touching
+        )
+        if stubs:
+            assert "stub" in README.lower() or "monkeypatch" in README, (
+                "some Model Armor tests stub the service and the README does not say so"
+            )
+        if live:
+            assert "live" in README.lower(), (
+                "live Model Armor tests exist and the README does not mention them"
             )
 
     def test_every_known_defect_is_still_open(self):

@@ -172,12 +172,17 @@ def search_filings(
     return out
 
 
-def fetch_filing_text(source_uri: str, max_bytes: int = 200_000) -> str:
+def fetch_filing_text(source_uri: str, max_bytes: int = 32_000) -> str:
     """Retrieve raw filing text.
 
-    The return value is UNTRUSTED. Callers must pass it through
-    `gateway.admit_untrusted_content` before placing it in a model context; the gateway
-    is the only path that screens it.
+    The return value is UNTRUSTED. The gateway screens it automatically because this tool is
+    declared `untrusted_output`; callers never have the option of skipping that.
+
+    The cap was 200,000 bytes, which is the wrong default now that screening is windowed: every
+    byte fetched is a byte screened, and 200KB is roughly 390 sanitize calls. 32KB is a realistic
+    single exhibit or corporate-action notice and screens in a few dozen. A caller needing more
+    should fetch the specific exhibit rather than the whole submission -- Model Armor refuses
+    anything over `MAX_WINDOWS` rather than quietly spending the calls.
     """
     body = _get(source_uri).text
     return body[:max_bytes]
