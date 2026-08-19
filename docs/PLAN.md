@@ -2,7 +2,7 @@
 
 **Deadline:** 31 Aug 2026, 17:00 PDT · **Plan date:** 18 Aug 2026 · **Remaining:** 12 days, both weekends worked
 **Track:** C — Fortified Enterprise Fleet · **Entrant:** individual
-**Supersedes:** v3.1 (approved, changes applied), v2 (REJECTED), v1 (APPROVE WITH CHANGES)
+**Supersedes:** v3.2 (APPROVE WITH CHANGES — 3 blockers), v3.1, v2 (REJECTED), v1
 
 ---
 
@@ -143,34 +143,42 @@ Dropping to three investigators retires the pricing and cash-fees categories. Th
 | | Hours |
 | :--- | :--- |
 | Build — §5 | 63.1 |
-| Build — §5b platform sections (S0-R.9, S9, S10, figure 5) | 11.0 |
+| Build — §5b platform sections (S0-R.9 4.5, S0-R.10 1.0, S9 7.0, S10 2.0, figure 5 1.5) | 16.0 |
 | Rework reserve — 9 code gates × 2.5h | 22.5 |
-| **Commitment** | **96.6** |
-| Already complete ahead of the calendar — S0a, S0-R.1, README patch, LICENSE, figures 1–4 | −5.3 |
-| **Remaining** | **91.3** |
-| Capacity — 12 days, both weekends, ~8h/day | 96.0 |
-| **Margin** | **4.7h (4.9%)** |
+| **Commitment** | **101.6** |
+| Already complete ahead of the calendar — S0a 1.5, S0-R.1 2.0, README patch 0.25, architecture figures 1.5 | −5.3 |
+| **Remaining** | **96.3** |
+| Capacity — 12 days, both weekends, 8.5h/day | 102.0 |
+| **Margin** | **5.7h (5.6%)** |
 
-§5b adds 11h of build and 5h of rework, against an explicit decision that build time is not the
-binding constraint here. The margin survives only because day one's allocation was completed
-ahead of the calendar; it is not slack won back by estimating better.
+§5b now costs 16h of build. It is retained on an explicit instruction that timeline is not the
+binding constraint on this project, and because the extensibility story is a headline selling point
+that must be **visible in the video** rather than merely true in the test suite.
 
-Of the 22.5h reserve, **9.2h is scheduled in-line** in §7 and **13.3h is deliberately unallocated**
+The rate is stated once and held: **8.5h/day for twelve consecutive days including both weekends.**
+v3.2 contradicted itself here, quoting 8h/day in the table and "~7h/day of productive build" twelve
+lines below; at 7h/day this plan is 7h under water and the contradiction hid that. 8.5h/day is a
+demanding rate and it is the rate this scope requires — if it does not hold, the §3 response
+releases in order.
+
+Of the 22.5h reserve, **10.2h is scheduled in-line** in §7 and **12.3h is deliberately unallocated**
 — rework lands on whichever gate produces findings, and pretending to know which day would be false
 precision.
 
 **2.5h per gate is a budget fitted to capacity, not an estimate derived from history — and the
-distinction matters.** The four gates so far produced 12 blockers and 41 majors at roughly 10h of
-re-planning each. At that rate **two gates exhaust the entire 17.5h reserve and the 3.7h margin with it.**
+distinction matters.** The five gates so far produced 15 blockers and 55 majors at roughly 10h of
+re-planning each. At that rate **two gates exhaust the entire 22.5h reserve and the 5.7h margin with it.**
 The reserve is a bet that remediating narrower, already-planned sections costs a quarter of what
 re-planning the whole project cost. That bet may lose, which is what §3's ordered response is for.
 
-The seven code gates are: S0-R · S7a · S1 · S2a · S3 · S4+S5 · S7.
+The nine code gates are: S0-R · S0-R.9+.10 · S7a · S1 · S2a · S3 · S4 · S5 · S7+S9.
 
 **The margin is thin and it is stated rather than hidden.** One further discovery of S0-R's magnitude
 breaks this plan. The pre-decided response, in order — **cheapest and least-scoring first, the 40% axis
 last**: (1) CI dropped (0.5h); (2) S10 per-tenant policy documented rather than built (2.0h); (3) S9
-transfer agency reduced to one scenario (2.0h); (4) the second adversarial case dropped (0.5h);
+transfer agency reduced to one scenario (2.0h) — never to zero, because it is the on-camera evidence
+for §5b, and **S0-R.10 is not on this ladder at any rung** since it is the only evidence that
+survives every cut; (4) the second adversarial case dropped (0.5h);
 (5) S2 memory degraded to a stub interface (1.0h); (6) S8b's rehearsal compressed (1.0h); (7) only
 then S4 reduces to materiality routing with no drafting — which forfeits the 40% closure proof and is therefore the last resort, not
 the first. v3.0 had this ordering inverted, sacrificing the heaviest-weighted axis before touching 2h of
@@ -178,14 +186,19 @@ should-have work.
 
 **Trigger, observable:** at 18:00 each day, if cumulative build-hours variance exceeds 4h, or the day's scheduled items are not code-review-closed, the next response above is taken that evening.
 
-**Working assumption, stated because it is load-bearing:** 12 consecutive days, no rest day, both
-weekends, ~7h/day of *productive* build — which for solo work means roughly 9–10 elapsed hours daily.
+**Working assumption, stated once and held:** 12 consecutive days, no rest day, both weekends,
+**8.5h/day of productive build** — which for solo work means roughly 10–11 elapsed hours daily.
 **This is feasible full-time and impossible alongside employment.** If the days are evenings and
 weekends rather than dedicated, the plan does not hold and scope must halve, not shrink.
 
-There is also **no slack day.** v3.0 claimed the final two days carried no build work; that was false.
-The 3.7h margin is the slack. What de-risks a late S7 is that **S7a banks the mandatory Cloud Run proof
-on 23 August**, eight days before the deadline.
+v3.2 quoted 8h/day in the table and 7h/day in this paragraph. At 7h/day this scope is 7h under
+water, and the contradiction concealed that. One figure now, and it is the demanding one the scope
+requires.
+
+There is also **no slack day.** v3.0 claimed the final two days carried no build work; that was
+false, and v3.2 repeated the claim in §7 while its own table contradicted it. The 5.7h margin is the
+slack. What de-risks a late S7 is that **S7a banks the mandatory Cloud Run proof on 23 August**,
+eight days before the deadline.
 
 ---
 
@@ -252,60 +265,100 @@ which contradicts S8a's offline criterion. Also delete the Gemini 3.5 aside — 
 
 ---
 
-## 5b. The platform claim, and what makes it checkable
+## 5b. The platform claim, and what makes it credible on camera
 
 Track C asks for a *fleet*, not a workflow. NAV reconciliation is one process; the control plane
 should host any reconciliation-shaped process, for any client. That is a strong selling point and
-it is currently **false**. One grep disproves it:
+it is currently **false**. Verified by AST sweep — six one-hop violations, not the five v3.2 named:
 
 ```
-control_plane/gateway.py   -> domain.models.ExceptionCase
-control_plane/policies.py  -> domain.models.ApprovalClass, ExceptionCase
-control_plane/audit.py     -> domain.models.ExceptionCase
-registry/models.py         -> domain.models.BreakCategory
-registry/discover.py       -> domain.models.BreakCategory
+control_plane/audit.py      -> domain.models.ExceptionCase
+control_plane/gateway.py    -> domain.models.ExceptionCase
+control_plane/gateway.py    -> tools.catalogue          (missed by v3.2)
+control_plane/policies.py   -> domain.models.{ApprovalClass, ExceptionCase}
+registry/discover.py        -> domain.models.BreakCategory
+registry/models.py          -> domain.models.BreakCategory
 ```
 
-The control plane knows what a NAV break is, and the registry holds a closed enum of one domain's
-categories, so it could never route for a second process. A fourth coupling shows in no import at
-all: `materiality.py` scores everything in **basis points of NAV**, which is meaningless for a
-process whose control total is denominated in shares.
+Three deeper couplings that no import list reveals:
 
-Asserting extensibility in prose is worthless — every entrant will claim it. Two things make it
-evidence instead.
+1. **`control_plane` reads eleven members of `ExceptionCase`**, not the four v3.2 assumed —
+   `approval_class, as_of, breaks, case_id, category, fund_id, nav_impact_bps, recurrence_key,
+   severity, status, trace_id`. All of them in `audit.py` and `policies.py`; `gateway.py` reads
+   **none** and only annotates. Four are irreducibly fund-accounting.
+2. **Three domain enums are consumed with no import at all** — `case.status.value`,
+   `case.severity.value`, `case.category.value` in `audit.py`. Any import-based check goes green
+   while the coupling stands.
+3. **`Authority.max_autonomous_bps` is a basis-point field in the registry manifest schema**,
+   present in all seven published manifests. A bps ceiling is meaningless for a shares-denominated
+   process, and v3.2's "fourth coupling" paragraph missed it entirely.
 
-**An AST test.** `control_plane/` and `registry/` must contain no import from any process package.
-Same technique as the tool-import scan in S1. It turns "domain-agnostic" from a sentence into a
-property the build enforces, and it fails the moment anyone re-couples them.
+### How the claim gets evidenced
 
-**A second process, thin.** The demonstration is not that transfer agency works; it is that adding
-it required **zero changes** to the gateway, the policies, the registry or the telemetry. That is
-verifiable from the diff, which is the only form of this claim a judge should believe.
+The audience decides the form. **Judges watch a four-minute video; they do not clone the
+repository.** A test suite is the right evidence for a reviewer and invisible to a judge, so the
+claim is carried on screen and backed in the suite — not the other way round.
 
-### S0-R.9 — Decouple the control plane · 3h · M
+**On camera (primary).** A second process, real enough to run: its own fixtures, its own
+investigator on Gemini, cited evidence, and its closure proof in a different unit. Then the
+artefact that makes the architectural claim unfalsifiable in five seconds —
+`git diff --stat` for the commit that added it, showing **zero lines changed** in
+`control_plane/`, `registry/` and the telemetry layer.
+
+**In the suite (backing).** An AST test with actual teeth, and a conformance test that drives the
+control plane over a process that does not exist in the codebase. These survive the descope ladder;
+the demo does not, which is why both exist.
+
+### S0-R.9 — Decouple the control plane · 4.5h · M
+
+Re-budgeted from 3h: v3.2 omitted the catalogue work, which is a registration inversion of an
+immutable module-level singleton plus its test seam and every caller.
 
 | Concept | Why it leaks | Resolution |
 | :--- | :--- | :--- |
-| `ApprovalClass` | Four-eyes and escalation are governance vocabulary, not fund accounting | Moves **into** `control_plane`; processes import it |
-| `ExceptionCase` | The gateway reads only an id, a trace id, an approval class and a display impact | Replaced by a `GovernedCase` **Protocol** — the control plane states its requirements, processes satisfy them |
-| `BreakCategory` | A closed enum of one domain's categories cannot route a second | `handles_capabilities: list[str]`, namespaced per process (`nav.fx_rate`, `ta.subscription_in_transit`) |
-| bps-of-NAV materiality | Units differ per process | The control plane enforces on the **approval band**; each process computes its band from its own units and the tenant's thresholds. The raw figure rides along for the audit record only. |
+| `ApprovalClass` | Governance vocabulary, not fund accounting | Moves to **`control_plane/governance.py`**, which imports nothing from the package. The registry capability-string change lands **first**, removing `registry → domain`, so no cycle can form. |
+| `ExceptionCase` | 11 members read, 4 of them fund-specific | **Not** protocol-ised — a Protocol satisfied by `ExceptionCase` still admits one. The process hands over a flat `CaseFacts` value: `case_id, subject_id, as_of, item_count, recurrence_key, status: str, capability: str, band: ApprovalClass, impact: (Decimal, unit: str)`. Every member is a primitive or a control-plane type; `trace_id` is returned, not written back. `audit.py` stamps a mapping it was handed. |
+| `BreakCategory` | A closed enum cannot route a second process | `handles_capabilities: list[str]`, namespaced (`nav.fx_rate`, `ta.subscription_in_transit`). `coverage()` takes its namespace from registered packs; `registry/cli.py` stops calling `.value`. |
+| `max_autonomous_bps` | A bps ceiling in a process-agnostic registry | `max_autonomous_impact: {value, unit}`; the existing zero-headroom test asserts on the value. |
+| bps materiality | Units differ per process | **The control plane owns the threshold table and derives the band itself**: `policies.band_for(impact: Decimal, unit: str, policy: ThresholdSet) -> ApprovalClass`. The process supplies a unit-tagged magnitude and nothing else. Pulled out of S10 so it cannot be lost with it — v3.2 made S0-R.9 depend on a section sitting at descope rung 2. |
+| `gateway -> tools.catalogue` | The catalogue is a hardcoded 17-entry singleton | The **port** moves to `control_plane` — `register(pack)` returning an immutable view. Specs stay in the packs. |
 
-A `ProcessPack` becomes the unit of extension — a key, a capability namespace, its tools, its
-manifests, and an impact scorer. The tool catalogue and the registry are assembled from the
-registered packs rather than from one hardcoded tuple.
+**Acceptance:** `ApprovalClass` is defined in `control_plane/governance.py`; every module imports
+cleanly in isolation in both orders; no capability string is unnamespaced; `control_plane` contains
+no reference to `case.fund_id`, `case.breaks`, `case.category`, `case.severity`, `case.status` or
+`case.nav_impact_bps`.
 
-**Acceptance:** the AST test passes; `ApprovalClass` is defined in `control_plane`; every capability
-string is namespaced; no policy function accepts a fund-accounting type.
+### S0-R.10 — Make the seam enforced, not asserted · 1h · M
 
-### S9 — Transfer agency process pack · 5h · S
+- **Transitive** import closure, not one hop: `control_plane` and `registry` must not *reach* any
+  process package. One-hop misses `gateway → tools → domain` and `identity → registry → domain`.
+- **Forbidden-attribute scan** over `control_plane/` for the six domain-shaped members above. This
+  is what catches the enum reads that carry no import, and what keeps S0-R.9 fixed.
+- **Synthetic-process conformance test**: drive `case_trace`, `route_for_approval` and
+  `may_post_entry` over a non-NAV case defined in the test file. Proves the seam without a second
+  product, and survives every ladder rung.
+
+### S9 — Transfer agency process pack · 7h · S
+
+Re-budgeted from 5h against the plan's own rates: models 0.5 · detection 1.0 · fixtures with contra
+legs 2.0 · investigator 1.5 · manifests and routing 0.6 · golden and closure 1.0 · `make eval`
+side-by-side 0.4.
 
 Shares in issue per the registrar against per fund accounting. Capabilities
-`ta.subscription_in_transit`, `ta.redemption_unprocessed`, `ta.switch_not_booked`. One investigator,
-two seeded scenarios, contra legs from the start — B2 is the lesson.
+`ta.subscription_in_transit`, `ta.redemption_unprocessed`, `ta.switch_not_booked`.
 
-The control total is denominated in **shares**, which is the point: it proves the impact scorer is
-not covertly tied to basis points, and it exercises the closure test in a second unit.
+**It gets an untrusted external evidence source**, which v3.2 did not give it: a registrar
+statement, ingested through the same windowed Model Armor screening and the same quarantined
+extractor as an EDGAR filing. Without this the TA investigator could cite only internal records —
+exactly the verdict shape S1's acceptance criterion fails, and it would read on camera as the weak
+agent. With it, the demo shows the quarantine boundary generalising to a second document type,
+which is the strongest architectural asset the project has. Served from a committed cassette and
+labelled a fixture, on the same honesty rule as the EDGAR evidence in S0-R.4.
+
+The control total is denominated in **shares** — the point being that it proves the band derivation
+is unit-driven rather than covertly tied to basis points, and exercises closure in a second unit.
+Shares corrections route through `QuantityRestatement`, which **S4 already requires** for the MSFT
+split, so the quantity path is not new work created by S9.
 
 ```
 control total     +12,500 shares
@@ -314,26 +367,36 @@ less corrections  −12,500 shares
 residual                       0
 ```
 
-**Acceptance:** the pack adds no line to `control_plane/`, `registry/` or `telemetry`; the same
-governance log and the same closure assertion run over it; `make eval` reports both processes side
-by side.
+**Acceptance — written as demo artefacts, because that is the evidence channel:**
+
+1. `git diff --stat` for the S9 commit shows **zero lines** in `control_plane/`, `registry/` and
+   `telemetry`. Recorded in the README and shown on screen.
+2. `make registry` lists both packs with namespaced capabilities.
+3. One TA case clears end to end with cited evidence from the registrar statement, and its trace
+   opens in the same Cloud Trace view as a NAV case.
+4. `make eval` reports both processes side by side.
 
 ### S10 — Per-tenant policy · 2h · S
 
-Materiality thresholds live in global `Settings` today, which implies every client shares one risk
-appetite. A `tenants/{tenant_id}` record carries thresholds per process, the approved agent set and
-capability scope; policies resolve from it rather than from config, and Firestore collections are
-tenant-prefixed.
+A `tenants/{tenant_id}` record carries thresholds per process, the approved agent set and capability
+scope; `policies.band_for` resolves from it. Firestore collections are tenant-prefixed.
 
-This also retires a live honesty defect: `bootstrap.sh` grants project-level `roles/datastore.user`,
-so the README's least-privilege claim is currently overstated.
+**Correction to v3.2:** it claimed this retires the overstated least-privilege defect. It does not.
+`bootstrap.sh` calls `gcloud projects add-iam-policy-binding … --condition None`, which is a
+*project-level* grant; a collection prefix narrows it by nothing. The defect stays open and the
+README's status row stays until S7 addresses IAM. v3.2 asserting otherwise is the same class of
+misstatement that rejected v2.
 
 **Acceptance:** two tenants with different thresholds route the same case to different approval
-classes, asserted by test; no policy reads a threshold from `Settings`.
+classes, asserted by test; `control_plane` resolves the band from the tenant record itself; a case
+whose declared band sits below the tenant floor is rejected.
 
-### Figure 5 — the seam · 1h · M
+### Figure 5 — the seam · 1.5h · M
 
-One control plane, two process packs, and the line between them. Added to `docs/architecture.html`.
+One control plane, two process packs, and the line between them. Also states plainly what the
+telemetry namespace is: every span attribute is `nav.*` because that is the *product's* name, not
+the process's. A judge invited to check the seam will otherwise open a transfer-agency trace and
+read `nav.case.impact_bps`.
 
 ---
 
@@ -357,22 +420,25 @@ One control plane, two process packs, and the line between them. Added to `docs/
 
 ## 7. Calendar
 
-Ten build days at ~7.3h, then two packaging days at ~4h. Build finishes **28 Aug**; the last two days carry no build work, so a failed take has room for a retake.
+Twelve build days at 8.5h. **Every day carries build work, including the last two** — v3.0 and v3.2
+both claimed otherwise while their own tables disagreed. What protects the recording is that S7a
+banked the mandatory Cloud Run proof on 23 August, and that the 29 August rehearsal precedes the
+30 August take.
 
 | Date | Day | Work | h |
 | :--- | :--- | :--- | :--- |
 | Aug 19 | Wed | S0a stack proof · **README honesty patch + LICENSE** · architecture diagram · S0-R.1 | 6.0 |
 | Aug 20 | Thu | S0-R.2 (incl. approvals slice) · S0-R.3 fixtures | 6.0 |
-| Aug 21 | Fri | S0-R.7 windowed screening + extractor · **S0-R.9 decouple** | 7.5 |
-| Aug 22 | Sat | S0-R.4 · .5 · .6 · .8 · S0c — **S0-R gate must close** | 8.0 |
+| Aug 21 | Fri | **S0-R.9 decouple** (before the fixtures it revocabularises) · S0-R.7 screening + extractor | 8.5 |
+| Aug 22 | Sat | S0-R.4 · .5 · .6 · .8 · **S0-R.10 enforced seam** · S0c — **S0-R gate must close** | 8.5 |
 | Aug 23 | Sun | S7a vertical slice — **mandatory Cloud Run proof banked** · Devpost skeleton, credit, social | 6.3 |
 | Aug 24 | Mon | S1.1 contract · S1 FX investigator | 6.0 |
 | Aug 25 | Tue | S1 corporate actions · S1.5 triage · S2a Firestore | 6.0 |
-| Aug 26 | Wed | S3 orchestration | 7.0 |
-| Aug 27 | Thu | S4 remediation · S2 memory shim · **S10 per-tenant policy** | 8.0 |
-| Aug 28 | Fri | **S9 transfer agency pack** · figure 5 · security pass | 7.5 |
-| Aug 29 | Sat | S5 evaluation + baseline · S7 deployment — **code freeze** | 8.0 |
-| Aug 30 | Sun | S8a reproducibility + Devpost · S8b rehearse and record · **submit** | 7.0 |
+| Aug 26 | Wed | S3 orchestration · CI | 8.0 |
+| Aug 27 | Thu | S4 remediation · S2 memory shim · **S10 per-tenant policy** | 8.5 |
+| Aug 28 | Fri | **S9 transfer agency pack** · security pass | 8.5 |
+| Aug 29 | Sat | S7 deployment · figure 5 — **code freeze 18:00** · demo rehearsal | 8.5 |
+| Aug 30 | Sun | S5 eval + baseline · S8a Devpost · S8b record · **submit** | 8.5 |
 
 Scheduled: **83.3h** across the twelve days. Build in §5 and §5b totals 74.1h, so 9.2h of in-line rework sits in the calendar and **13.3h of the 22.5h reserve stays unallocated** — rework lands on whichever gate produces findings. Gross commitment is 96.6h; the 19–20 August rows are already complete as of 18 August, so 91.3h remains against 96.0h of capacity.
 
@@ -388,13 +454,13 @@ No day exceeds 8h. v2 scheduled 15h on Aug 27 while criticising v1 for schedulin
 | Risk | Sev | Mitigation |
 | :--- | :--- | :--- |
 | Mandatory stack never executed; model IDs unverified | **High** | S0a on day 1, asserted by test |
-| S0-R overruns and eats S1 | **High** | Gate must close 21 Aug; §3 response taken that evening if not |
+| S0-R overruns and eats S1 | **High** | Gate must close 22 Aug per §7; §3 response taken that evening if not |
 | Governance claims falsifiable in ten minutes | **High** | S0-R.1/.2 plus four exploit tests |
 | Model Armor cannot stop contextual injection | **High** | Accepted as a property of the service; mitigated structurally by quarantined extraction, not by configuration |
 | 40% axis unevidenced | **High** | `Σ fleet corrections == −control_total` + heuristic baseline; S4 promoted to mandatory |
-| 4.4% margin | **High** | Response pre-decided in §3, observable trigger, checked daily at 18:00 |
+| 5.6% margin at a demanding 8.5h/day rate | **High** | Response pre-decided in §3, observable trigger, checked daily at 18:00 |
 | Eval N too small to quote | **Accepted** | The volume run is **cut**, so there is no denominator fix. Accuracy is reported on N=6 (+2 adversarial) and stated as **indicative only** — one miss is 16.7%. The defensible claims are leg-level structure and evidence citation, which a heuristic cannot produce at any N. |
-| Live demo fails on the take | Med | 29 Aug rehearsal, pre-captured fallback, 30 Aug has no build work |
+| Live demo fails on the take | Med | 29 Aug rehearsal, pre-captured Console navigation, S7a's proof already banked |
 | The platform claim is disprovable by grep today | **High** | S0-R.9 plus the AST test; S9 proves it by diff, not assertion |
 | S9 and S10 crowd the final days | Med | Both off the critical path, at ladder rungs 2 and 3 |
 | Solo, no redundancy, no rest day | Accepted | Stated in §3 rather than implied |
@@ -424,5 +490,6 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | Plan v3.1 | changes applied | — | — | superseded |
 | S0a | covered by v3 review | done | **APPROVE WITH CHANGES** — applied | **yes** |
 | S0-R.1 | covered by v3 review | done | **APPROVE WITH CHANGES** — applied | **yes** |
-| Plan v3.2 | **in progress** | — | — | — |
+| Plan v3.2 | **APPROVE WITH CHANGES** — 3 blockers | — | — | superseded |
+| Plan v3.3 | **in progress** | — | — | — |
 | S0-R | pending | — | — | — |
