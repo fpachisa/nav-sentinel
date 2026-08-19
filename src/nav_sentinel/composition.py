@@ -10,7 +10,7 @@ test session fixture.
 
 from __future__ import annotations
 
-from nav_sentinel.control_plane import packs
+from nav_sentinel.control_plane import approvals, packs
 from nav_sentinel.registry import discover
 
 # Manifests are sourced from the packs, so any registration change must drop the discovery
@@ -19,7 +19,7 @@ from nav_sentinel.registry import discover
 packs.on_change(discover.invalidate)
 
 
-def configure() -> tuple[packs.ProcessPack, ...]:
+def configure(*, approvals_backend: str = "memory") -> tuple[packs.ProcessPack, ...]:
     """Register every process this deployment hosts.
 
     Adding a process is one import and one line here. Nothing in `control_plane/` or `registry/`
@@ -42,7 +42,44 @@ def configure() -> tuple[packs.ProcessPack, ...]:
         ),
     )
     packs.register(NAV_PACK)
+    _configure_approvals(approvals_backend)
     return packs.registered()
+
+
+def _configure_approvals(backend: str) -> None:
+    """Install the store the enforcement side reads approvals from.
+
+    `memory` is the default because the offline suite must be hermetic — but it is now an explicit
+    choice rather than a silent one. Leaving an in-process dict as the shipped default meant a
+    deployment would have given every Cloud Run instance its own empty store: an approval granted
+    on one instance invisible to the next, and every approval lost on cold start.
+
+    `firestore` fails closed. A store that cannot be reached must stop the fleet, not degrade to
+    one the controlled party can write.
+    """
+    if backend == "memory":
+        approvals.use_store(approvals.InMemoryApprovalStore())
+        return
+    if backend != "firestore":
+        raise ValueError(f"unknown approvals backend {backend!r}; expected 'memory' or 'firestore'")
+
+    try:
+        approvals.use_store(approvals.FirestoreApprovalStore())
+    except Exception as exc:
+        raise RuntimeError(
+            "the Firestore approvals store is unavailable. Refusing to fall back to an "
+            "in-process store: nothing may post to the ledger on the strength of an approval "
+            "record the agent runtime could have written itself."
+        ) from exc
+
+
+def approval_authority() -> approvals.ApprovalAuthority:
+    """The minting side, for the approval console.
+
+    Deliberately a separate call. The agent runtime never invokes it, so the process that acts on
+    approvals holds no object capable of creating one.
+    """
+    return approvals.ApprovalAuthority(approvals.reader())
 
 
 def reset() -> None:

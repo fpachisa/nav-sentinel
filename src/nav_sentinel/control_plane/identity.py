@@ -20,7 +20,15 @@ from contextvars import ContextVar
 from nav_sentinel.config import settings
 from nav_sentinel.registry.models import AgentManifest
 
-_current: ContextVar[AgentManifest | None] = ContextVar("current_agent", default=None)
+#: A binding is the manifest plus a token only `acting_as` holds. `current()` checks the token,
+#: so writing the ContextVar directly -- `identity._current.set(forged)` -- yields an unbound
+#: identity rather than a forged one. This does not defend against arbitrary code execution inside
+#: the runtime, which could read the token; it closes the route that needs nothing but a name.
+_BINDING_TOKEN = object()
+
+_current: ContextVar[tuple[AgentManifest, object] | None] = ContextVar(
+    "current_agent", default=None
+)
 
 
 class IdentityError(RuntimeError):
@@ -44,29 +52,25 @@ def acting_as(agent_ref: str) -> Iterator[AgentManifest]:
     # Refuse a manifest object explicitly. Passing one raises AttributeError on the split below,
     # which is a refusal by accident: the caller gets an obscure error instead of being told that
     # supplying a manifest is the thing that is not allowed.
-    if not isinstance(agent_ref, str):
+    # `type(...) is str`, not isinstance: a str subclass overriding split() could bind a
+    # different published agent than the reference names, which is an attribution hazard
+    # the moment a reference arrives from outside the process.
+    if type(agent_ref) is not str:
         raise IdentityError(
             f"acting_as takes an agent reference, not a {type(agent_ref).__name__}. Identities "
             f"resolve from the published registry; a manifest supplied by the caller is exactly "
             f"what this signature exists to prevent."
         )
 
-    agent_id = agent_ref.split("@", 1)[0]
     try:
-        manifest = discover.get(agent_id)
+        manifest = discover.get_ref(agent_ref)
     except KeyError as exc:
         raise IdentityError(
-            f"{agent_ref!r} is not published in the registry. An identity must resolve to a "
-            f"published manifest; it cannot be constructed at call time."
+            f"{exc.args[0]} An identity must resolve to a published manifest; it cannot be "
+            f"constructed at call time."
         ) from exc
 
-    if "@" in agent_ref and manifest.ref != agent_ref:
-        raise IdentityError(
-            f"{agent_ref!r} is pinned to a version the registry does not publish "
-            f"(current: {manifest.ref}). Refusing to silently bind a different version."
-        )
-
-    token = _current.set(manifest)
+    token = _current.set((manifest, _BINDING_TOKEN))
     try:
         yield manifest
     finally:
@@ -74,17 +78,31 @@ def acting_as(agent_ref: str) -> Iterator[AgentManifest]:
 
 
 def current() -> AgentManifest:
-    m = _current.get()
-    if m is None:
+    binding = _current.get()
+    if binding is not None:
+        # Shape-checked before unpacking: writing a bare manifest into the ContextVar otherwise
+        # raised "too many values to unpack", which is a refusal by accident rather than a
+        # statement of what went wrong.
+        if (
+            isinstance(binding, tuple)
+            and len(binding) == 2
+            and binding[1] is _BINDING_TOKEN
+        ):
+            return binding[0]
         raise IdentityError(
-            "No agent identity bound. Tool calls must run inside `identity.acting_as(agent_ref)` "
-            "so that the gateway can attribute and authorise them."
+            "An identity was bound without going through acting_as. Bindings carry a token that "
+            "only acting_as issues, so this is either a bug or an attempt to install an "
+            "unresolved manifest."
         )
-    return m
+    raise IdentityError(
+        "No agent identity bound. Tool calls must run inside `identity.acting_as(agent_ref)` so "
+        "that the gateway can attribute and authorise them."
+    )
 
 
 def current_or_none() -> AgentManifest | None:
-    return _current.get()
+    binding = _current.get()
+    return binding[0] if binding is not None and binding[1] is _BINDING_TOKEN else None
 
 
 def service_account_email(manifest: AgentManifest) -> str:

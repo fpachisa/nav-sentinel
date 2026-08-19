@@ -56,10 +56,37 @@ def discover_for_capability(capability: str) -> AgentManifest | None:
 
 
 def get(agent_id: str) -> AgentManifest:
+    """Highest published version of an agent id.
+
+    Returned the *first* match in catalogue order, which is filename sort order, while
+    `discover_for_capability` returned the highest version. With two versions of one id published
+    the two functions disagreed, and the version-pin check in `identity.acting_as` reported a
+    published version as unpublished.
+    """
+    candidates = [m for m in _catalogue() if m.agent_id == agent_id]
+    if not candidates:
+        raise KeyError(f"agent {agent_id!r} is not published in the registry")
+    return max(candidates, key=lambda m: _version_key(m.version))
+
+
+def get_ref(agent_ref: str) -> AgentManifest:
+    """Resolve an exact `id@version`, or the highest version of a bare id.
+
+    Separate from `get` because a pinned reference must match exactly: silently binding a
+    different version would let a caller pin to one manifest's authority and receive another's.
+    """
+    if "@" not in agent_ref:
+        return get(agent_ref)
+
+    agent_id, version = agent_ref.split("@", 1)
     for m in _catalogue():
-        if m.agent_id == agent_id:
+        if m.agent_id == agent_id and m.version == version:
             return m
-    raise KeyError(f"agent {agent_id!r} is not published in the registry")
+    published = sorted(m.version for m in _catalogue() if m.agent_id == agent_id)
+    raise KeyError(
+        f"{agent_ref!r} is not published. Versions of {agent_id!r} in the registry: "
+        f"{published or 'none'}"
+    )
 
 
 def coverage() -> dict[str, str | None]:

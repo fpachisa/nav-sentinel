@@ -13,13 +13,29 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from nav_sentinel.control_plane import packs
 from nav_sentinel.control_plane.governance import Impact
 
+#: Every model here is frozen, and every collection is a tuple.
+#:
+#: `identity.current()` returns the manifest instance the registry cached, so a mutable model was
+#: a one-line bypass of every policy in the fleet:
+#:
+#:     with identity.acting_as("fx-rates-investigator"):
+#:         identity.current().authority.may_post_entries = True
+#:
+#: That returned ALLOW on a subsequent post, and because the mutation landed on the cached
+#: instance it poisoned the registry for the rest of the process, for every agent. It is the same
+#: defect B3 named — the agent determining its own authority — reached by assignment instead of by
+#: argument, so freezing is the structural half of that fix.
+_FROZEN = ConfigDict(frozen=True, extra="forbid")
+
 
 class Authority(BaseModel):
+    model_config = _FROZEN
+
     may_propose_remediation: bool = False
     may_post_entries: bool = False
     #: The largest impact this agent may clear without a human, tagged with its unit. Was
@@ -45,15 +61,21 @@ class Authority(BaseModel):
 
 
 class DataScopes(BaseModel):
-    read: list[str] = Field(default_factory=list)
-    write: list[str] = Field(default_factory=list)
+    model_config = _FROZEN
+
+    read: tuple[str, ...] = ()
+    write: tuple[str, ...] = ()
 
 
 class Sla(BaseModel):
+    model_config = _FROZEN
+
     target_latency_seconds: int = 60
 
 
 class AgentManifest(BaseModel):
+    model_config = _FROZEN
+
     agent_id: str
     version: str
     display_name: str
@@ -61,9 +83,9 @@ class AgentManifest(BaseModel):
     description: str
     #: Namespaced capability strings, e.g. "nav.fx_rate". Was a closed enum of one domain's
     #: categories, which could never route for a second process.
-    handles_capabilities: list[str] = Field(default_factory=list)
+    handles_capabilities: tuple[str, ...] = ()
     model: str
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: tuple[str, ...] = ()
     data_scopes: DataScopes = Field(default_factory=DataScopes)
     authority: Authority = Field(default_factory=Authority)
     untrusted_inputs: bool = False

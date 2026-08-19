@@ -169,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 98 invariant tests, including "no agent may post"
+make test        # 108 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -228,7 +228,7 @@ such rather than as complete.
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
-| Agent Gateway policy enforcement | works | All six policies resolve from a frozen catalogue and the bound identity. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved` |
+| Agent Gateway policy enforcement | works, within a stated boundary | All six policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
 | Model Armor screening | **under remediation** | Verified bypass, above. Tests cover the gateway's wiring (`test_governance.py::TestUntrustedOutputScreening`) but **every one of them monkeypatches `model_armor.screen`** — no test exercises the live service or its real detection behaviour |
 | Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
@@ -245,17 +245,29 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 1. **Tool allowlist bypass.** `gateway.call_tool(name, fn)` validates the *name* and executes the
    supplied *callable*, so any function can run under a declared tool's label — and the audit log
    records the declared name, actively falsifying the trail.
-2. ~~**Confused deputy.**~~ **Closed.** `acting_as` now takes an agent reference and resolves the
-   manifest from the published registry, so a forged one cannot enter the context; every
-   `authorize_*` takes its subject from the bound identity; and `human_approval_ref` is resolved
-   against an append-only approvals store, checked against the case *and* the band it was granted
-   under.
+2. ~~**Confused deputy.**~~ **Closed.** `acting_as` takes an agent reference and resolves the
+   manifest from the published registry; registry models are frozen, so the resolved manifest
+   cannot be mutated either (that was a one-line bypass which also poisoned the registry cache
+   process-wide); every `authorize_*` takes its subject from the bound identity; and
+   `human_approval_ref` resolves against an append-only store, checked against the case, the band
+   in force, and the signers' roles.
 3. **Model Armor bypass.** As described above.
 4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
    the declared ground truth explains only a fraction of the NAV difference.
 5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
-   leaves all 98 tests passing, because `market_value_base` is a stored field nothing recomputes.
-6. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
+   leaves all 108 tests passing, because `market_value_base` is a stored field nothing recomputes.
+6. **Manifests have no integrity control.** Any `*.yaml` in a pack's manifest directory is loaded
+   with no signature or digest, so on a writable filesystem an identity can be published at
+   runtime. Resolving from "the published registry" only raises the bar if publication is itself
+   a controlled act.
+7. **`bootstrap.sh` grants project-level `roles/datastore.user`** to any agent with a write
+   scope, which is not collection-scoped. Once approvals live in Firestore, the drafting agent's
+   service account could write approval records directly — defeating P-003 at the infra layer.
+8. **Approvals are unbounded in use.** One record authorises repeated postings on its case, never
+   expires, and is not bound to the drafted entry.
+9. `FirestoreApprovalStore` is written but never executed; the offline default is an in-process
+   store, chosen explicitly and fail-closed when Firestore is requested and unavailable.
+10. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
    one test require live network access to the ECB.
 
 ## Licence

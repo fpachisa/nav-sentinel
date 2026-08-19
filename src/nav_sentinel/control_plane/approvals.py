@@ -13,6 +13,7 @@ is the same code path, so a test proving a forged reference is refused proves it
 from __future__ import annotations
 
 import hashlib
+import re
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 
@@ -36,6 +37,9 @@ class ApprovalRecord(BaseModel):
     case_id: str
     granted_band: ApprovalClass
     approvers: tuple[str, ...]
+    #: Roles the signers held, recorded so an auditor can see the signature was role-appropriate
+    #: at the time and not merely counted.
+    approver_roles: tuple[str, ...] = ()
     granted_at: datetime
     note: str = ""
 
@@ -104,41 +108,122 @@ class FirestoreApprovalStore(ApprovalStore):
         doc.set(record.model_dump(mode="json"))
 
 
-_store: ApprovalStore = InMemoryApprovalStore()
+class Principal(BaseModel):
+    """An authenticated human, as the platform sees them.
+
+    `approvers` was a tuple of arbitrary strings, so an agent could sign as `("i-am-the-cio",)`.
+    Nothing linked an approval to a real person. A principal carries the subject the platform
+    authenticated and the role it holds, and the band determines which roles suffice.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    subject: str
+    role: str
+
+    def __str__(self) -> str:
+        return f"{self.subject} ({self.role})"
+
+
+#: Which roles may sign at each band, and how many distinct principals are required.
+BAND_REQUIREMENTS: dict[ApprovalClass, tuple[frozenset[str], int]] = {
+    ApprovalClass.AUTO_CLEAR: (frozenset({"reviewer", "controller", "cio"}), 1),
+    ApprovalClass.SINGLE_REVIEWER: (frozenset({"reviewer", "controller", "cio"}), 1),
+    ApprovalClass.FOUR_EYES: (frozenset({"controller", "cio"}), 2),
+    ApprovalClass.CIO_ESCALATION: (frozenset({"cio"}), 1),
+}
+
+
+class ApprovalDenied(RuntimeError):
+    """A grant was refused. Raised at minting time, so a bad approval never exists."""
+
+
+class ApprovalAuthority:
+    """The only object that can mint an approval.
+
+    Held by the approval console. **The agent runtime never constructs one**, which is the point:
+    `grant()` used to be a module function, so anything that could import the module could sign
+    its own approval. The module docstring's own standard — a control that accepts its own
+    evidence from the party it is controlling is not a control — was not met by a module function.
+    """
+
+    def __init__(self, store: ApprovalStore) -> None:
+        self._store = store
+
+    def grant(
+        self,
+        case_id: str,
+        band: ApprovalClass,
+        principals: tuple[Principal, ...],
+        note: str = "",
+    ) -> ApprovalRecord:
+        """Record a human approval, or refuse to.
+
+        The reference is content-derived rather than sequential, so it cannot be guessed from a
+        counter. It deliberately excludes the timestamp: including it meant two identical grants
+        produced two distinct refs and both persisted, which is not what "records are immutable"
+        should mean.
+        """
+        allowed_roles, required = BAND_REQUIREMENTS[band]
+        if not principals:
+            raise ApprovalDenied(
+                f"an approval at {band.value} needs at least one signer; an append-only ledger "
+                f"must not accept a signature with no signer"
+            )
+        wrong = sorted({p.role for p in principals} - allowed_roles)
+        if wrong:
+            raise ApprovalDenied(
+                f"{band.value} may be signed by {sorted(allowed_roles)}; got role(s) {wrong}"
+            )
+        if len({p.subject for p in principals}) < required:
+            raise ApprovalDenied(
+                f"{band.value} requires {required} distinct signer(s); got "
+                f"{len({p.subject for p in principals})}"
+            )
+
+        subjects = tuple(sorted(p.subject for p in principals))
+        digest = hashlib.sha256(
+            f"{case_id}|{band.value}|{'|'.join(subjects)}".encode()
+        ).hexdigest()[:16]
+        record = ApprovalRecord(
+            ref=f"APPR-{digest}",
+            case_id=case_id,
+            granted_band=band,
+            approvers=subjects,
+            approver_roles=tuple(sorted(p.role for p in principals)),
+            granted_at=datetime.now(UTC),
+            note=note,
+        )
+        self._store.put(record)
+        return record
+
+
+_REF = re.compile(r"^APPR-[0-9a-f]{16}$")
+
+_resolver: ApprovalStore = InMemoryApprovalStore()
 
 
 def use_store(store: ApprovalStore) -> None:
-    global _store
-    _store = store
+    """Install the store the *enforcement* side reads from. Never returns a writer."""
+    global _resolver
+    _resolver = store
 
 
-def store() -> ApprovalStore:
-    return _store
+def reader() -> ApprovalStore:
+    """The installed store. Named `reader` because the enforcement side only ever reads; the
+    console obtains a writer through `composition.approval_authority()`."""
+    return _resolver
 
 
 def resolve(ref: str | None) -> ApprovalRecord | None:
-    return None if ref is None else _store.get(ref)
+    """Look up an approval. Read-only by construction.
 
-
-def grant(
-    case_id: str, band: ApprovalClass, approvers: tuple[str, ...], note: str = ""
-) -> ApprovalRecord:
-    """Record a human approval. Called by the approval console, never by an agent.
-
-    The reference is derived from the content rather than issued as a counter, so it cannot be
-    guessed from a sequence and two identical grants collide rather than silently duplicating.
+    The reference shape is validated here rather than passed through. `FirestoreApprovalStore`
+    raises `ValueError` on a reference like "a/b" (odd number of path elements), so a malformed
+    reference produced an unhandled exception in a deployment instead of a recorded DENY — losing
+    the governance-log entry for an escalation attempt, which is exactly what `call_tool` goes out
+    of its way to avoid for an unknown tool.
     """
-    granted_at = datetime.now(UTC)
-    digest = hashlib.sha256(
-        f"{case_id}|{band.value}|{'|'.join(sorted(approvers))}|{granted_at.isoformat()}".encode()
-    ).hexdigest()[:16]
-    record = ApprovalRecord(
-        ref=f"APPR-{digest}",
-        case_id=case_id,
-        granted_band=band,
-        approvers=approvers,
-        granted_at=granted_at,
-        note=note,
-    )
-    _store.put(record)
-    return record
+    if ref is None or not _REF.match(ref):
+        return None
+    return _resolver.get(ref)

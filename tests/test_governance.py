@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from nav_sentinel.control_plane import approvals, gateway, identity, packs, policies
 from nav_sentinel.control_plane.governance import CaseFacts, Impact
@@ -155,7 +156,7 @@ class TestDataScopeEnforcement:
         check must still refuse it."""
         cf = discover.get("cash-fees-investigator")
         widened = cf.model_copy(
-            update={"allowed_tools": cf.allowed_tools + ["books_and_records.positions"]}
+            update={"allowed_tools": (*cf.allowed_tools, "books_and_records.positions")}
         )
         decision = policies.tool_within_data_scope(
             widened, "books_and_records.positions", ("positions",)
@@ -515,9 +516,14 @@ class TestIdentityCannotBeForged:
                 pass
 
     def test_a_version_pin_the_registry_does_not_publish_is_refused(self):
-        """Silently binding a different version would let an attacker pin to a version whose
-        manifest granted more, and get the current one without noticing — or the reverse."""
-        with pytest.raises(identity.IdentityError, match="pinned to a version"):
+        """Silently binding a different version would let a caller pin to one manifest's
+        authority and receive another's.
+
+        The message names the versions that *are* published. It used to report the highest as
+        "current", which was a false statement whenever two versions of one id were published —
+        `discover.get` returned the first in filename order while discovery returned the highest.
+        """
+        with pytest.raises(identity.IdentityError, match=r"not published.*\['1\.3\.0'\]"):
             with identity.acting_as("fx-rates-investigator@9.9.9"):
                 pass
 
@@ -536,11 +542,20 @@ class TestApprovalReferencesAreResolved:
     """
 
     @pytest.fixture(autouse=True)
-    def _clean_store(self):
+    def _authority(self):
+        """A fresh store plus the minting side, which only a console ever holds."""
         store = approvals.InMemoryApprovalStore()
         approvals.use_store(store)
+        self.authority = approvals.ApprovalAuthority(store)
         yield
         store.clear()
+
+    CIO = (approvals.Principal(subject="ada", role="cio"),)
+    TWO_CONTROLLERS = (
+        approvals.Principal(subject="ada", role="controller"),
+        approvals.Principal(subject="bob", role="controller"),
+    )
+    ONE_REVIEWER = (approvals.Principal(subject="cal", role="reviewer"),)
 
     def _poster(self):
         """An agent granted posting authority, published so identity can resolve it."""
@@ -560,7 +575,7 @@ class TestApprovalReferencesAreResolved:
         assert "does not resolve" in d.reason
 
     def test_an_approval_for_a_different_case_is_denied(self):
-        rec = approvals.grant("SOME-OTHER-CASE", policies.ApprovalClass.CIO_ESCALATION, ("alice",))
+        rec = self.authority.grant("SOME-OTHER-CASE", policies.ApprovalClass.CIO_ESCALATION, self.CIO)
         d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
         assert not d.allowed
         assert "not C-APPR" in d.reason
@@ -568,31 +583,121 @@ class TestApprovalReferencesAreResolved:
     def test_an_approval_granted_at_a_lower_band_is_denied(self):
         """A case re-scored upward must not carry its old signature. 5.41bps bands to
         cio_escalation; an approval granted at single_reviewer cannot authorise it."""
-        rec = approvals.grant("C-APPR", policies.ApprovalClass.SINGLE_REVIEWER, ("alice",))
+        rec = self.authority.grant("C-APPR", policies.ApprovalClass.SINGLE_REVIEWER, self.ONE_REVIEWER)
         d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
         assert not d.allowed
         assert "granted at single_reviewer" in d.reason
 
-    def test_four_eyes_needs_two_distinct_approvers(self):
-        rec = approvals.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, ("alice", "alice"))
-        d = policies.may_post_entry(self._poster(), self._facts("2"), rec.ref)
-        assert not d.allowed
-        assert "requires 2" in d.reason
+    def test_four_eyes_needs_two_distinct_signers_at_grant_time(self):
+        """Refused when minted, so a single-signed four-eyes record never exists to be used."""
+        with pytest.raises(approvals.ApprovalDenied, match="2 distinct signer"):
+            self.authority.grant(
+                "C-APPR", policies.ApprovalClass.FOUR_EYES,
+                (approvals.Principal(subject="ada", role="controller"),),
+            )
+
+    def test_a_role_that_may_not_sign_at_this_band_is_refused(self):
+        """`approvers` was arbitrary strings, so an agent could sign as ("i-am-the-cio",)."""
+        with pytest.raises(approvals.ApprovalDenied, match="may be signed by"):
+            self.authority.grant(
+                "C-APPR", policies.ApprovalClass.CIO_ESCALATION, self.ONE_REVIEWER,
+            )
+
+    def test_an_approval_with_no_signer_is_refused(self):
+        with pytest.raises(approvals.ApprovalDenied, match="at least one signer"):
+            self.authority.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, ())
+
+    def test_the_agent_facing_module_cannot_mint(self):
+        """The structural half: minting is a method on an object the agent runtime never holds."""
+        assert not hasattr(approvals, "grant")
+
+    def test_a_malformed_reference_is_denied_not_raised(self):
+        """FirestoreApprovalStore raises ValueError on "a/b" (odd path elements), so a malformed
+        reference produced an unhandled exception in a deployment instead of a recorded DENY."""
+        for bad in ("a/b", "", "APPR-not-hex", "../../etc/passwd"):
+            d = policies.may_post_entry(self._poster(), self._facts(), bad)
+            assert not d.allowed
+            assert "does not resolve" in d.reason
 
     def test_a_matching_approval_is_allowed(self):
-        rec = approvals.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, ("cio",))
+        rec = self.authority.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, self.CIO)
         d = policies.may_post_entry(self._poster(), self._facts(), rec.ref)
         assert d.allowed, d.reason
-        assert d.metadata["approvers"] == "cio"
+        assert d.metadata["approvers"] == "ada"
 
-    def test_approval_records_are_immutable(self):
-        rec = approvals.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, ("a", "b"))
+    def test_an_identical_grant_collides_rather_than_duplicating(self):
+        """The reference excludes the timestamp. Including it meant two identical grants produced
+        two distinct refs and both persisted, which is not what an immutable ledger means."""
+        self.authority.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS)
         with pytest.raises(ValueError, match="already exists"):
-            approvals.store().put(rec)
+            self.authority.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS)
 
     def test_the_published_fleet_still_cannot_post_with_a_valid_approval(self):
         """Authority is checked before the approval, so a correct signature does not confer
         authority the manifest does not grant."""
-        rec = approvals.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, ("cio",))
+        rec = self.authority.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, self.CIO)
         for m in load_manifests():
             assert not policies.may_post_entry(m, self._facts(), rec.ref).allowed
+
+
+class TestRegistryModelsAreImmutable:
+    """The shortest bypass this project has had. `identity.current()` returns the instance the
+    registry cached, so a mutable model meant every policy in the fleet was one assignment from
+    defeat — and the mutation poisoned the cache process-wide, for every agent:
+
+        with identity.acting_as("fx-rates-investigator"):
+            identity.current().authority.may_post_entries = True
+    """
+
+    def test_authority_cannot_be_mutated(self):
+        with identity.acting_as("fx-rates-investigator") as m:
+            with pytest.raises(ValidationError):
+                m.authority.may_post_entries = True
+
+    def test_the_authority_object_cannot_be_replaced(self):
+        with identity.acting_as("fx-rates-investigator") as m:
+            with pytest.raises(ValidationError):
+                m.authority = Authority(may_post_entries=True)
+
+    def test_tool_and_scope_collections_are_tuples(self):
+        with identity.acting_as("fx-rates-investigator") as m:
+            assert isinstance(m.allowed_tools, tuple)
+            assert isinstance(m.data_scopes.read, tuple)
+            assert isinstance(m.handles_capabilities, tuple)
+            with pytest.raises(AttributeError):
+                m.allowed_tools.append("books_and_records.cash_movements")
+
+    def test_a_mutation_attempt_does_not_reach_the_cache(self):
+        """Belt and braces: even if a future model loses `frozen`, assert the cached instance is
+        unchanged after an attempt, because that is the property that actually matters."""
+        before = discover.get("fx-rates-investigator").authority.may_post_entries
+        with identity.acting_as("fx-rates-investigator") as m, pytest.raises(ValidationError):
+            m.authority.may_post_entries = True
+        assert discover.get("fx-rates-investigator").authority.may_post_entries == before is False
+
+
+class TestIdentityBindingsCarryAToken:
+    """`acting_as` is the only way in. Writing the ContextVar directly used to install whatever
+    was handed to it."""
+
+    def test_a_directly_written_binding_is_refused(self):
+        forged = discover.get("fx-rates-investigator")
+        for label, value in (
+            ("bare manifest", forged),
+            ("bogus token", (forged, object())),
+            ("wrong arity", (forged,)),
+        ):
+            identity._current.set(value)
+            try:
+                with pytest.raises(identity.IdentityError, match="without going through acting_as"):
+                    identity.current()
+            finally:
+                identity._current.set(None)
+            assert identity.current_or_none() is None, label
+
+    def test_current_or_none_does_not_leak_an_untokened_binding(self):
+        identity._current.set((discover.get("remediation-agent"), object()))
+        try:
+            assert identity.current_or_none() is None
+        finally:
+            identity._current.set(None)
