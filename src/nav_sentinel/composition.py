@@ -13,6 +13,11 @@ from __future__ import annotations
 from nav_sentinel.control_plane import packs
 from nav_sentinel.registry import discover
 
+# Manifests are sourced from the packs, so any registration change must drop the discovery
+# cache or a newly registered process's agents stay invisible. Wired once, here, rather than
+# left as an obligation on every caller.
+packs.on_change(discover.invalidate)
+
 
 def configure() -> tuple[packs.ProcessPack, ...]:
     """Register every process this deployment hosts.
@@ -23,15 +28,23 @@ def configure() -> tuple[packs.ProcessPack, ...]:
     """
     from nav_sentinel.domain.pack import PACK as NAV_PACK
 
+    # Registry discovery is a platform capability rather than a fund-accounting one, so it is
+    # registered here instead of inside a pack. Two processes both needing it would otherwise
+    # collide on the tool name and the second to register would fail.
+    packs.register_platform_tools(
+        packs.ToolSpec(
+            "registry.discover_for_capability", discover.discover_for_capability, ("registry",),
+            description="Highest-versioned agent declaring support for a capability.",
+        ),
+        packs.ToolSpec(
+            "registry.coverage", discover.coverage, ("registry",),
+            description="Which capabilities currently have an authorised investigator.",
+        ),
+    )
     packs.register(NAV_PACK)
-
-    # Manifests are sourced from the packs, so a newly registered process must invalidate the
-    # discovery cache or its agents stay invisible.
-    discover.invalidate()
     return packs.registered()
 
 
 def reset() -> None:
     """Tear down all registration. Tests only."""
     packs.clear()
-    discover.invalidate()

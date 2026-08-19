@@ -234,7 +234,7 @@ class RemediationProposal(BaseModel):
 
     @property
     def balances(self) -> bool:
-        return sum(l.debit for l in self.lines) == sum(l.credit for l in self.lines)
+        return sum(x.debit for x in self.lines) == sum(x.credit for x in self.lines)
 
 
 class ExceptionCase(BaseModel):
@@ -296,7 +296,11 @@ class ExceptionCase(BaseModel):
             subject_id=self.fund_id,
             as_of=self.as_of,
             capability=self.capability,
-            impact=Impact(value=Decimal(str(self.nav_impact_bps or 0)), unit="bps"),
+            impact=(
+                Impact(value=Decimal(str(self.nav_impact_bps)), unit="bps")
+                if self.nav_impact_bps is not None
+                else None
+            ),
             status=self.status.value,
             severity=self.severity.value if self.severity else None,
             item_count=len(self.breaks),

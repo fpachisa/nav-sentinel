@@ -25,7 +25,13 @@ _BPS = Decimal(10000)
 ToBase = Callable[[Decimal, str], Decimal]
 
 
-def identity_to_base(amount: Decimal, currency: str) -> Decimal:
+def identity_to_base(amount: Decimal, currency: str) -> Decimal:  # noqa: ARG001
+    """A no-op converter, kept only to satisfy `ToBase` in single-currency tests.
+
+    `currency` is unused by design: the signature is the contract. Never pass this where a real
+    conversion is needed -- summing a USD cash break into a EUR fund unconverted is exactly the
+    error that produced B4, which is why the callers no longer default to it.
+    """
     return amount
 
 

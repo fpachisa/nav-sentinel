@@ -13,7 +13,6 @@ intentions.
 from __future__ import annotations
 
 from nav_sentinel.control_plane.packs import ToolSpec
-from nav_sentinel.registry import discover
 from nav_sentinel.tools import books_and_records as bnr
 from nav_sentinel.tools import ecb_fx, edgar
 
@@ -36,12 +35,6 @@ NAV_TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("books_and_records.nav_record", bnr.nav_record, ("nav_records",)),
     ToolSpec("books_and_records.trades", bnr.trades, ("trades",)),
     ToolSpec("books_and_records.trades_for_security", bnr.trades_for_security, ("trades",)),
-
-    # --- the registry itself, so triage discovers specialists rather than hard-coding them -
-    ToolSpec("registry.discover_for_capability", discover.discover_for_capability, ("registry",),
-             description="Highest-versioned agent declaring support for a capability."),
-    ToolSpec("registry.coverage", discover.coverage, ("registry",),
-             description="Which capabilities currently have an authorised investigator."),
 
     # --- third-party filings: free text, authored by someone else -------------------------
     # Metadata, but still filer-authored: `issuer` comes from the filing's own name and

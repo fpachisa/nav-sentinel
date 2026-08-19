@@ -105,11 +105,11 @@ def local_per_base(local_ccy: str, base_ccy: str, day: date) -> Decimal:
     """Units of `local_ccy` per one unit of `base_ccy`, via the ECB's EUR cross."""
     if local_ccy == base_ccy:
         return Decimal(1)
-    l = ecb_fx.latest_rate_on_or_before(local_ccy, day)
-    b = ecb_fx.latest_rate_on_or_before(base_ccy, day)
-    if l is None or b is None:
+    local_rate = ecb_fx.latest_rate_on_or_before(local_ccy, day)
+    base_rate = ecb_fx.latest_rate_on_or_before(base_ccy, day)
+    if local_rate is None or base_rate is None:
         raise RuntimeError(f"no ECB rate for {local_ccy}/{base_ccy} on {day}")
-    return l[1] / b[1]
+    return local_rate[1] / base_rate[1]
 
 
 def make_position(fund_id, isin, quantity, price, source, day, *, fx_day=None, price_override=None,

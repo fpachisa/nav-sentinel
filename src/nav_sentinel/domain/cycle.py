@@ -48,10 +48,7 @@ def group_into_cases(
     for b in breaks:
         if b.fund_id != fund_id or b.break_type == BreakType.NAV_PER_SHARE:
             continue
-        if b.isin:
-            key = ("security", b.isin)
-        else:
-            key = ("cash", b.currency or "")
+        key = ("security", b.isin) if b.isin else ("cash", b.currency or "")
         buckets.setdefault(key, []).append(b)
 
     cases: list[ExceptionCase] = []

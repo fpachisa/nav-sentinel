@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from nav_sentinel.control_plane import gateway, identity, packs, policies
+from nav_sentinel.control_plane.governance import CaseFacts, Impact
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import BreakType, ExceptionCase, ReconciliationBreak
 from nav_sentinel.registry import discover
@@ -81,7 +82,7 @@ class TestNoAgentHoldsPostingAuthority:
         """Approval alone is insufficient: the agent must also hold the authority, and none do."""
         fx = discover.get("fx-rates-investigator")
         with identity.acting_as(fx), pytest.raises(PolicyViolation) as exc:
-            gateway.authorize_posting(fx, case, human_approval_ref="APPR-123")
+            gateway.authorize_posting(fx, case.to_facts(), human_approval_ref="APPR-123")
         assert exc.value.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
 
 
@@ -393,3 +394,111 @@ class TestCatalogueIntegrity:
         with pytest.raises(packs.UnknownTool) as exc:
             packs.resolve("nope.nope")
         assert not str(exc.value).startswith("\"")
+
+
+class TestApprovalBand:
+    """P-004 derives the band; the process supplies only a unit-tagged magnitude.
+
+    These are boundary tests because the band decides who signs off on a NAV adjustment, and
+    the previous implementation read a value the domain had already set — so there was nothing
+    to test.
+    """
+
+    @pytest.mark.parametrize(
+        ("bps", "expected"),
+        [
+            ("0", "auto_clear"),
+            ("0.24", "auto_clear"),
+            ("0.25", "single_reviewer"),   # boundary: below is exclusive
+            ("0.99", "single_reviewer"),
+            ("1", "four_eyes"),
+            ("4.99", "four_eyes"),
+            ("5", "cio_escalation"),
+            ("500", "cio_escalation"),
+        ],
+    )
+    def test_band_boundaries(self, bps, expected):
+        impact = Impact(value=Decimal(bps), unit="bps")
+        assert policies.band_for(impact).value == expected
+
+    def test_a_negative_impact_bands_on_magnitude(self):
+        """Direction is not materiality: a 6bps overstatement and a 6bps understatement need
+        the same signature."""
+        assert policies.band_for(Impact(value=Decimal(-6), unit="bps")) is (
+            policies.band_for(Impact(value=Decimal(6), unit="bps"))
+        )
+
+    def test_an_uncomputed_impact_escalates(self):
+        """An untriaged case is the default state of a freshly opened one. Collapsing a missing
+        magnitude to zero banded every one of them as auto_clear."""
+        assert policies.band_for(None) is policies.ApprovalClass.CIO_ESCALATION
+
+    def test_an_unknown_unit_escalates(self):
+        """A process measuring impact in something the control plane has no thresholds for
+        cannot be auto-cleared on the strength of it."""
+        assert policies.band_for(Impact(value=Decimal(1), unit="bananas")) is (
+            policies.ApprovalClass.CIO_ESCALATION
+        )
+
+
+class TestAutonomousCeiling:
+    """The ceiling may only narrow autonomy, never widen it past the derived band."""
+
+    def _authority(self, ceiling_bps: str | None):
+        from nav_sentinel.registry.models import Authority
+
+        return Authority(
+            may_post_entries=True,
+            max_autonomous_impact=(
+                None if ceiling_bps is None else Impact(value=Decimal(ceiling_bps), unit="bps")
+            ),
+        )
+
+    def _facts(self, bps: str):
+        return CaseFacts(
+            case_id="C-CEIL", subject_id="F1", as_of=NAV_DATE, capability="nav.fx_rate",
+            impact=Impact(value=Decimal(bps), unit="bps"), status="triaged",
+        )
+
+    def test_a_wide_ceiling_cannot_outvote_the_derived_band(self):
+        """The regression this class exists for: consulting the ceiling alone let a manifest
+        grant itself 500bps of headroom over a case the control plane had banded
+        cio_escalation, and the permissive control won."""
+        agent = discover.get("fx-rates-investigator").model_copy(
+            update={"authority": self._authority("500")}
+        )
+        decision = policies.may_post_entry(agent, self._facts("400"), None)
+        assert not decision.allowed
+        assert policies.band_for(self._facts("400").impact) is policies.ApprovalClass.CIO_ESCALATION
+
+    def test_a_zero_ceiling_means_zero(self):
+        """`<=` made a zero-impact case clear a zero ceiling, while the field's own comment
+        claimed zero meant no autonomy at any size."""
+        agent = discover.get("fx-rates-investigator").model_copy(
+            update={"authority": self._authority("0")}
+        )
+        assert not policies.may_post_entry(agent, self._facts("0"), None).allowed
+
+    def test_a_ceiling_in_another_unit_never_applies(self):
+        from nav_sentinel.registry.models import Authority
+
+        agent = discover.get("fx-rates-investigator").model_copy(
+            update={"authority": Authority(
+                may_post_entries=True,
+                max_autonomous_impact=Impact(value=Decimal(1000000), unit="shares"),
+            )}
+        )
+        assert not policies.may_post_entry(agent, self._facts("400"), None).allowed
+
+    def test_the_one_legitimate_autonomous_path(self):
+        """Auto-clear band AND inside the ceiling. Both, not either."""
+        agent = discover.get("fx-rates-investigator").model_copy(
+            update={"authority": self._authority("0.2")}
+        )
+        assert policies.may_post_entry(agent, self._facts("0.1"), None).allowed
+
+    def test_no_published_agent_can_post_at_any_impact(self):
+        """The published fleet holds no posting authority, so the ceiling never comes up."""
+        for m in load_manifests():
+            for bps in ("0", "0.1", "4.9", "5000"):
+                assert not policies.may_post_entry(m, self._facts(bps), None).allowed

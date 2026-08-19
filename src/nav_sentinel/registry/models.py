@@ -24,14 +24,24 @@ class Authority(BaseModel):
     may_post_entries: bool = False
     #: The largest impact this agent may clear without a human, tagged with its unit. Was
     #: `max_autonomous_bps` — a basis-point field in a process-agnostic registry, meaningless to
-    #: a process whose control total is denominated in shares. Zero means no autonomy at any size.
+    #: a process whose control total is denominated in shares.
     max_autonomous_impact: Impact | None = None
 
-    def clears_autonomously(self, impact: Impact) -> bool:
+    def within_ceiling(self, impact: Impact | None) -> bool:
+        """Whether this impact is strictly inside the declared ceiling.
+
+        Strictly: a ceiling of zero must mean no autonomy at any size, and `<=` made a
+        zero-impact case clear a zero ceiling. A ceiling in a different unit never applies —
+        an agent granted headroom in basis points has none over a share count.
+
+        This is a *necessary* condition for autonomous action, never a sufficient one. P-003
+        additionally requires the control plane's own band to be AUTO_CLEAR, so a manifest can
+        only ever narrow its autonomy, never widen it.
+        """
         ceiling = self.max_autonomous_impact
-        if ceiling is None or ceiling.unit != impact.unit:
+        if ceiling is None or impact is None or ceiling.unit != impact.unit:
             return False
-        return abs(impact.value) <= abs(ceiling.value)
+        return abs(impact.value) < abs(ceiling.value)
 
 
 class DataScopes(BaseModel):
@@ -92,15 +102,30 @@ def load_manifests(directories: tuple[Path, ...] | Path | None = None) -> list[A
     else:
         dirs = directories
 
+    # Which pack owns each directory, so a manifest can be held to its own namespace.
+    owner = {p.manifest_dir: p for p in packs.registered()}
+
     manifests: list[AgentManifest] = []
     seen: dict[str, Path] = {}
     for directory in dirs:
+        pack = owner.get(directory)
         for path in sorted(directory.glob("*.yaml")):
             manifest = AgentManifest.model_validate(yaml.safe_load(path.read_text()))
             if manifest.ref in seen:
                 raise ValueError(
                     f"{manifest.ref} is published twice: {seen[manifest.ref]} and {path}"
                 )
+            if pack is not None:
+                # Namespacing the pack's declared capability tuple is the half that carries no
+                # authority. This is the half that decides routing: without it, a manifest in one
+                # process's directory could claim another's capability and win discovery on
+                # version number alone.
+                foreign = [c for c in manifest.handles_capabilities if c not in pack.capabilities]
+                if foreign:
+                    raise ValueError(
+                        f"{path} is published by process {pack.key!r} but declares "
+                        f"{foreign}, which that process does not own."
+                    )
             seen[manifest.ref] = path
             manifests.append(manifest)
     return manifests

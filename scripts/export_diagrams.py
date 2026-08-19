@@ -36,7 +36,7 @@ def main() -> None:
     if len(blocks) != len(FIGURES):
         raise SystemExit(f"expected {len(FIGURES)} figures, found {len(blocks)}")
 
-    for (name, title), svg in zip(FIGURES, blocks):
+    for (name, title), svg in zip(FIGURES, blocks, strict=True):
         s = svg
         for token, value in LIGHT.items():
             s = s.replace(f"var({token})", value)

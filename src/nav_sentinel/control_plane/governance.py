@@ -88,7 +88,9 @@ class CaseFacts(BaseModel):
     as_of: date
     #: Which capability this case needs, namespaced by process: "nav.fx_rate", "ta.subscription_in_transit".
     capability: str
-    impact: Impact
+    #: None when the process has not computed one yet. Distinct from zero, and banded
+    #: fail-closed rather than auto-cleared.
+    impact: Impact | None = None
     status: str
     severity: str | None = None
     item_count: int = 0
@@ -107,8 +109,8 @@ class CaseFacts(BaseModel):
             "nav.case.subject": self.subject_id,
             "nav.case.as_of": self.as_of.isoformat(),
             "nav.case.capability": self.capability,
-            "nav.case.impact_value": str(self.impact.value),
-            "nav.case.impact_unit": self.impact.unit,
+            "nav.case.impact_value": str(self.impact.value) if self.impact else "not_computed",
+            "nav.case.impact_unit": self.impact.unit if self.impact else "",
             "nav.case.status": self.status,
             "nav.case.item_count": self.item_count,
         }

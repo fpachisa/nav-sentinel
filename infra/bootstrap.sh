@@ -45,7 +45,12 @@ say "Per-agent service accounts (Agent Identity)"
 .venv/bin/python - "$PROJECT" <<'PYEOF'
 import subprocess, sys
 sys.path.insert(0, "src")
+from nav_sentinel.composition import configure
 from nav_sentinel.registry.models import load_manifests
+
+# Manifests are sourced from the registered process packs, so the composition root has to run
+# before any of them are visible. Without this the script mints zero service accounts.
+configure()
 
 project = sys.argv[1]
 for m in load_manifests():

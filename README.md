@@ -82,9 +82,10 @@ where token spend would otherwise run away.
 | :--- | :--- |
 | `P-001-TOOL-ALLOWLIST` | An agent may call only the tools declared in its registry manifest. Grants cannot be made at runtime. |
 | `P-002-DRAFT-AUTHORITY` | Only the remediation agent may draft an accounting entry. Investigators report root causes. |
-| `P-003-NO-AUTONOMOUS-POSTING` | Nothing posts to the ledger without a recorded human approval. No agent holds posting authority at any materiality. |
-| `P-004-MATERIALITY-ROUTING` | Basis points of NAV determine who signs off: auto-clear, single reviewer, four eyes, or CIO escalation. Computed, never inferred. |
+| `P-003-NO-AUTONOMOUS-POSTING` | No published agent holds posting authority, so nothing reaches the ledger without a recorded human approval. An agent *could* be granted a narrow autonomous ceiling, but only within a band the control plane itself scores AUTO_CLEAR — a manifest can narrow its autonomy, never widen it. |
+| `P-004-APPROVAL-ROUTE` | A unit-tagged magnitude and the tenant's thresholds determine who signs off; the control plane derives the band, the process never declares it: auto-clear, single reviewer, four eyes, or CIO escalation. Computed, never inferred. |
 | `P-005-UNTRUSTED-INGEST` | An agent that reads the public internet cannot opt out of Model Armor screening. |
+| `P-006-DATA-SCOPE` | A tool may only read the data domains its caller's manifest declares. |
 
 ### Why the governance is load-bearing, not decorative
 
@@ -168,7 +169,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 70 invariant tests, including "no agent may post"
+make test        # 87 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -227,7 +228,7 @@ such rather than as complete.
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
-| Agent Gateway policy enforcement | **under remediation** | P-001 is a string check on a label and P-002/P-003/P-005 trust a caller-supplied manifest; both are bypassable. No test covers the bypass |
+| Agent Gateway policy enforcement | partly closed | P-001 and P-006 resolve from a frozen catalogue and the bound identity, with bypass tests (`TestCatalogueIntegrity`, `TestDataScopeEnforcement`). **P-002 and P-003 still accept a caller-supplied manifest** — open as B3, see [docs/PLAN.md](docs/PLAN.md) |
 | Model Armor screening | **under remediation** | Verified bypass, above. Tests cover the gateway's wiring (`test_governance.py::TestUntrustedOutputScreening`) but **every one of them monkeypatches `model_armor.screen`** — no test exercises the live service or its real detection behaviour |
 | Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
@@ -251,7 +252,7 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
    the declared ground truth explains only a fraction of the NAV difference.
 5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
-   leaves all 70 tests passing, because `market_value_base` is a stored field nothing recomputes.
+   leaves all 87 tests passing, because `market_value_base` is a stored field nothing recomputes.
 6. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
    one test require live network access to the ECB.
 

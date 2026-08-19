@@ -38,10 +38,36 @@ packages = ["src/nav_sentinel"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+# The default rule set is E4/E7/E9/F only, which is why an unused function argument sat in a
+# policy signature reading as though P-003 consulted the band. "Lint clean" should mean more
+# than "syntactically valid".
+select = ["E", "F", "W", "I", "B", "SIM", "ARG", "RET", "C4", "UP", "PL", "FURB"]
+ignore = [
+    "PLR0913",  # policy functions legitimately take several collaborators
+    "PLR0917",  # ditto, positionally
+    "PLR2004",  # threshold literals in tests are the point of the test
+    "E501",     # line length is handled by the formatter setting above
+    # Local imports are deliberate in three places: breaking an import cycle (audit -> gateway),
+    # deferring a heavy SDK until it is needed (ADK, Model Armor), and keeping the composition
+    # root's process imports inside the function that registers them.
+    "PLC0415",
+    # Module-level caches with documented invalidation: the discovery catalogue, the tracing
+    # provider flag, the decision log, the EDGAR throttle. Each is deliberate and commented.
+    "PLW0603",
+]
+
 [tool.ruff.lint.per-file-ignores]
 # Nested `with identity.acting_as(...)` / `with pytest.raises(...)` reads more clearly than a
 # combined statement: the identity binding is the setup and the raises is the assertion.
-"tests/**" = ["SIM117"]
+# ARG005: stub lambdas exist precisely to ignore their arguments.
+# E731: a named lambda is the clearest way to express a one-line exploit probe.
+"tests/**" = ["SIM117", "ARG005", "E731", "ARG002"]
+# The generator is one long deliberate script: each seeded scenario is a named block, and
+# splitting them into helpers would hide the very thing a reviewer needs to read straight down.
+"fixtures/generate.py" = ["PLR0915"]
+# The diagram checker's branches are one per check, which is the clearest form it can take.
+"scripts/check_diagrams.py" = ["PLR0912"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

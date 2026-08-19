@@ -83,6 +83,30 @@ class UnknownTool(KeyError):
 
 _packs: dict[str, ProcessPack] = {}
 _overrides: dict[str, ToolSpec] = {}
+#: Tools the platform itself offers to every process — registry discovery, for instance. Held
+#: outside the packs because two processes both needing registry lookup would otherwise collide
+#: on the tool name, and whichever registered second would fail.
+_platform_tools: dict[str, ToolSpec] = {}
+#: Called after any registration change, so a caller cannot forget to invalidate the discovery
+#: cache and leave a registered pack's agents invisible.
+_change_hooks: list[Callable[[], None]] = []
+
+
+def on_change(hook: Callable[[], None]) -> None:
+    _change_hooks.append(hook)
+
+
+def _on_change() -> None:
+    for hook in _change_hooks:
+        hook()
+
+
+def register_platform_tools(*specs: ToolSpec) -> None:
+    """Register tools every process may declare. Called by the composition root, which is the
+    only place that may import both the control plane and the modules these wrap."""
+    for spec in specs:
+        _platform_tools[spec.name] = spec
+    _on_change()
 
 
 class DuplicateProcess(ValueError):
@@ -90,15 +114,38 @@ class DuplicateProcess(ValueError):
 
 
 def register(pack: ProcessPack) -> None:
+    """Register a process.
+
+    Validation happens here as well as in `ProcessPack.__post_init__`, because construction is
+    bypassable: a duck-typed object or a subclass overriding `__post_init__` would otherwise
+    register un-namespaced capabilities.
+    """
+    if not isinstance(pack, ProcessPack):
+        raise TypeError(f"expected a ProcessPack, got {type(pack).__name__}")
+    for cap in pack.capabilities:
+        if not cap.startswith(f"{pack.key}."):
+            raise ValueError(f"capability {cap!r} is not namespaced to process {pack.key!r}")
     if pack.key in _packs and _packs[pack.key] is not pack:
         raise DuplicateProcess(f"process {pack.key!r} is already registered")
+
     for other in _packs.values():
         if other.key == pack.key:
             continue
         clash = set(other.tools_by_name()) & set(pack.tools_by_name())
         if clash:
             raise DuplicateProcess(f"tool names claimed by two processes: {sorted(clash)}")
+        # Two packs claiming the same unit with different thresholds would let alphabetical
+        # ordering decide whose governance applies to whose cases, silently.
+        units = {t.unit for t in other.thresholds} & {t.unit for t in pack.thresholds}
+        if units:
+            raise DuplicateProcess(
+                f"processes {other.key!r} and {pack.key!r} both declare thresholds for unit(s) "
+                f"{sorted(units)}. Threshold resolution is by unit, so this would make one "
+                f"process's materiality govern the other's cases."
+            )
+
     _packs[pack.key] = pack
+    _on_change()
 
 
 def registered() -> tuple[ProcessPack, ...]:
@@ -108,6 +155,8 @@ def registered() -> tuple[ProcessPack, ...]:
 def clear() -> None:
     """Reset the registry. For tests and the composition root only."""
     _packs.clear()
+    _platform_tools.clear()
+    _on_change()
 
 
 def capabilities() -> tuple[str, ...]:
@@ -146,7 +195,7 @@ def catalogue() -> MappingProxyType[str, ToolSpec]:
     A mutable mapping here would let in-process code swap a spec and run arbitrary code under a
     declared tool's label. Tests use `override()`, which is scoped and named.
     """
-    merged: dict[str, ToolSpec] = {}
+    merged: dict[str, ToolSpec] = dict(_platform_tools)
     for pack in registered():
         merged.update(pack.tools_by_name())
     return MappingProxyType(merged)

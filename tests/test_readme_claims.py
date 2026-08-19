@@ -85,6 +85,22 @@ class TestClaimedCoverage:
             "README lists `make demo` as broken, but the module now runs — update the defect list"
         )
 
+    def test_policy_ids_in_the_readme_exist_in_the_code(self):
+        """The policy table drifted once: it named P-004-MATERIALITY-ROUTING after the code had
+        renamed it, and described the band as basis-point-driven after that coupling was removed."""
+        import re
+
+        from nav_sentinel.control_plane import policies
+
+        source = (ROOT / "src" / "nav_sentinel" / "control_plane" / "policies.py").read_text()
+        in_code = set(re.findall(r'policy_id="(P-\d+-[A-Z-]+)"', source))
+        in_readme = set(re.findall(r"\b(P-\d+-[A-Z-]+)\b", README))
+        assert in_readme, "README no longer names any policy id"
+        assert in_readme <= in_code, (
+            f"README names policy ids the code does not emit: {sorted(in_readme - in_code)}"
+        )
+        assert policies.band_for is not None
+
     def test_license_claim_has_a_file(self):
         assert "MIT" in README
         assert (ROOT / "LICENSE").exists(), "README declares MIT with no LICENSE file"

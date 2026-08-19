@@ -135,27 +135,37 @@ def may_post_entry(
             agent_ref=manifest.ref,
             resource=f"ledger:{facts.case_id}",
         )
-    if manifest.authority.clears_autonomously(facts.impact):
-        return PolicyDecision(
-            effect=Effect.ALLOW,
-            policy_id="P-003-NO-AUTONOMOUS-POSTING",
-            reason=(
-                f"{facts.impact} is within {manifest.ref}'s autonomous ceiling of "
-                f"{manifest.authority.max_autonomous_impact}."
-            ),
-            agent_ref=manifest.ref,
-            resource=f"ledger:{facts.case_id}",
-        )
     if human_approval_ref is None:
+        # The only route to the ledger without a human is a case the control plane itself bands
+        # as AUTO_CLEAR *and* which sits inside the agent's declared ceiling. Both, not either:
+        # consulting the ceiling alone let a manifest grant itself 500bps of headroom over a
+        # case the control plane had banded cio_escalation, and the permissive control won.
+        band = band_for(facts.impact, thresholds)
+        if band is ApprovalClass.AUTO_CLEAR and manifest.authority.within_ceiling(facts.impact):
+            return PolicyDecision(
+                effect=Effect.ALLOW,
+                policy_id="P-003-NO-AUTONOMOUS-POSTING",
+                reason=(
+                    f"{facts.impact} bands to {band.value} and sits within {manifest.ref}'s "
+                    f"ceiling of {manifest.authority.max_autonomous_impact}."
+                ),
+                agent_ref=manifest.ref,
+                resource=f"ledger:{facts.case_id}",
+                metadata={"band": band.value},
+            )
         return PolicyDecision(
             effect=Effect.DENY,
             policy_id="P-003-NO-AUTONOMOUS-POSTING",
             reason=(
-                f"No human approval reference recorded, and {facts.impact} exceeds "
-                f"{manifest.ref}'s autonomous ceiling."
+                f"No human approval recorded. {facts.impact} bands to {band.value}"
+                + ("" if manifest.authority.max_autonomous_impact is None
+                   else f" and {manifest.ref}'s ceiling is "
+                        f"{manifest.authority.max_autonomous_impact}")
+                + "."
             ),
             agent_ref=manifest.ref,
             resource=f"ledger:{facts.case_id}",
+            metadata={"band": band.value},
         )
     return PolicyDecision(
         effect=Effect.ALLOW,
@@ -166,7 +176,7 @@ def may_post_entry(
     )
 
 
-def band_for(impact: Impact, thresholds: ThresholdSet | None = None) -> ApprovalClass:
+def band_for(impact: Impact | None, thresholds: ThresholdSet | None = None) -> ApprovalClass:
     """Derive who must approve, from a unit-tagged magnitude and the tenant's thresholds.
 
     The control plane derives the band; the process supplies only the magnitude and its unit.
@@ -178,6 +188,12 @@ def band_for(impact: Impact, thresholds: ThresholdSet | None = None) -> Approval
     An unrecognised unit escalates. A process measuring impact in something the control plane
     has no thresholds for cannot be auto-cleared on the strength of that.
     """
+    if impact is None:
+        # An uncomputed magnitude escalates. Collapsing it to zero made every untriaged case --
+        # the default state of a freshly opened one -- band as auto_clear on an impact nobody
+        # had calculated. The unknown-unit rule below and this one are the same rule.
+        return ApprovalClass.CIO_ESCALATION
+
     thresholds = thresholds or thresholds_for(impact.unit)
     if thresholds is None:
         return ApprovalClass.CIO_ESCALATION

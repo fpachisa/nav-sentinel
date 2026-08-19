@@ -5,11 +5,16 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
+from nav_sentinel import composition
 from nav_sentinel.control_plane import identity
 from nav_sentinel.registry import discover
 
 
 def main() -> None:
+    # The registry has no manifests until the processes are registered. Without this the CLI
+    # raises rather than printing an empty table -- correct, but only if someone calls it.
+    composition.configure()
+
     console = Console()
 
     table = Table(title="Agent Registry -- published fleet", header_style="bold")
