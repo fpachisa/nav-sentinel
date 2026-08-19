@@ -155,9 +155,9 @@ Dropping to three investigators retires the pricing and cash-fees categories. Th
 binding constraint here. The margin survives only because day one's allocation was completed
 ahead of the calendar; it is not slack won back by estimating better.
 
-Of the 22.5h reserve, **12.25h is scheduled in-line** in §7 and **10.25h is deliberately
-unallocated** — rework lands on whichever gate produces findings, and pretending to know which day
-would be false precision.
+Of the 22.5h reserve, **9.2h is scheduled in-line** in §7 and **13.3h is deliberately unallocated**
+— rework lands on whichever gate produces findings, and pretending to know which day would be false
+precision.
 
 **2.5h per gate is a budget fitted to capacity, not an estimate derived from history — and the
 distinction matters.** The four gates so far produced 12 blockers and 41 majors at roughly 10h of
@@ -374,8 +374,7 @@ Ten build days at ~7.3h, then two packaging days at ~4h. Build finishes **28 Aug
 | Aug 29 | Sat | S5 evaluation + baseline · S7 deployment — **code freeze** | 8.0 |
 | Aug 30 | Sun | S8a reproducibility + Devpost · S8b rehearse and record · **submit** | 7.0 |
 
-Scheduled **75.3h** (63.1 build + 12.25 in-line rework); plus the 5.25h floating reserve, the commitment is
-80.6h against 84h.
+Scheduled: **83.3h** across the twelve days. Build in §5 and §5b totals 74.1h, so 9.2h of in-line rework sits in the calendar and **13.3h of the 22.5h reserve stays unallocated** — rework lands on whichever gate produces findings. Gross commitment is 96.6h; the 19–20 August rows are already complete as of 18 August, so 91.3h remains against 96.0h of capacity.
 
 **S4 → S5 now precede S7**, so the deployed artefact is the final fleet. A late S7 is tolerable precisely
 because S7a banks the mandatory proof on 23 August.
