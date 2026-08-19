@@ -50,11 +50,26 @@ class ApprovalRecord(BaseModel):
                 f"approval {self.ref} was granted at {self.granted_band.value} but the case "
                 f"now bands to {band.value}"
             )
-        required = 2 if band is ApprovalClass.FOUR_EYES else 1
+        allowed_roles, required = BAND_REQUIREMENTS[band]
         if len(set(self.approvers)) < required:
             return False, (
                 f"approval {self.ref} carries {len(set(self.approvers))} approver(s); "
                 f"{band.value} requires {required}"
+            )
+        # Re-checked at enforcement, not only at minting. A record can reach the store without
+        # going through `grant()` -- a direct write, a restored backup -- so checking roles once
+        # made `approver_roles` decorative exactly where it mattered.
+        wrong = sorted(set(self.approver_roles) - allowed_roles)
+        if wrong:
+            return False, (
+                f"approval {self.ref} was signed by role(s) {wrong}; {band.value} may be signed "
+                f"only by {sorted(allowed_roles)}"
+            )
+        if len(self.approver_roles) != len(self.approvers):
+            return False, (
+                f"approval {self.ref} records {len(self.approvers)} approver(s) and "
+                f"{len(self.approver_roles)} role(s); a signature without a recorded role cannot "
+                f"be checked"
             )
         return True, f"approval {self.ref} by {', '.join(self.approvers)}"
 
@@ -209,9 +224,33 @@ def use_store(store: ApprovalStore) -> None:
     _resolver = store
 
 
+class _ReadOnlyStore(ApprovalStore):
+    """A façade with no working `put`.
+
+    `reader()` returned the store itself, `put()` included, while its docstring said it never
+    returns a writer. Naming is not a control.
+    """
+
+    def __init__(self, inner: ApprovalStore) -> None:
+        self._inner = inner
+
+    def get(self, ref: str) -> ApprovalRecord | None:
+        return self._inner.get(ref)
+
+    def put(self, record: ApprovalRecord) -> None:  # noqa: ARG002 -- the signature is the point
+        raise PermissionError(
+            "this handle is read-only. Minting an approval requires an ApprovalAuthority, which "
+            "the agent runtime never constructs."
+        )
+
+
 def reader() -> ApprovalStore:
-    """The installed store. Named `reader` because the enforcement side only ever reads; the
-    console obtains a writer through `composition.approval_authority()`."""
+    """A read-only handle on the installed store, for the enforcement side."""
+    return _ReadOnlyStore(_resolver)
+
+
+def _writable() -> ApprovalStore:
+    """The writable store, for an ApprovalAuthority only."""
     return _resolver
 
 

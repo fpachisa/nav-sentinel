@@ -129,6 +129,7 @@ def load_manifests(directories: tuple[Path, ...] | Path | None = None) -> list[A
 
     manifests: list[AgentManifest] = []
     seen: dict[str, Path] = {}
+    owner_of_agent: dict[str, str] = {}
     for directory in dirs:
         pack = owner.get(directory)
         for path in sorted(directory.glob("*.yaml")):
@@ -137,7 +138,16 @@ def load_manifests(directories: tuple[Path, ...] | Path | None = None) -> list[A
                 raise ValueError(
                     f"{manifest.ref} is published twice: {seen[manifest.ref]} and {path}"
                 )
+            claimed = owner_of_agent.get(manifest.agent_id)
+            if pack is not None and claimed is not None and claimed != pack.key:
+                raise ValueError(
+                    f"{path} publishes agent_id {manifest.agent_id!r}, already published by "
+                    f"process {claimed!r}. Discovery resolves a bare reference to the highest "
+                    f"version across all packs, so an unscoped agent_id lets one process hijack "
+                    f"another's identity by version number."
+                )
             if pack is not None:
+                owner_of_agent[manifest.agent_id] = pack.key
                 # Namespacing the pack's declared capability tuple is the half that carries no
                 # authority. This is the half that decides routing: without it, a manifest in one
                 # process's directory could claim another's capability and win discovery on

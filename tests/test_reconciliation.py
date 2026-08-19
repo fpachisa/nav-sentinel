@@ -119,6 +119,32 @@ class TestApprovalRouting:
         assert severity_for(100.0) is Severity.CRITICAL
 
 
+def fixture_to_base(base: str, as_of: date):
+    """A currency converter derived from the committed fixtures.
+
+    `make_to_base` fetches live ECB rates, which made the three closure proofs -- the section's
+    headline claim -- network-dependent inside a suite labelled offline, and they flaked. The
+    stored rates are the same numbers: a `live` test pins every custodian rate to the ECB's
+    published rate for its date, so deriving from the fixtures loses no fidelity and gains
+    hermeticity.
+    """
+    rates: dict[str, Decimal] = {base: Decimal(1)}
+    for source in ("accounting", "custodian"):
+        for p in bnr.positions(source):
+            if p.as_of == as_of and p.local_currency not in rates and source == "custodian":
+                rates[p.local_currency] = p.fx_rate
+
+    def convert(amount: Decimal, currency: str) -> Decimal:
+        if currency not in rates:
+            raise AssertionError(
+                f"no fixture rate for {currency} at {as_of}; add a position in that currency "
+                f"or the closure proof cannot be checked offline"
+            )
+        return (amount / rates[currency]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return convert
+
+
 class TestGoldenClosesTheControlTotal:
     """B2. The declared ground truth must account for the whole NAV difference.
 
@@ -151,7 +177,7 @@ class TestGoldenClosesTheControlTotal:
         cycle = golden["cycles"][cycle_index]
         as_of = date.fromisoformat(cycle["nav_date"])
         base = golden["base_currency"]
-        to_base = make_to_base(base, as_of)
+        to_base = fixture_to_base(base, as_of)
 
         acc = bnr.nav_record("accounting", golden["fund_id"], as_of)
         cus = bnr.nav_record("custodian", golden["fund_id"], as_of)
@@ -185,7 +211,7 @@ class TestGoldenClosesTheControlTotal:
         cycle = golden["cycles"][1]
         as_of = date.fromisoformat(cycle["nav_date"])
         base = golden["base_currency"]
-        to_base = make_to_base(base, as_of)
+        to_base = fixture_to_base(base, as_of)
 
         def total(scenarios):
             out = Decimal(0)

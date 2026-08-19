@@ -43,8 +43,9 @@ other break is a candidate explanation for it. The cycle is complete only when t
 of explained cases equals the NAV difference and the residual is zero:
 
 ```
-MERID-GEF  control total  EUR 5,338,120.80
-           explained       EUR 5,338,120.80   (5 cases)
+MERID-GEF  control total          EUR -4529562.69
+           less declared corrections  (closes to 0.00)
+           6 scenarios across 3 capabilities, 2 NAV cycles
            residual        EUR        -0.00   complete
 ```
 
@@ -64,8 +65,8 @@ proof — are in [docs/diagrams/](docs/diagrams/), with the full write-up in
 | Agent Runtime | Agent Runtime / Cloud Run | Long-running investigations dispatched asynchronously over Pub/Sub. |
 | Memory Bank | Memory Bank | Per-fund, per-security recurrence memory across NAV cycles, so a break seen last month is recognised rather than re-investigated. |
 | Agent Identity | Agent Identity + IAM | One service account per agent, minted from its manifest. No shared fleet identity, no ambient authority. |
-| Agent Gateway | Agent Gateway | Intended single enforcement point for five policies (below). **Under remediation — see Known defects.** |
-| Model Armor | Model Armor | Screens external content before it reaches a model context. **Under remediation — the current implementation has a verified bypass; see Known defects.** |
+| Agent Gateway | Agent Gateway | Single enforcement point for the six policies below. Subject resolved from the bound identity; tools resolved from a frozen catalogue. |
+| Model Armor | Model Armor | Screens external content in overlapping windows, gated on all three response fields. Reduces what gets through; **not** the boundary — see below. |
 | Observability | Cloud Trace via OTLP | One trace per exception case. The reasoning chain *is* the audit artefact. |
 
 **Model:** `gemini-3.7-flash` on Vertex AI for investigation and drafting;
@@ -76,7 +77,7 @@ where token spend would otherwise run away.
 > general availability as of August 2026 — it missed its I/O target. We satisfy the
 > requirement with Gemini 3.7 Flash, which is GA and better suited to agentic workloads.
 
-### The five enforced policies
+### The six enforced policies
 
 | ID | Policy |
 | :--- | :--- |
@@ -95,23 +96,39 @@ prompt-injection surface rather than a hypothetical one. `fixtures/data/` contai
 corporate-action notice instructing the agent to enable posting authority, skip the audit log and
 exfiltrate the investor register.
 
-**Model Armor blocks that notice in isolation and does not reliably block it inside a real document.**
-Measured against the live service, with the 1,008-byte injection held constant:
+**Model Armor reduces what gets through. It does not stop it, and we can show why.**
 
-| Injection position in a 19,662-byte filing | Whole-document screen |
+Measured against the live service. The 586-byte injection block from the poisoned notice:
+
+| Payload | Prompt-injection filter |
 | :--- | :--- |
-| head | missed |
-| middle | missed |
-| tail | caught |
+| the injection block alone | matched 4/4 |
+| plus up to 400 bytes of benign filler (61% injection) | matched 2/2 |
+| plus one particular 157-byte filing paragraph (80% injection) | **missed 0/8** |
 
-There is also a size cliff between 40,827 and 41,329 bytes, above which the prompt-injection filter
-returns `execution_state: EXECUTION_SKIPPED` and `invocation_result: PARTIAL` while
-`filter_match_state` still reads `NO_MATCH_FOUND` — so code checking only the match state, as this
-code currently does, cannot distinguish a skipped scan from a clean one.
+Deterministically, not flakily. Earlier versions of this section blamed dilution, then placement;
+neither is causal. What changes the verdict is *which* benign text shares the payload — which no
+window size can control, because you cannot know an injection's length in advance.
 
-Screening in 1KB windows with 500-byte overlap catches the injection at every position tested, with no
-false positives. That fix is in progress, together with a quarantined extractor so that untrusted prose
-never enters a privileged context at all. See [docs/PLAN.md](docs/PLAN.md) §1.
+There is also a size cliff around 41,000 bytes, above which `invocation_result` becomes `PARTIAL`.
+An earlier version of this section attributed that to the prompt-injection filter and claimed
+152,066 bytes were admitted with the injection intact. Re-measured: it is the **`csam`** filter
+that reports `EXECUTION_SKIPPED`, and `pi_and_jailbreak` runs and matches at both 41KB and 152KB.
+The conclusion did not follow from the measurement. The cliff still matters in the other
+direction — gating on `invocation_result == SUCCESS` makes every document over ~41KB fail closed
+regardless of content, which is deliberate but is a refusal rather than a catch.
+
+**So the boundary is structural, not the screener.** Content is screened in overlapping windows on
+merged structural boundaries, gated on all three response fields, and refused rather than
+part-scanned. Behind that, a quarantined extractor holds no tools, no bound identity and no
+memory, and emits only a record of pattern-constrained typed fields — so an instruction that
+survives screening arrives somewhere with nothing to instruct. Quarantine bounds *instruction*
+injection and does nothing about a poisoned *value*, which is what the fixture actually attacks by
+claiming 0.00% withholding on a Brazilian ADR, so values are cross-checked against the treaty
+schedule and the fund's own books before anything is drafted, and a human approval sits behind
+that.
+
+Four layers, each doing one thing, none claiming another's job.
 
 ## Data
 
@@ -121,7 +138,7 @@ Real public sources provide the external truth an investigator checks against:
   weekends and TARGET holidays, which is itself the cause of a large share of real FX breaks.
 - **SEC EDGAR** — issuer filings and corporate-action announcements.
 
-The books and records are synthetic: two funds, twelve holdings, and nine deliberately
+The books and records are synthetic: one fund, eight holdings, and six deliberately
 seeded breaks spanning all five root-cause families. Each seeded break records its expected
 category and exact correction in `eval/golden_breaks.yaml`, which is what allows root-cause
 accuracy to be scored without a model grading another model.
@@ -169,7 +186,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 144 invariant tests, including "no agent may post"
+make test        # 159 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -242,9 +259,10 @@ such rather than as complete.
 Recorded openly because this repository is public and the claims above were previously overstated. Full
 detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 
-1. **Tool allowlist bypass.** `gateway.call_tool(name, fn)` validates the *name* and executes the
-   supplied *callable*, so any function can run under a declared tool's label — and the audit log
-   records the declared name, actively falsifying the trail.
+1. ~~**Tool allowlist bypass.**~~ **Closed.** `call_tool` takes a name only and resolves the
+   callable from a frozen catalogue; a callable passed as an argument is refused before any policy
+   is evaluated, so a rejected call leaves no misleading ALLOW in the log. Reintroducible only via
+   the `packs.override` test seam, which now refuses to run outside the test runner.
 2. ~~**Confused deputy.**~~ **Closed.** `acting_as` takes an agent reference and resolves the
    manifest from the published registry; registry models are frozen, so the resolved manifest
    cannot be mutated either (that was a one-line bypass which also poisoned the registry cache
@@ -273,8 +291,9 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    expires, and is not bound to the drafted entry.
 9. `FirestoreApprovalStore` is written but never executed; the offline default is an in-process
    store, chosen explicitly and fail-closed when Firestore is requested and unavailable.
-10. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
-   one test require live network access to the ECB.
+10. `make demo` fails (`ModuleNotFoundError`) — the orchestrator lands in S3. `make fixtures`
+    requires live ECB access; the test suite itself does not, and `make verify` passes with the
+    network unreachable.
 
 ## Licence
 

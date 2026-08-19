@@ -79,7 +79,7 @@ def approval_authority() -> approvals.ApprovalAuthority:
     Deliberately a separate call. The agent runtime never invokes it, so the process that acts on
     approvals holds no object capable of creating one.
     """
-    return approvals.ApprovalAuthority(approvals.reader())
+    return approvals.ApprovalAuthority(approvals._writable())
 
 
 def reset() -> None:

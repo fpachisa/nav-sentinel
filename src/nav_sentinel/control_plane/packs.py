@@ -12,6 +12,7 @@ port and each process supplies specs through it.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -31,6 +32,12 @@ class ToolSpec:
     #: True when the return value is authored outside our trust boundary. The gateway screens
     #: these; the agent is never asked to remember to.
     untrusted_output: bool = False
+    #: Which fields of a structured return actually carry filer text. Empty means "everything",
+    #: which is right for a tool returning a document body and wrong for one returning metadata:
+    #: screening a listing's accession numbers and dates cost 15,000 calls to learn ten facts, and
+    #: overflowed the span queue that carries the audit trail. An accession number is pattern-
+    #: constrained by the SEC and cannot carry an instruction; an issuer name can.
+    untrusted_fields: tuple[str, ...] = ()
     description: str = ""
 
 
@@ -218,8 +225,19 @@ def resolve(name: str) -> ToolSpec:
 
 @contextmanager
 def override(name: str, spec: ToolSpec) -> Iterator[None]:
-    """Temporarily substitute one tool. Tests only — scoped, named, and unreachable by an agent
-    emitting tool-call data."""
+    """Temporarily substitute one tool. Tests only.
+
+    Gated on the test runner rather than trusted to convention. `resolve()` consults `_overrides`
+    first, so this seam runs arbitrary code under a declared tool's label while the audit record
+    names the declared tool and logs ALLOW — precisely the property B1 was closed to remove.
+    "Scoped and named" was naming, not a control.
+    """
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        raise RuntimeError(
+            "packs.override is a test seam. Outside the test runner it would let code execute "
+            "under another tool's name while the audit log records that name — the exact defect "
+            "B1 closed."
+        )
     previous = _overrides.get(name)
     _overrides[name] = spec
     try:

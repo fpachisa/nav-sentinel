@@ -39,10 +39,15 @@ NAV_TOOLS: tuple[ToolSpec, ...] = (
     # --- third-party filings: free text, authored by someone else -------------------------
     # Metadata, but still filer-authored: `issuer` comes from the filing's own name and
     # `description` from primaryDocDescription, both chosen by the filer.
+    # Only `issuer` and `description` are filer-authored; accession numbers, dates, CIKs and form
+    # types are SEC-formatted and cannot carry an instruction. Screening all of them cost 15,000
+    # calls for one listing and overflowed the span queue carrying the audit trail.
     ToolSpec("edgar.recent_filings", edgar.recent_filings, (), untrusted_output=True,
-             description="Filing metadata for an issuer. Filer-authored strings."),
+             untrusted_fields=("issuer", "description"),
+             description="Filing metadata for an issuer."),
     ToolSpec("edgar.search_filings", edgar.search_filings, (), untrusted_output=True,
-             description="Full-text search across EDGAR. Filer-authored strings."),
+             untrusted_fields=("issuer",),
+             description="Full-text search across EDGAR."),
     ToolSpec("edgar.fetch_filing_text", edgar.fetch_filing_text, (), untrusted_output=True,
              description="Raw filing text. Attacker-controllable; screened by the gateway."),
 )

@@ -114,39 +114,90 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
     # Screening is bound to the tool that fetched the bytes, not to an agent's self-declared
     # flag. An agent cannot forget to screen, because it never had the option.
     if spec.untrusted_output:
-        return _screen_untrusted_result(result, source_uri=f"tool:{resolved}")
+        return _screen_untrusted_result(
+            result, source_uri=f"tool:{resolved}", fields=spec.untrusted_fields
+        )
     return result
 
 
-def _screen_untrusted_result(value: Any, *, source_uri: str, _depth: int = 0) -> Any:
+#: Distinct strings screened per tool call. `edgar.recent_filings` returns up to 1000 filings of
+#: 7 fields; screening every one produced 15,000 sanitize calls for a single call, with only ten
+#: distinct payloads -- and 15,000 spans overflowed the batch processor, so audit spans were
+#: silently dropped. The audit trail is the deliverable, so that is the serious half.
+MAX_SCREENED_STRINGS = 64
+
+
+def _screen_untrusted_result(
+    value: Any, *, source_uri: str, fields: tuple[str, ...] = (), _depth: int = 0
+) -> Any:
     """Screen every string reachable in an untrusted tool's return value.
 
-    An earlier version screened only a bare `str`, so a tool returning a dict or a list of
-    strings bypassed screening entirely while still logging ALLOW. Attacker-controllable text
-    routinely arrives inside a structure -- a filing's `description` field, a list of search
-    hits -- so the shape of the container must not decide whether a control applies.
+    An earlier version screened only a bare `str`, so a tool returning a dict or a list bypassed
+    screening entirely while still logging ALLOW. Attacker-controllable text routinely arrives
+    inside a structure -- a filing's `description` field, a list of search hits -- so the shape of
+    the container must not decide whether a control applies.
 
-    Un-screenable types are refused rather than passed through: a control that silently
-    ignores what it does not understand is not a control.
+    Un-screenable types are refused rather than passed through: a control that silently ignores
+    what it does not understand is not a control.
     """
-    if _depth > 6:
+    seen: dict[str, str] = {}
+    budget = [MAX_SCREENED_STRINGS]
+    return _screen_value(
+        value, source_uri=source_uri, seen=seen, budget=budget, depth=_depth,
+        fields=frozenset(fields), screen_this=not fields,
+    )
+
+
+def _screen_value(  # noqa: PLR0911 -- one return per admissible shape; collapsing them would
+    #                  hide which shapes are handled and which are refused.
+    value: Any, *, source_uri: str, seen: dict[str, str], budget: list[int],
+    depth: int, fields: frozenset[str], screen_this: bool,
+) -> Any:
+    if depth > 6:
         raise ContentUnscreenable("untrusted value nests more deeply than 6 levels")
 
     if isinstance(value, str):
-        return admit_untrusted_content(value, source_uri=source_uri)
+        if not screen_this:
+            # A field the tool did not declare as filer-authored. Not screened, and not silently
+            # trusted either: it is returned unchanged precisely because it cannot carry prose.
+            return value
+        # Memoised by content. The same issuer name repeats across every filing in a listing, and
+        # screening it a thousand times costs a thousand calls to learn one fact.
+        if value in seen:
+            return seen[value]
+        if not value.strip():
+            return value
+        if budget[0] <= 0:
+            raise ContentUnscreenable(
+                f"more than {MAX_SCREENED_STRINGS} distinct strings to screen in one tool "
+                f"result. Refusing rather than spending an unbounded number of screening calls "
+                f"and overflowing the span queue that carries the audit trail."
+            )
+        budget[0] -= 1
+        screened = admit_untrusted_content(value, source_uri=source_uri)
+        seen[value] = screened
+        return screened
+
     if isinstance(value, (int, float, bool, type(None), Decimal, date, datetime)):
         return value
     if isinstance(value, dict):
+        # Keys are our own field names, not filer text, so they are not screened.
         return {
-            _screen_untrusted_result(k, source_uri=source_uri, _depth=_depth + 1):
-            _screen_untrusted_result(v, source_uri=source_uri, _depth=_depth + 1)
+            k: _screen_value(
+                v, source_uri=source_uri, seen=seen, budget=budget, depth=depth + 1,
+                fields=fields, screen_this=(not fields) or (k in fields),
+            )
             for k, v in value.items()
         }
     if isinstance(value, (list, tuple, set)):
         screened = [
-            _screen_untrusted_result(v, source_uri=source_uri, _depth=_depth + 1) for v in value
+            _screen_value(
+                v, source_uri=source_uri, seen=seen, budget=budget, depth=depth + 1,
+                fields=fields, screen_this=screen_this,
+            )
+            for v in value
         ]
-        return type(value)(screened) if not isinstance(value, set) else set(screened)
+        return set(screened) if isinstance(value, set) else type(value)(screened)
     raise ContentUnscreenable(
         f"a tool declared untrusted_output returned {type(value).__name__}, which cannot be "
         f"screened. Return a string or a structure of primitives, or screen it explicitly."

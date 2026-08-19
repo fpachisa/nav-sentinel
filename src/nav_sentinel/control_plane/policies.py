@@ -265,8 +265,12 @@ def approval_route(facts: CaseFacts, thresholds: ThresholdSet | None = None) -> 
         resource=facts.case_id,
         metadata={
             "band": band.value,
-            "impact_value": str(facts.impact.value),
-            "impact_unit": facts.impact.unit,
+            # `impact` is None on every freshly opened case, which is the state `band_for`
+            # deliberately escalates. Dereferencing it here raised AttributeError instead, so a
+            # case could not have its trace opened before triage and no P-004 record reached the
+            # governance log.
+            "impact_value": str(facts.impact.value) if facts.impact else "not_computed",
+            "impact_unit": facts.impact.unit if facts.impact else "",
             "capability": facts.capability,
         },
     )

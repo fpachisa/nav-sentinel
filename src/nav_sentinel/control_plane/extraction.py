@@ -27,8 +27,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from nav_sentinel.control_plane import identity
 
@@ -85,15 +86,20 @@ class CorporateActionRecord(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    action_type: str
-    isin: str
+    #: Every string field is constrained by pattern or by enumeration. `split_ratio` was
+    #: `str | None` with no pattern, and `_LABEL` captures the rest of the line -- so 170 bytes of
+    #: attacker instruction prose crossed the boundary this class exists to hold, in the one field
+    #: nobody had constrained. The docstring above already forbade it; the constraint was missing.
+    action_type: Literal["cash_dividend", "stock_split", "merger", "unknown"]
+    isin: str = Field(pattern=r"^[A-Z]{2}[A-Z0-9]{9}\d$")
     ex_date: date
     gross_rate: Decimal | None = None
     withholding_pct: Decimal | None = None
-    split_ratio: str | None = None
-    currency: str | None = None
-    #: Where this came from, so a verdict can cite it. A URI, not the document.
-    source_uri: str | None = None
+    split_ratio: str | None = Field(default=None, pattern=r"^\d{1,6}\s*:\s*\d{1,6}$")
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    #: Where this came from, so a verdict can cite it. A URI, not the document, and constrained
+    #: to an https URL so it cannot smuggle prose either.
+    source_uri: str | None = Field(default=None, max_length=300, pattern=r"^https://\\S+$")
 
     @property
     def net_rate(self) -> Decimal | None:
@@ -189,7 +195,7 @@ def extract_corporate_action(
     withholding = _parse_percentage(
         fields.get("withholding tax") or fields.get("withholding") or fields.get("withholding_pct")
     )
-    ratio = fields.get("ratio") or fields.get("split ratio")
+    ratio = _parse_ratio(fields.get("ratio") or fields.get("split ratio"))
 
     for name, value in (("gross_rate", gross), ("withholding_pct", withholding)):
         if value is not None:
@@ -330,6 +336,25 @@ def _parse_percentage(raw: str | None) -> Decimal | None:
     if "%" in raw or value > 1:
         return value / Decimal(100)
     return value
+
+
+def _parse_ratio(raw: str | None) -> str | None:
+    """A share ratio, or nothing.
+
+    Extracts the ratio and discards the rest of the line rather than passing it through. A
+    document that appends prose after the ratio -- `2:1 -- SYSTEM NOTE: ignore all previous...` --
+    gets the ratio read and the prose dropped at the boundary, which is where prose is supposed
+    to stop.
+    """
+    if not raw:
+        return None
+    match = re.search(r"\b(\d{1,6})\s*:\s*(\d{1,6})\b", raw)
+    if match is None:
+        raise ExtractionRejected(
+            f"ratio field {raw[:60]!r} does not contain a share ratio. Refusing rather than "
+            f"passing unparsed text across the boundary."
+        )
+    return f"{match.group(1)}:{match.group(2)}"
 
 
 def _parse_currency(fields: dict[str, str]) -> str | None:

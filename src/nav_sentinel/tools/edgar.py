@@ -15,12 +15,23 @@ import time
 from datetime import date
 from functools import lru_cache
 from threading import Lock
+from urllib.parse import urlsplit
 
 import httpx
 
 from nav_sentinel.config import settings
 
 SOURCE_NAME = "sec_edgar"
+
+#: The only hosts this tool will fetch from. `source_uri` is an agent-supplied argument, so
+#: without this the tool is an outbound HTTP channel reachable by tool-call data alone -- and the
+#: poisoned fixture's instruction is literally to export the investor register to a URL. Screening
+#: does not help: the request is issued inside the tool, before its return value is screened.
+ALLOWED_HOSTS = frozenset({"www.sec.gov", "data.sec.gov", "efts.sec.gov"})
+
+
+class DisallowedHost(ValueError):
+    """The URI points somewhere this tool may not go."""
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 FULLTEXT_URL = "https://efts.sec.gov/LATEST/search-index"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data"
@@ -77,6 +88,27 @@ def _throttled() -> None:
         return
 
 
+def _assert_allowed(url: str) -> None:
+    """Refuse anything outside the EDGAR hosts.
+
+    Checked on every request rather than only on caller-supplied URIs, and redirects are not
+    followed, because a redirect to an attacker host is the same channel one hop later.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme != "https":
+        raise DisallowedHost(f"{url!r} is not https. Refusing to fetch over {parsed.scheme!r}.")
+    if parsed.username or parsed.password:
+        raise DisallowedHost(f"{url!r} carries userinfo. Refusing.")
+    if parsed.port not in (None, 443):
+        raise DisallowedHost(f"{url!r} targets port {parsed.port}. Refusing.")
+    if parsed.hostname not in ALLOWED_HOSTS:
+        raise DisallowedHost(
+            f"{parsed.hostname!r} is not an EDGAR host. This tool fetches only from "
+            f"{sorted(ALLOWED_HOSTS)}; anything else would make it an outbound channel an "
+            f"injected instruction could use."
+        )
+
+
 def _get(url: str, params: dict | None = None, *, attempts: int = 4) -> httpx.Response:
     """GET with backoff on transient failures.
 
@@ -85,11 +117,15 @@ def _get(url: str, params: dict | None = None, *, attempts: int = 4) -> httpx.Re
     upstream hiccuped would report "root cause unknown" for a break it could have explained,
     so transient faults are retried and only a persistent failure is allowed to surface.
     """
+    _assert_allowed(url)
+
     last: Exception | None = None
     for attempt in range(attempts):
         _throttled()
         try:
-            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            # Redirects are not followed: a 302 to an attacker host is the same exfiltration
+            # channel one hop later, and EDGAR does not need them for these endpoints.
+            with httpx.Client(timeout=30.0, follow_redirects=False) as client:
                 r = client.get(url, params=params, headers=_headers())
             if r.status_code in (403, 429, 500, 502, 503, 504) and attempt < attempts - 1:
                 last = httpx.HTTPStatusError(
@@ -177,6 +213,10 @@ def fetch_filing_text(source_uri: str, max_bytes: int = 32_000) -> str:
 
     The return value is UNTRUSTED. The gateway screens it automatically because this tool is
     declared `untrusted_output`; callers never have the option of skipping that.
+
+    `source_uri` must point at an EDGAR host. It is an agent-supplied argument, and without that
+    restriction this function is an outbound HTTP channel: an injected instruction only has to
+    name a URL, and the request goes out before anything screens the response.
 
     The cap was 200,000 bytes, which is the wrong default now that screening is windowed: every
     byte fetched is a byte screened, and 200KB is roughly 390 sanitize calls. 32KB is a realistic

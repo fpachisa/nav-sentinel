@@ -12,11 +12,18 @@ It is not, however, the boundary. See below.
 
 Three measured properties of the service shape this module, none of them documented.
 
-**An undocumented size cliff.** Bisected to between 40,827 and 41,329 bytes, above which the
-prompt-injection filter returns `execution_state: EXECUTION_SKIPPED` and `invocation_result:
-PARTIAL` while `filter_match_state` still reads `NO_MATCH_FOUND`. Code reading only the match
-state -- as this module originally did -- cannot tell a skipped scan from a clean one. Confirmed
-end to end: 152,066 bytes admitted with the injection intact.
+**An undocumented size cliff, and not where it first appeared to be.** Above roughly 41,000 bytes
+`invocation_result` goes `PARTIAL` for any content, because the `csam` filter reports
+`EXECUTION_SKIPPED`. An earlier version of this docstring attributed the skip to
+`pi_and_jailbreak` and claimed 152,066 bytes were admitted with the injection intact; re-measured,
+`pi_and_jailbreak` runs and matches at both 41KB and 152KB. The 152KB admission that was observed
+was the content-sensitivity effect below, reached with a different payload -- the conclusion did
+not follow from the measurement.
+
+The cliff still matters, in the other direction: gating on `invocation_result == SUCCESS` means
+every document over ~41KB now fails closed regardless of content. That is deliberate -- a partial
+scan is not a scan -- but it is a refusal, not a catch, and it is why the fetch cap does the real
+work.
 
 **Detection is content-sensitive, not size-sensitive.** The same 636-byte injection block is
 matched 4/4 alone, and 2/2 with up to 400 bytes of benign filler appended (61% concentration).
@@ -40,6 +47,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from functools import lru_cache
 
 from nav_sentinel.config import settings
 
@@ -107,20 +115,32 @@ def template_path() -> str:
     return f"projects/{s.project}/locations/{s.region}/templates/{s.model_armor_template}"
 
 
+@lru_cache(maxsize=1)
+def _client(ma):
+    """One client per process. It was constructed per `screen()` call, which meant a fresh gRPC
+    channel for every window."""
+    return ma.ModelArmorClient(
+        client_options={"api_endpoint": settings().model_armor_endpoint}
+    )
+
+
 def windows(text: str, *, size: int = WINDOW_BYTES, overlap: int = OVERLAP_BYTES) -> list[str]:
-    """Split text into screenable windows on structural boundaries.
+    """Split text into overlapping windows on structural boundaries.
 
-    Paragraph-first, not a byte-wise slide. An injection has to read as prose to work on a model,
-    so it occupies whole blocks -- the poisoned notice in the fixtures is a single 635-byte
-    paragraph. Splitting on blocks keeps it intact in one window, and costs roughly one call per
-    paragraph instead of one per `size - overlap` bytes.
+    Three things happen here, and each was a defect first.
 
-    That difference is not cosmetic. A byte-wise slide over a 200KB filing is about 390 sanitize
-    calls, which is neither affordable against the project's credit nor acceptable as request
-    latency inside a NAV window. Paragraph blocks bring the same document to a few dozen.
+    **Blocks are merged up to the window size.** Splitting one window per block meant a
+    line-structured filing -- a holder table, a line-broken exhibit, both routine on EDGAR --
+    produced one window per line: a 30KB document needed 760 windows and was refused outright, so
+    the screener could not read the class of document the investigator exists to read.
 
-    Blocks longer than one window are split with overlap, which is the only place a slide is
-    needed and the only place a straddle is possible.
+    **Adjacent windows overlap.** The overlap was applied only inside the slide over a single
+    over-long block, so neighbouring blocks shared nothing. An attacker chooses where the blank
+    lines fall, so splitting an injection across one made it two independent halves by
+    construction -- and the docstring claimed the opposite.
+
+    **Blocks come first, then a slide.** An injection has to read as prose to work, so it occupies
+    whole blocks; keeping those intact is what gives the filter something recognisable to see.
     """
     step = size - overlap
     if step <= 0:
@@ -128,17 +148,30 @@ def windows(text: str, *, size: int = WINDOW_BYTES, overlap: int = OVERLAP_BYTES
     if len(text.encode()) <= size:
         return [text]
 
-    out: list[str] = []
+    merged: list[str] = []
     for block in _blocks(text):
+        if merged and len((merged[-1] + "\n" + block).encode()) <= size:
+            merged[-1] = merged[-1] + "\n" + block
+            continue
         if len(block.encode()) <= size:
-            out.append(block)
+            merged.append(block)
             continue
         for start in range(0, len(block), step):
             chunk = block[start : start + size]
             if chunk.strip():
-                out.append(chunk)
+                merged.append(chunk)
             if start + size >= len(block):
                 break
+
+    # Carry the tail of each window into the next, so an injection split across a block boundary
+    # is still whole in at least one of them.
+    out: list[str] = []
+    for index, window in enumerate(merged):
+        if index == 0:
+            out.append(window)
+            continue
+        carry = merged[index - 1][-overlap:]
+        out.append(carry + "\n" + window)
     return out or [text]
 
 
@@ -210,9 +243,7 @@ def screen(text: str, *, source_uri: str | None = None) -> ArmorVerdict:
     """
     from google.cloud import modelarmor_v1 as ma
 
-    s = settings()
-    client = ma.ModelArmorClient(client_options={"api_endpoint": s.model_armor_endpoint})
-
+    client = _client(ma)
     parts = windows(text)
     if len(parts) > MAX_WINDOWS:
         blocked = ArmorVerdict(
