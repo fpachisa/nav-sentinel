@@ -168,7 +168,7 @@ Fetches live ECB reference rates — **network required** — and writes the syn
 ### 4. Verify
 
 ```bash
-make test        # 32 invariant tests, including "no agent may post"
+make test        # 70 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -223,12 +223,12 @@ such rather than as complete.
 
 | Component | State | Evidence |
 | :--- | :--- | :--- |
-| Deterministic reconciliation core | works, with a known gap | `tests/test_reconciliation.py` (32 tests). The NAV control-total closure is **circular** — see [docs/PLAN.md](docs/PLAN.md) §1 |
+| Deterministic reconciliation core | works, with a known gap | `tests/test_reconciliation.py` (16 tests). The NAV control-total closure is **circular** — see [docs/PLAN.md](docs/PLAN.md) §1 |
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
 | Agent Gateway policy enforcement | **under remediation** | P-001 is a string check on a label and P-002/P-003/P-005 trust a caller-supplied manifest; both are bypassable. No test covers the bypass |
-| Model Armor screening | **under remediation** | Verified bypass, above. **No test in the suite currently touches Model Armor** |
+| Model Armor screening | **under remediation** | Verified bypass, above. Tests cover the gateway's wiring (`test_governance.py::TestUntrustedOutputScreening`) but **every one of them monkeypatches `model_armor.screen`** — no test exercises the live service or its real detection behaviour |
 | Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
 | Memory Bank recurrence recall | not started | — |
@@ -251,7 +251,7 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 4. **Fixtures violate double entry.** Trade-date recognitions are booked without a contra cash leg, so
    the declared ground truth explains only a fraction of the NAV difference.
 5. **The control total is blind to the FX chain.** Corrupting every `fx_rate` in the accounting book
-   leaves all 32 tests passing, because `market_value_base` is a stored field nothing recomputes.
+   leaves all 70 tests passing, because `market_value_base` is a stored field nothing recomputes.
 6. `make demo` fails (`ModuleNotFoundError`); `make lint` fails (ruff not installed); `make fixtures` and
    one test require live network access to the ECB.
 
