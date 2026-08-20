@@ -38,7 +38,17 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "nav_sentinel"
 
 #: Packages that belong to a process rather than to the platform. The control plane may not reach
 #: any of them, by any route.
-PROCESS_PACKAGES = ("domain", "tools", "agents", "pipeline", "memory")
+PROCESS_PACKAGES = (
+    "domain",
+    "tools",
+    "agents",
+    "pipeline",
+    "memory",
+    # The second process. Added here rather than exempted: if the platform may not reach fund
+    # accounting, it may not reach transfer agency either, and a package the seam scan does not
+    # know about is a package the seam does not protect.
+    "transfer_agency",
+)
 PLATFORM_PACKAGES = ("control_plane", "registry")
 
 

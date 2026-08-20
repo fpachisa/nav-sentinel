@@ -1,0 +1,39 @@
+# Agent Registry manifest. Published to the same registry as the fund-accounting fleet, read by the
+# same `discover`, governed by the same seven policies. Nothing about this file is transfer-agency
+# specific except its contents -- which is the point.
+agent_id: register-investigator
+version: 1.0.0
+display_name: Share Register Investigator
+owner: transfer-agency-platform
+description: >
+  Resolves breaks between the registrar's share register and the fund's own unit ledger:
+  subscriptions dealt before a valuation point but settling after it, redemptions paid and not yet
+  struck off, and transfers recorded on one side only.
+
+  A break in units is not a break in money. The registrar recognises a deal from its trade date and
+  the fund's ledger from its settlement date, so between those dates the two disagree by exactly the
+  dealt units and neither book is wrong.
+
+handles_capabilities: [ta.subscription_in_transit, ta.redemption_unsettled]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - register.positions
+  - register.deals
+  - register.in_transit
+
+data_scopes:
+  read: [holder_positions, deals]
+  write: []
+
+# The same authority model, because authority belongs to the platform and not to a process.
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_impact: null
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 45

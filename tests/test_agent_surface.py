@@ -577,13 +577,22 @@ class TestUndeclaredProjectionsAreRefused:
     removing the filter entirely left every test passing."""
 
     def test_the_declared_facts_are_producible_and_consumable(self):
-        """Every fact a pack's tool declares must be a field the process can rebuild, or it is
-        recorded and then discarded on the way back."""
-        from nav_sentinel.domain.models import ObservedFacts
+        """Every fact a pack's tool declares must be a field *that process* can rebuild, or it is
+        recorded and then discarded on the way back.
 
-        for name, spec in packs.catalogue().items():
+        Scoped to the NAV pack's own tools. `ObservedFacts` is NAV's vocabulary, and transfer agency
+        has its own -- `trade_date`, `settlement_date` -- which is the point of a second process
+        rather than a defect. This test asserted the whole catalogue against one process's fields,
+        which only held while there was one process.
+        """
+        from nav_sentinel.domain.models import ObservedFacts
+        from nav_sentinel.domain.pack import PACK as NAV
+
+        for spec in NAV.tools:
             undeclared = sorted(set(spec.facts) - set(ObservedFacts.model_fields))
-            assert not undeclared, f"{name} declares fact(s) {undeclared} that no verdict can cite"
+            assert not undeclared, (
+                f"{spec.name} declares fact(s) {undeclared} that no NAV verdict can cite"
+            )
 
     def test_a_projection_returning_an_undeclared_key_is_caught(self, store, monkeypatch):
         spec = packs.catalogue()["ecb_fx.rate_on"]

@@ -92,11 +92,18 @@ class TestTriageCannotInventACategory:
             triage.draft_model("nav")
 
     def test_every_capability_triage_can_return_maps_to_a_break_category(self):
-        """`ExceptionCase.category` is a closed enum, so an unmappable answer would crash the
-        caller rather than route badly."""
+        """`ExceptionCase.category` is a closed enum, so an unmappable answer would crash the caller
+        rather than route badly.
+
+        Over the *NAV* vocabulary, which is what triage is offered for a NAV break -- the schema is
+        scoped to the namespace of the process that detected it. Iterating the whole fleet's
+        capabilities was only correct while the fleet was one process.
+        """
         from nav_sentinel.agents.contract import category_for
 
-        for capability in gateway.capabilities():
+        vocabulary = triage.draft_model("nav").model_fields["capability"].annotation.__args__
+        assert vocabulary
+        for capability in vocabulary:
             assert category_for(capability) is not None
 
 
@@ -196,7 +203,13 @@ class TestRoutingStaysWithTheRegistry:
             for capability in gateway.capabilities()
         }
         unrouted = sorted(c for c, agent in routed.items() if agent is None)
-        assert unrouted == ["nav.cash_fees", "nav.pricing", "nav.unclassified"], unrouted
+        assert unrouted == [
+            "nav.cash_fees",
+            "nav.pricing",
+            "nav.unclassified",
+            "ta.transfer_mismatch",
+            "ta.unclassified",
+        ], unrouted
 
     def test_an_unclassified_break_reaches_no_investigator(self):
         """Triage claimed `nav.unclassified`, so the confidence floor -- whose whole purpose is to

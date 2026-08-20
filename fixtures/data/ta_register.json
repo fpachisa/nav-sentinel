@@ -1,0 +1,12 @@
+{
+  "note": "A share register for MERID-GEF at 2026-08-17, in units. Two books: the registrar's and the fund's own unit ledger. HOLD-002 dealt a subscription on 2026-08-14 settling 2026-08-19 -- in transit at the valuation point, so the registrar counts it and the ledger does not.",
+  "positions": [
+    {"fund_id": "MERID-GEF", "holder_id": "HOLD-001", "as_of": "2026-08-17", "units": "2800000.0000", "source": "registrar"},
+    {"fund_id": "MERID-GEF", "holder_id": "HOLD-001", "as_of": "2026-08-17", "units": "2800000.0000", "source": "fund_accounting"},
+    {"fund_id": "MERID-GEF", "holder_id": "HOLD-002", "as_of": "2026-08-17", "units": "1575000.0000", "source": "registrar"},
+    {"fund_id": "MERID-GEF", "holder_id": "HOLD-002", "as_of": "2026-08-17", "units": "1450000.0000", "source": "fund_accounting"}
+  ],
+  "deals": [
+    {"deal_id": "DEAL-0001", "fund_id": "MERID-GEF", "holder_id": "HOLD-002", "deal_type": "subscription", "trade_date": "2026-08-14", "settlement_date": "2026-08-19", "units": "125000.0000", "source": "registrar"}
+  ]
+}

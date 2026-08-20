@@ -74,6 +74,7 @@ def configure(
     _approvals_backend = approvals_backend
 
     from nav_sentinel.domain.pack import PACK as NAV_PACK
+    from nav_sentinel.transfer_agency.pack import PACK as TA_PACK
 
     # Registry discovery is a platform capability rather than a fund-accounting one, so it is
     # registered here instead of inside a pack. Two processes both needing it would otherwise
@@ -91,6 +92,10 @@ def configure(
         ),
     )
     packs.register(NAV_PACK)
+    # A second process, and this is the whole change. Its capabilities, tools, manifests, prompts
+    # and thresholds all come from the pack; the control plane and the registry are untouched, which
+    # `git diff --stat` shows rather than asserts.
+    packs.register(TA_PACK)
     _configure_approvals(approvals_backend)
     return packs.registered()
 

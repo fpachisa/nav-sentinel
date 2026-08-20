@@ -56,7 +56,15 @@ class TestRegistry:
         revisiting those criteria is also a failure.
         """
         gaps = {cat for cat, ref in discover.coverage().items() if ref is None}
-        assert gaps == {"nav.pricing", "nav.cash_fees", "nav.unclassified"}, (
+        assert gaps == {
+            "nav.pricing",
+            "nav.cash_fees",
+            "nav.unclassified",
+            # Transfer agency declares a capability nobody is published to handle, for the same
+            # reason: the registry reporting NONE is a governance demonstration, not a gap.
+            "ta.transfer_mismatch",
+            "ta.unclassified",
+        }, (
             f"coverage gaps are {sorted(gaps)}; expected the two unpublished capabilities plus "
             f"nav.unclassified, which reaches no investigator by design -- an uncertain break "
             f"escalates to a human rather than returning to the classifier. "

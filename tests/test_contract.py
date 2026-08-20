@@ -190,12 +190,23 @@ class TestConversionToTheDomainType:
         with pytest.raises(ValueError, match="does not name a break category"):
             contract.category_for("nav.invented_category")
 
-    def test_every_capability_the_pack_declares_maps(self):
-        """The conversion has to be total, or a declared capability has nowhere to land."""
-        from nav_sentinel.control_plane import packs
+    def test_every_capability_the_nav_pack_declares_maps(self):
+        """The conversion has to be total for its own process, or a declared capability has nowhere
+        to land.
 
-        for capability in packs.capabilities():
+        `BreakCategory` is fund accounting's enum. Transfer agency declares `ta.subscription_in
+        _transit`, which has no business mapping into it -- the two processes share the control plane
+        and nothing else. Asserting over `packs.capabilities()` only held while one process existed.
+        """
+        from nav_sentinel.domain.pack import PACK as NAV
+
+        for capability in NAV.capabilities:
             assert isinstance(contract.category_for(capability), BreakCategory)
+
+    def test_another_processs_capability_does_not_map(self):
+        """And is refused rather than defaulted, so a cross-process routing mistake is loud."""
+        with pytest.raises(ValueError, match="does not name a break category"):
+            contract.category_for("ta.subscription_in_transit")
 
 
 class TestIdsAreDerivedNotCounted:
