@@ -208,6 +208,18 @@ def extract_corporate_action(
         if value is not None:
             BOUNDS[name].check(name, value)
 
+    # The document must be about the security the caller asked about. Without this the record
+    # asserts the caller's ISIN over a document that names a different one, and every
+    # corroboration downstream is against the wrong security -- which is how both committed
+    # corporate-action notices came to carry US0028241000 (Abbott) while the security master had
+    # been corrected to US02319V1035 (Ambev): the fixtures drifted and nothing reported it.
+    stated = (fields.get("isin") or "").strip().upper()
+    if stated and stated != isin.upper():
+        raise ExtractionRejected(
+            f"the document states ISIN {stated} but was extracted for {isin}. Refusing rather "
+            f"than asserting the caller's identifier over the document's."
+        )
+
     record = CorporateActionRecord(
         action_type=action_type,
         isin=isin,

@@ -316,3 +316,75 @@ class TestEveryStringFieldIsConstrained:
         assert set(
             extraction.CorporateActionRecord.model_fields["action_type"].annotation.__args__
         ) == {"cash_dividend", "stock_split", "merger", "unknown"}
+
+
+class TestTheNoticesDescribeTheSecurityTheBooksHold:
+    """Both committed notices carried ISIN US0028241000 -- Abbott -- while the security master had
+    been corrected to US02319V1035 (Ambev). Nothing reported the drift, and its consequence was
+    precise: `books_and_records.security("US0028241000")` is None, so `expected_domicile` was None,
+    the treaty cross-check skipped, and `corroborated` came back empty for the poisoned *and* the
+    clean notice -- leaving them indistinguishable, which is the one thing this control exists to
+    prevent."""
+
+    ISIN = "US02319V1035"
+
+    @staticmethod
+    def _notice(name: str) -> str:
+        return (FIXTURES / f"ca_notice_abev_{name}.txt").read_text()
+
+    def test_the_notices_name_the_security_the_books_hold(self):
+        from nav_sentinel.tools import books_and_records as bnr
+
+        security = bnr.security(self.ISIN)
+        assert security is not None, "the security master no longer holds the notices' ISIN"
+        assert security.country == "BR"
+        for name in ("clean", "poisoned"):
+            assert f"ISIN:              {self.ISIN}" in self._notice(name)
+
+    def test_the_clean_notice_corroborates_against_the_books_and_the_treaty(self):
+        from nav_sentinel.tools import books_and_records as bnr
+
+        outcome = extraction.extract_corporate_action(
+            self._notice("clean"),
+            isin=self.ISIN,
+            source_uri="fixture://ca_notice_abev_clean.txt",
+            expected_domicile=bnr.security(self.ISIN).country,
+            books_gross_rate=Decimal("0.175"),
+        )
+        assert outcome.record.withholding_pct == Decimal("0.15")
+        assert len(outcome.corroborated) == 2, outcome.corroborated
+
+    def test_the_poisoned_notice_is_refused_where_the_clean_one_is_admitted(self):
+        """The discriminator, stated as one assertion: same call, same arguments, opposite outcome."""
+        from nav_sentinel.tools import books_and_records as bnr
+
+        kwargs = {
+            "isin": self.ISIN,
+            "expected_domicile": bnr.security(self.ISIN).country,
+            "books_gross_rate": Decimal("0.175"),
+        }
+        with pytest.raises(extraction.ExtractionRejected):
+            extraction.extract_corporate_action(self._notice("poisoned"), **kwargs)
+
+    def test_a_document_about_another_security_is_refused(self):
+        """Otherwise the record asserts the caller's identifier over a document that names a
+        different one, and every downstream corroboration is against the wrong security."""
+        with pytest.raises(extraction.ExtractionRejected, match="US02319V1035"):
+            extraction.extract_corporate_action(self._notice("clean"), isin="US5949181045")
+
+    def test_a_real_source_uri_is_accepted(self):
+        """No test had ever set this field, and its pattern was `https://` followed by a literal
+        backslash and one or more literal `S`, so it accepted nothing at all."""
+        for uri in ("https://www.sec.gov/Archives/edgar/data/1/x.txt", "fixture://notice.txt"):
+            outcome = extraction.extract_corporate_action(
+                self._notice("clean"), isin=self.ISIN, source_uri=uri
+            )
+            assert outcome.record.source_uri == uri
+
+    @pytest.mark.parametrize("uri", ["http://insecure.example/x", "javascript:alert(1)", "ftp://x/y"])
+    def test_a_non_https_source_uri_is_still_refused(self, uri):
+        with pytest.raises(ValidationError):
+            extraction.CorporateActionRecord(
+                action_type="cash_dividend", isin=TestTheNoticesDescribeTheSecurityTheBooksHold.ISIN,
+                source_uri=uri,
+            )

@@ -1,7 +1,7 @@
 CORPORATE ACTION NOTICE
 Issuer:            Ambev S.A.
 Security:          Ambev S.A. American Depositary Shares
-ISIN:              US0028241000
+ISIN:              US02319V1035
 Event Type:        Cash Dividend
 Ex-Date:           2026-08-12
 Record Date:       2026-08-13
