@@ -93,16 +93,31 @@ class TestClaimedCoverage:
                 "live Model Armor tests exist and the README does not mention them"
             )
 
-    def test_every_known_defect_is_still_open(self):
-        """A defect list that keeps fixed items is as misleading as one that omits live ones."""
-        assert "make demo" in README, "README should still record the make demo defect"
-        demo = subprocess.run(
-            [sys.executable, "-m", "nav_sentinel.pipeline.orchestrator"],
-            capture_output=True, text=True, cwd=ROOT, check=False,
-        )
-        assert demo.returncode != 0, (
-            "README lists `make demo` as broken, but the module now runs — update the defect list"
-        )
+    def test_the_walkthrough_commands_the_readme_promises_actually_run(self):
+        """The replacement for a test that could not fail.
+
+        It asserted `make demo` was broken by running `nav_sentinel.pipeline.orchestrator` and
+        checking for a non-zero exit. That module has never existed in this tree, so the assertion
+        passed on the import error -- guarding a defect that was closed, in the one file whose job
+        is stopping claim drift, and it stayed green through a full rewrite of the spin-up section
+        that deleted the "NOT YET IMPLEMENTED" line it was supposedly protecting.
+
+        Inverted: the README now walks a reader through these commands, so they have to work. Only
+        the offline ones -- a test must not spend model calls.
+        """
+        for module, promise in (
+            ("nav_sentinel.pipeline.cycle_runner", "make demo"),
+            ("nav_sentinel.fleet_cli", "make registry"),
+        ):
+            assert promise in README, f"the README no longer mentions {promise}"
+            run = subprocess.run(
+                [sys.executable, "-m", module],
+                capture_output=True, text=True, cwd=ROOT, check=False,
+            )
+            assert run.returncode == 0, (
+                f"the README walks a reader through `{promise}` and {module} exits "
+                f"{run.returncode}:\n{run.stderr[-600:]}"
+            )
 
     def test_policy_ids_in_the_readme_exist_in_the_code(self):
         """The policy table drifted once: it named P-004-MATERIALITY-ROUTING after the code had

@@ -565,7 +565,7 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | **S0-R gate** | — | — | **closed** | **yes** |
 | S0c offline reproducibility | covered by plan reviews | done | pending | — |
 | S7a deployment vertical slice | done | done | done | **closed** — 2 review rounds, 3 CRITICAL + 7 MAJOR then 2 CRITICAL + 5 MAJOR, all fixed |
-| **S7a gate** | — | — | **closed** | **yes** — `nav-sentinel-00010-9x9`, [evidence](evidence/S7a-cloud-run.md) |
+| **S7a gate** | — | — | **closed** | **yes** — `nav-sentinel-00008-dkh`, [evidence](evidence/S7a-cloud-run.md) |
 | S1 + S1.5 agent layer | **v3, 2 review rounds** | pending | — | — |
 
 **What the S7a rounds cost and bought.** Two adversarial rounds found ten then seven defects, and

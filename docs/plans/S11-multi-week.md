@@ -75,158 +75,228 @@ It also makes each named technology load-bearing rather than decorative:
   the sub-agent's own identity, restricted to its own allowlist, recorded as a decision.
 - **Agent Identity** — the delegation is the zero-trust beat: a caller cannot lend its privileges.
 
-## 3. Architecture additions
+## 2b. Corrections to this plan after review
 
-Four additions. Everything else is reuse.
+Reviewed in a fresh context before any code was written. The use case was upheld; **the
+architecture was not**, and two acceptance criteria were unsatisfiable as written. What follows is
+the revised plan. The original is in git history — the corrections are more instructive than the
+first draft.
 
-### 3.1 A case that spans stages (`control_plane/casefile.py`)
+Five blockers the first draft would have hit, each verified against the code:
 
-Today a case is detected, worked and finished inside one process invocation. A remediation case
-needs a persisted stage machine:
+1. **`may_delegate_to` in `registry/models.py` red-lines the repo's own platform claim.**
+   `tests/test_transfer_agency.py:288` asserts a bare equality: *no file under `registry/` changed
+   since the second process arrived.* Delegation permission moves to `ProcessPack`, which
+   `packs.py` has already been amended once for with a recorded reason.
+2. **`gateway.delegate` cannot invoke an agent.** `agents` is a process package and
+   `tests/test_seam.py:129` forbids any transitive path from the control plane to it —
+   `TYPE_CHECKING` included, because `_import_graph` walks that too. The gateway evaluates the
+   policy and calls an **injected invoker**, registered by `composition` exactly as
+   `discover_for_capability` already is.
+3. **`memory/` is forbidden to both layers.** It is in `PROCESS_PACKAGES`
+   (`tests/test_seam.py:46`) *and* in `FORBIDDEN_TO_A_PROCESS`
+   (`tests/test_transfer_agency.py:48`). So neither the control plane nor a pack may import it.
+   Memory reaches a pack the way every other capability does: a `ToolSpec` registered by
+   `composition` as a platform tool.
+4. **P-007 cannot police a recalled fact as the first draft claimed.** Two errors. `declared_facts`
+   (`packs.py:126`) iterates `self.tools` only, so a pack declaring an evidence requirement over a
+   platform-tool fact **fails to register at all**. And the refusal I attributed to P-007 is
+   actually `contract.resolve_citations` (`agents/contract.py:169`) — P-007
+   (`policies.py:317`) compares *fact names*, not resolvability. Criterion 4 would have been a test
+   passing for a reason unrelated to its name, which is the defect family every review of this
+   build has found.
+5. **A case cannot belong to two processes.** `CaseFacts.capability` is one string;
+   `packs.process_of` returns one pack; `thresholds_for` returns one threshold set. The first draft
+   proposed coordination without naming which invariant gave way.
 
-```
-DETECTED → IMPACT_ASSESSED → MATERIALITY_DETERMINED → AWAITING_APPROVAL
-         → APPROVED → COMPENSATION_IN_FLIGHT → CLOSED
-                                             ↘ NOTIFIED_REGULATOR
-```
+And three things the first draft got factually wrong about the existing code: `Repository.save_case`
+is `set()` (`repository.py:203`) — an overwrite, so **there is no case history** to build a stage
+machine on; `ExceptionStatus` has ten members, not nine, and `AWAITING_APPROVAL` appears exactly
+once in the whole repo, its own definition; and the claim that S11 "subsumes the S3 fan-out work"
+is false — resuming a parked case is sequencing, not fan-out, and does not answer "orchestration
+at scale".
 
-Rules, to avoid the defects this build keeps producing:
+## 3. Architecture, revised
 
-- Transitions are **explicit and validated**; an unknown transition raises rather than defaults.
-- The stage is **persisted**, not held in memory, and the store is append-only for history with a
-  current-state document (the existing `Repository` split).
-- Every transition records a policy decision, so the audit trail answers *who moved this case,
-  when, and on what evidence*.
-- A stage cannot be skipped. Compensation before approval must be refused, and there must be a
-  test that produces that state.
+**The governing decision, made explicitly:** a remediation case belongs to **one new pack** that
+owns the stage capabilities and its own tools. Fund accounting and transfer agency stay isolated
+and never learn about each other. Transfer agency's contribution arrives through
+`gateway.delegate`, and the sub-agent's observations are recorded against the *remediation*
+case_id — which satisfies `resolve_citations`'s cross-case rule by construction. A third pack
+orchestrates **through the platform**, not around it.
 
-### 3.2 Memory Bank (`memory/`)
+The pack is named `remediation_office/`, not `compliance/`: `src/nav_sentinel/compliance.py`
+already exists (281 lines, the stack-compliance probe behind `make compliance`) and a package of
+that name cannot coexist with it.
 
-Implement ADK's `BaseMemoryService` (`add_session_to_memory`, `add_memory`, `search_memory`) with
-**two backends behind one interface**, mirroring the existing `Repository` pattern:
+It measures materiality in **affected investors**, not basis points. Two reasons, and the second
+is the better one: `packs.register` refuses two packs declaring thresholds for the same unit and
+fund accounting owns `bps` — but also, a regulator's materiality threshold is genuinely not the
+fund's own auto-clear band, and conflating them would be a domain error as well as a registration
+failure.
 
-- `FirestoreMemoryBank` — default. Deterministic, offline-testable, no extra provisioning.
-- `VertexAiMemoryBankService` — the real thing, from `google.adk.memory`. It requires an
-  `agent_engine_id`, so it needs a Vertex AI Agent Engine provisioned in `bootstrap.sh`. Selected
-  by config, exactly like `NAV_APPROVALS=firestore|memory`.
+### 3.1 Stage machine (`control_plane/casefile.py` + `Repository`)
 
-Two distinct kinds of memory, and the distinction matters:
+Transitions explicit and validated; unknown transition raises. A skipped stage is refused and
+there is a test that produces that state. `Repository` gains history methods — appended, not
+overwritten — because `save_case` overwrites today and a stage machine without history is a
+variable that happened to survive.
 
-| Kind | Scope | Example | Consumed by |
-| --- | --- | --- | --- |
-| **Case memory** | one case, across sessions and weeks | "TA reported 41 affected investors holding 2.1m units on day 1" | every later stage |
-| **Entity memory** | across cases, keyed by `recurrence_key` | "this fund has had 3 pricing errors since 1 July" | compliance's materiality decision |
+`stage_history` carries a wall-clock write timestamp per transition. That is not decoration: it is
+what makes the compressed-timeline claim demonstrable rather than asserted (§4).
 
-The second is the one that earns the name. A memory that only remembers within a case is a
-database row; a memory that changes a *decision* because of what happened in earlier cases is
-cross-session context. The materiality rule must therefore read entity memory, and there must be
-a test that the same error is treated differently on its fourth occurrence — measured, with the
-threshold stated in the fixture rather than in prose.
+### 3.2 Memory, split into two mechanisms
 
-**Guard against the obvious failure:** memory is *recalled evidence*, not truth. A recalled fact
-must carry its provenance (which case, which observation, when) and P-007 must still apply — a
-verdict cannot cite a memory that does not resolve. Otherwise Memory Bank becomes a laundering
-route for unevidenced claims, which is precisely the kind of hole the reviews keep finding.
+The first draft put both behind one interface. Verified against the installed ADK 2.7.1, that does
+not work: `add_session_to_memory` takes an ADK `Session`, which would drag the agent framework
+into a layer deliberately built without it (`agent_surface.py` imports no ADK), and
+`search_memory` is a **semantic** query keyed on `user_id`. A materiality decision that must come
+out the same way twice cannot rest on fuzzy retrieval.
 
-### 3.3 Delegation through the gateway (`gateway.delegate`)
+| Mechanism | Backing | Why |
+| --- | --- | --- |
+| **Recurrence index** — "this fund has had N pricing errors since 1 July" | deterministic query on `Repository`, single equality filter on `recurrence_key`, client-side date filtering | the decision has to be reproducible, and this repo has been burned twice by Firestore composite-index requirements |
+| **Case memory** — narrative carry-over between stages weeks apart | ADK `BaseMemoryService`; `VertexAiMemoryBankService` when an agent engine is configured | this is what the interface is actually for, and `custom_metadata` carries provenance |
 
-A new gateway entry point and a new policy:
+Honest claim: *"Memory Bank for cross-session case context; a deterministic recurrence index for
+the decision that has to be reproducible."*
 
-- **P-008 — delegation.** An agent may request a capability only if its manifest declares it in a
-  new `may_delegate_to` list. The sub-agent runs under **its own identity**, with **its own**
-  allowlist and data scopes. The caller's privileges are not inherited and cannot be lent.
-- The delegation is recorded as a decision naming both agents, and the sub-agent's work hangs off
-  the same case trace as a child span, so the reasoning chain is one tree.
-- Depth is bounded (1 by default). An agent that can delegate to an agent that can delegate back
-  is a loop, and a loop inside a model's tool surface is a runaway bill.
+Both reach a pack as **platform ToolSpecs**, so recall is a `gateway.call_tool` — which means the
+wrapper records an `Observation` against the current case with `source`, `args`, `digest` and
+projected facts. Provenance is free and citations resolve by construction. That is the real answer
+to the laundering worry, and it is stronger than the one the first draft claimed.
 
-This is the piece that turns "two processes on one control plane" into coordination.
+**The hole this creates, named:** recalled content re-entered into a model context is a
+memory-poisoning surface, and the track names "tool poisoning" explicitly. Screening is triggered
+by `spec.untrusted_output` (`gateway.py:229`), which defaults to `False` — so an injected
+instruction that survived into a stored summary would be replayed unscreened. The recall ToolSpec
+sets `untrusted_output=True`. Cost: one keyword. Gain: the biggest new hole becomes a demo beat.
 
-### 3.4 Event ingress that resumes a parked case (`server.py`)
+**And the guard's real strength, stated:** `investigator.unquoted_evidence` demands the verdict
+quote what it cites, and `_appears_in` scans numeric literals. That is strong for rates and dates
+and **weak for small integers** — a recalled count of `3` matches almost any sentence. Say so
+rather than implying uniform strength.
 
-Pub/Sub push already works end to end (S7a, verified on revision `nav-sentinel-00010-9x9`). Add a
-second route for **remediation events** — a TA impact report, an approval, a payment confirmation
-— each of which loads the case, validates the transition, advances the stage and re-parks. This
-subsumes the S3 fan-out work.
+### 3.3 Delegation (`gateway.delegate` + P-008)
+
+Permission lives on `ProcessPack`, not the manifest (blocker 1). The gateway evaluates P-008,
+records a decision naming both agents, and calls an invoker injected by `composition` (blocker 2).
+Depth bounded at 1.
+
+**Stated as what it is, not what it looks like.** The README already records that Cloud Run gives
+one identity per service, so the deployed container collapses every per-agent account into
+`nav-runtime` (defect 7, open), and that in-process memory is not a trust boundary. So the claim
+is: *the sub-agent's manifest, not the caller's, decides what it may read, enforced at the
+gateway.* Not "the sub-agent runs under its own IAM identity". A judge who reads the README and
+then watches the video must not catch the two disagreeing.
+
+### 3.4 Event ingress that resumes a parked case
+
+A second Pub/Sub route. Each event loads the case, validates the transition, advances the stage and
+re-parks. The word "webhooks" is not used: these are self-generated fixtures, not deliveries from a
+third party.
+
+### 3.5 Two track phrases the first draft ignored
+
+- **Discovery** — the track's *first* focus area, and the first draft had no beat for it. Open the
+  remediation case with the compliance capability **unpublished**: the registry refuses to route
+  and the case escalates to a human. Publish the manifest, re-run, and the same case routes. This
+  is machinery that already exists (`discover.coverage`, `republish`, `invalidate`).
+- **PII** — nothing anywhere, and this use case hands it over: the impact report is named
+  investors with holdings. Model Armor is inbound-only today. Screen the **outbound** path — what
+  enters a model context and what a notification draft contains. "Screening all external email
+  with Model Armor" is verbatim in the track's own example.
+
+### 3.6 Orchestration at scale
+
+Not a state machine. A concurrency measurement over work that already exists: N cases in one
+delivery, decisions correctly isolated per request. The gateway's `ContextVar` was built for
+exactly this and the prior defect is measured in the comment at `gateway.py:52` — eight concurrent
+cycles reporting 80, 28, 54, 132, 184, 106, 158 and 210 decisions instead of 28 each. One test,
+one number, one sentence.
 
 ## 4. The multi-week honesty problem
 
-**I cannot demo three real weeks, and must not imply otherwise.**
+Unchanged in substance: a committed event timeline replayed as real Pub/Sub messages, business
+dates weeks apart, wall-clock compressed.
 
-The approach: a committed **event timeline fixture** — day 0, 1, 2, 5, 12, 21, 28 — replayed as
-real Pub/Sub messages against the deployed service. Each event is genuinely delivered, the case is
-genuinely loaded from Firestore, advanced and written back, and the trace genuinely spans the
-sequence. What is compressed is wall-clock, nothing else.
+What the review correctly attacked: **both things the first draft offered as proof are
+unfalsifiable by someone watching a video.** A test that restarts the process is a test the judge
+does not run; a fixture with distant dates is a file the judge does not read. The hostile reading
+is *you replayed seven JSON files through one endpoint in ninety seconds and called it 28 days.*
 
-Two things make this honest rather than a mock:
+Two purchases that convert assertion into evidence:
 
-1. The case state between events lives **only** in Firestore. Kill the service between two events
-   and the next one still works — and there should be a test that does exactly that, because
-   otherwise "persistent" is a claim about a variable that happened to still be in scope.
-2. The **business dates in the data are weeks apart**, and every materiality and compensation
-   figure is computed from those dates. A payment confirmed on day 21 for a deal dated day −2 is
-   arithmetic over a 23-day span whether or not I waited 23 days.
+1. **Make one gap real.** Fire event 1, **delete the Cloud Run revision**, redeploy from the
+   image, fire event 2. Both revision names and both timestamps into `docs/evidence/`, same
+   discipline as `S7a-cloud-run.md`. "Here is the revision id that did not exist when this case was
+   created" is not a claim a viewer has to trust.
+2. **Show `stage_history` in the Firestore console on camera** — seven writes, seven wall-clock
+   timestamps, visibly distinct.
 
-The README and the video must both say this in one plain sentence. An implied month of uptime
-would be the worst kind of claim: unfalsifiable by a judge and untrue.
+And the compressed-clock sentence goes in the **video narration**, not only the README. A README
+caveat beside a video implying a month is still the dishonest version.
 
-## 5. Work breakdown
-
-Ordered by dependency. Sized in hours; M = must, S = should, C = could.
+## 5. Work breakdown, revised
 
 | # | Work | Hours | Rung |
 | --- | --- | --- | --- |
-| S11.1 | Casefile stage machine + persistence + transition policy decisions | 3.0 | **M** |
-| S11.2 | `BaseMemoryService` interface, `FirestoreMemoryBank`, case memory | 3.0 | **M** |
-| S11.3 | Entity memory keyed on `recurrence_key`; compliance materiality consumes it | 2.0 | **M** |
-| S11.4 | `gateway.delegate` + P-008 + `may_delegate_to` in manifests + child spans | 3.0 | **M** |
-| S11.5 | Compliance process pack (third department) — thresholds, capability, agent, prompt | 2.5 | **M** |
-| S11.6 | Event timeline fixture + `/remediation/events` route + park/resume | 3.0 | **M** |
-| S11.7 | `make remediation` — the on-camera walkthrough of the 28-day case | 1.5 | **M** |
-| S11.8 | Vertex AI Memory Bank backend + Agent Engine in `bootstrap.sh` | 2.0 | S |
-| S11.9 | Figure 6 — the multi-week coordination diagram | 1.5 | S |
-| S11.10 | Regulator notification stage | 1.0 | C |
-| S11.11 | Deploy + live evidence doc, as S7a | 1.5 | S |
+| S11.0 | Extend `ADMITTED_PLATFORM_CHANGES` per file with a reason, in the commit that adds each | 0.5 | **M** |
+| S11.1 | Stage machine + `Repository` history methods + transition decisions + `stage_history` | 3.5 | **M** |
+| S11.2 | Event route, park/resume, timeline fixture | 3.0 | **M** |
+| S11.3 | `gateway.delegate` + P-008 on `ProcessPack` + injected invoker + child spans | 3.0 | **M** |
+| S11.4 | Recurrence index as a platform tool; one materiality rule consumes it; recurrence lever on the band | 2.5 | **M** |
+| S11.5 | `remediation_office` pack — stage capabilities, agent, prompt, thresholds in investors | 2.0 | **M** |
+| S11.6 | Discovery beat: unpublished → refused → published → routes | 0.5 | **M** |
+| S11.7 | Outbound PII screening + policy + test | 1.5 | **M** |
+| S11.8 | `make remediation` walkthrough | 1.5 | **M** |
+| S11.9 | Concurrency measurement (orchestration at scale) | 0.75 | S |
+| S11.10 | Case memory via `BaseMemoryService` (narrative carry-over) | 1.5 | S |
+| S11.11 | Revision-delete evidence for one timeline gap | 0.75 | S |
+| S11.12 | `VertexAiMemoryBankService` + Agent Engine in `bootstrap.sh` | 2.0 | C |
+| S11.13 | Figure 6 | 1.5 | C |
+| S11.14 | Regulator notification stage | 1.0 | C |
 
-**Total M: 18.0h. M+S: 23.0h.**
+**M: 18.0h. M+S: 21.0h.**
 
-De-scope ladder, in the order I would spend it: S11.10 first, then S11.8 (the Firestore backend
-already satisfies the interface and the claim becomes "Memory Bank interface, our backend" — still
-true, just less impressive), then S11.9.
+Cut order, corrected: **S11.14, S11.13, S11.12** — Figure 6 before the Vertex backend, because a
+new figure is a new `check_diagrams.py` gate plus a re-export for four seconds of screen time,
+while S11.12 buys the literal phrase the track names.
 
-## 6. Acceptance criteria
+Note the real constraint is **review rounds, not hours**. Four of the M rungs land on the most
+adversarially tested modules in the repo, and `tests/test_readme_claims.py` pins the README's test
+count, so every rung that adds tests needs a README edit or the suite goes red.
 
-Each of these is a test or a measured artefact, not a paragraph.
+## 6. Acceptance criteria, revised
 
-1. A case advances through all seven stages across seven separate invocations, with **the process
-   restarted between two of them**, and closes correctly.
-2. Compensation before approval is **refused**, and the refusal is a recorded policy decision.
-3. The register agent's contribution arrives via `gateway.delegate` under `register-investigator`'s
-   own identity — asserted by the recorded decision, and by a test that the caller's allowlist does
-   **not** widen the sub-agent's.
-4. A verdict citing a recalled memory that does not resolve is **refused** by P-007.
-5. The same error on its fourth occurrence for a fund reaches a **different** materiality outcome
-   than on its first, from entity memory, with both thresholds in the fixture.
+1. A case advances through every stage across separate invocations, **with the process restarted
+   between two of them**, and closes correctly.
+2. Compensation before approval is refused, and the refusal is a recorded policy decision.
+3. The register agent's contribution arrives via `gateway.delegate`, and a test asserts the
+   caller's allowlist does **not** widen the sub-agent's.
+4. A verdict citing a recalled fact that does not resolve is refused — by
+   `contract.resolve_citations`, **named correctly**, with P-007 tested separately for what it
+   actually does.
+5. The same error on its fourth occurrence reaches a different materiality outcome than on its
+   first, from the recurrence index, with both thresholds in the fixture.
 6. Delegation depth > 1 is refused.
-7. One Cloud Trace shows the whole case as a tree, including the sub-agent's spans.
-8. `make verify` still passes offline with no network and no credentials.
-9. The seam holds: the compliance pack imports no other process's modules, asserted by the same
-   AST test.
+7. ~~One trace across the case.~~ **Impossible and now corrected.** `audit.case_trace` opens a
+   fresh root span per invocation and OTel cannot append to a finished trace, so seven deliveries
+   are seven traces. The criterion is: **seven traces joined by `nav.case.id`, each stage span
+   carrying an OTel `Link` to the previous stage's span context, persisted with the case.** This
+   was the video's headline shot and would have failed at recording time.
+8. Recall is screened: a poisoned stored summary is caught on the way out of memory, not replayed.
+9. An unpublished capability is refused by the registry; publishing it routes the same case.
+10. `make verify` still passes offline with no network and no credentials.
+11. The seam holds: `remediation_office` imports no other process's modules, same AST test.
 
 ## 7. Risks
 
 | Risk | Mitigation |
 | --- | --- |
-| Scope. This is the largest section since S1, with 11 days left. | The M rungs are 18h and independently demoable. S11.1–S11.4 alone deliver the claim; S11.5–S11.7 make it filmable. |
-| Vertex AI Agent Engine provisioning is unfamiliar and may fight us. | It is rung S, behind an interface the Firestore backend already satisfies. Time-box to 2h and drop it if it resists. |
-| Memory becomes an unevidenced-claim laundry. | P-007 applies to recalled facts; provenance is mandatory; there is an acceptance test for the refusal. |
-| A third pack invites cross-process coupling. | The existing AST seam test is extended to the new package on day one, not after. |
-| Demo credibility on the compressed timeline. | Stated plainly in the README, the video and this plan. The persistence test that restarts the process is the substantive answer. |
-| The reviews keep finding controls that never ran. | Every acceptance criterion above names a state that must be *produced*, not merely asserted. |
-
-## 8. What the 240-second video gains
-
-The current shot list proves governance on a single case. This adds the shot the track description
-is actually asking for: one case, four departments, twenty-eight days, resumed from Firestore
-between events, with one trace covering the whole thing and a sub-agent that could not read the
-caller's data even though the caller asked it to.
+| Review rounds, not hours, are the constraint. | S11.1–S11.3 deliver the claim and are independently demoable. Everything from S11.9 down is droppable without touching it. |
+| The seam tests are actively hostile to exactly these changes. | S11.0 exists for this, and each platform change is admitted with a reason in the commit that makes it. |
+| Recurrence lever on the band is unbudgeted in the first draft. | Now explicit in S11.4. `band_for` has no such lever today; only `no_auto_clear`, which floors at `SINGLE_REVIEWER`. |
+| Memory as an unevidenced-claim laundry. | Recall goes through `call_tool`, so provenance is structural rather than promised. The weak spot (small integers) is stated, not hidden. |
+| Demo credibility on the compressed timeline. | Revision-delete evidence and visible `stage_history`; narration says it out loud. |
+| Controls that never ran — the recurring defect family. | Every criterion above names a state that must be produced. Criterion 7 is in the list *because* the first draft's version could not have been produced at all. |

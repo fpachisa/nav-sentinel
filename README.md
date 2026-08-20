@@ -92,7 +92,7 @@ where token spend would otherwise run away.
 > general availability as of August 2026 — it missed its I/O target. We satisfy the
 > requirement with Gemini 3.7 Flash, which is GA and better suited to agentic workloads.
 
-### The six enforced policies
+### The seven enforced policies
 
 | ID | Policy |
 | :--- | :--- |
