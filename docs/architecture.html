@@ -148,179 +148,242 @@ footer {
 <section>
   <div class="sec-head">
     <span class="num">Figure 1</span>
-    <h2>The system</h2>
-    <p>Agents above, data below, and exactly one crossing. The gateway is drawn as a band rather than a box because no call reaches data without passing through it — that is the architecture's central claim, and a box on the side would misstate it.</p>
+    <h2>Deployed architecture</h2>
+    <p>Triggers on the left, one container in the middle, managed Google Cloud services on the right. The gateway is drawn as a band rather than a box because no call reaches data or a model without passing through it — that is the architecture's central claim, and a box on the side would misstate it.</p>
+    <p>The middle column is deliberately generic. The two process packs are interchangeable and the control plane below them knows nothing about either: fund accounting measures materiality in basis points and transfer agency in units, and the same <code>band_for</code> derives the approval band from both. An earlier version of this figure drew the fund-accounting pipeline — detection, triage, remediation — which described one process rather than the platform that hosts any.</p>
   </div>
 
   <figure>
     <div class="canvas">
-      <svg viewBox="0 0 1040 660" role="img"
-        aria-label="Agents in a top band pass every data access down through a full-width control plane band containing the Agent Registry, Agent Identity and six policies, before reaching books and records, memory, ECB rates, quarantined EDGAR filings, and Vertex AI. Cloud Trace records one trace per case. The ledger is reachable only after human approval.">
+      <svg viewBox="0 0 1040 830" role="img"
+        aria-label="A deployment diagram. On the left, Pub/Sub topic nav-exceptions feeds a push subscription authenticated with an OIDC token, which posts to a Cloud Run service; undelivered messages go to a dead-letter topic. An operator CLI is a second entry point. In the centre, the Cloud Run service nav-sentinel runs as service account nav-runtime and contains interchangeable process packs, a fleet of ADK agents discovered from the Agent Registry, and a full-width control plane band holding the registry, agent identity and the Agent Gateway with seven policies. On the right, Google Cloud services: Vertex AI serving Gemini from location global, Model Armor on its regional endpoint, Firestore holding four collections of state, and Cloud Trace. Along the bottom, external sources of truth and the build path from Cloud Build through Artifact Registry.">
         <defs>
-          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
           </marker>
-          <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker id="bd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="var(--deny)"/>
           </marker>
-          <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <marker id="bf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-faint)"/>
           </marker>
         </defs>
 
-        <!-- fleet -->
-        <g fill="none" stroke="currentColor" stroke-width="1.4">
-          <rect x="30" y="76" width="116" height="54" rx="3"/>
-          <rect x="180" y="76" width="116" height="54" rx="3"/>
-          <rect x="560" y="76" width="124" height="54" rx="3"/>
+        <!-- ============ column headings ============ -->
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" letter-spacing=".8">
+          <text x="30" y="30">TRIGGERS</text>
+          <text x="292" y="30">COMPUTE · ONE CONTAINER</text>
+          <text x="800" y="30">MANAGED GOOGLE CLOUD SERVICES</text>
         </g>
-        <rect x="330" y="40" width="196" height="126" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+
+        <!-- ============ left column: triggers ============ -->
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="30" y="42" width="216" height="52" rx="3"/>
+          <rect x="30" y="122" width="216" height="76" rx="3"/>
+          <rect x="30" y="300" width="216" height="58" rx="3"/>
+        </g>
+        <rect x="30" y="214" width="216" height="52" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.3" stroke-dasharray="5 3"/>
+
+        <g font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">
+          <text x="42" y="64">Pub/Sub topic</text>
+          <text x="42" y="146">Push subscription</text>
+          <text x="42" y="322">Operator CLI</text>
+        </g>
+        <text x="42" y="236" font-family="Archivo, sans-serif" font-size="12.5" fill="var(--deny)">Dead-letter topic</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">
+          <text x="42" y="81">nav-exceptions</text>
+          <text x="42" y="162">OIDC token · aud = service URL</text>
+          <text x="42" y="176">SA nav-pubsub-push</text>
+          <text x="42" y="190">POST /pubsub/exceptions</text>
+          <text x="42" y="339">make investigate · approve · ta</text>
+        </g>
+        <text x="42" y="253" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)">nav-exceptions-dlq · 5 attempts</text>
+
+        <line x1="138" y1="94" x2="138" y2="118" stroke="currentColor" stroke-width="1.3" marker-end="url(#b)"/>
+        <line x1="138" y1="198" x2="138" y2="210" stroke="var(--deny)" stroke-width="1.3" marker-end="url(#bd)"/>
+
+        <!-- into the container -->
+        <path d="M246 160 H278" stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#b)"/>
+        <path d="M246 329 H278" stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#b)"/>
+
+        <!-- ============ centre: the Cloud Run service ============ -->
+        <rect x="282" y="42" width="470" height="578" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <text x="296" y="64" font-family="Archivo, sans-serif" font-size="13.5" font-weight="700" fill="currentColor">Cloud Run · nav-sentinel</text>
+        <text x="296" y="80" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">SA nav-runtime · --no-allow-unauthenticated · no secrets in image</text>
+
+        <!-- process packs: the generic seam -->
+        <rect x="296" y="94" width="442" height="86" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
+        <text x="308" y="112" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" letter-spacing=".8">PROCESS PACKS · INTERCHANGEABLE</text>
         <g fill="none" stroke="currentColor" stroke-width="1.2">
-          <rect x="342" y="50" width="172" height="32" rx="2"/>
-          <rect x="342" y="87" width="172" height="32" rx="2"/>
-          <rect x="342" y="124" width="172" height="32" rx="2"/>
+          <rect x="308" y="120" width="208" height="48" rx="2"/>
+          <rect x="530" y="120" width="196" height="48" rx="2"/>
         </g>
-        <rect x="712" y="76" width="150" height="54" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
-        <rect x="896" y="76" width="114" height="54" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="5 3"/>
+        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor">
+          <text x="318" y="139">Fund accounting</text>
+          <text x="540" y="139">Transfer agency</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">
+          <text x="318" y="155">nav · bps thresholds</text>
+          <text x="540" y="155">ta · unit thresholds</text>
+        </g>
+        <text x="318" y="165" font-family="JetBrains Mono, monospace" font-size="7.5" fill="var(--ink-faint)">tools · prompts · manifests</text>
+        <text x="540" y="165" font-family="JetBrains Mono, monospace" font-size="7.5" fill="var(--ink-faint)">tools · prompts · manifests</text>
 
-        <g font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">
-          <text x="88"  y="100">Detection</text>
-          <text x="238" y="100">Triage</text>
-          <text x="622" y="100">Remediation</text>
-          <text x="953" y="100">Ledger</text>
+        <!-- the fleet -->
+        <rect x="296" y="196" width="442" height="96" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="308" y="216" font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">The fleet — ADK 2.0 agents</text>
+        <text x="308" y="232" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">one manifest each · discovered by capability, never named in code</text>
+        <g fill="none" stroke="var(--ink-faint)" stroke-width="1.1">
+          <rect x="308" y="242" width="134" height="38" rx="2"/>
+          <rect x="452" y="242" width="134" height="38" rx="2"/>
+          <rect x="596" y="242" width="130" height="38" rx="2"/>
         </g>
-        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">
-          <text x="88"  y="117">tolerance rules</text>
-          <text x="238" y="117">classify · discover</text>
-          <text x="622" y="117">drafts, cannot post</text>
-          <text x="953" y="117">golden records</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)" text-anchor="middle">
+          <text x="375" y="259">classify</text>
+          <text x="519" y="259">investigate</text>
+          <text x="661" y="259">draft</text>
+          <text x="375" y="272">cheap model</text>
+          <text x="519" y="272">cites evidence</text>
+          <text x="661" y="272">cannot post</text>
         </g>
-        <text x="428" y="32" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle" letter-spacing=".8">INVESTIGATORS · REGISTRY-DISCOVERED</text>
-        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
-          <text x="428" y="70">FX &amp; Rates</text>
-          <text x="428" y="107">Corporate Actions</text>
-          <text x="428" y="144">Trade &amp; Settlement</text>
-        </g>
-        <text x="787" y="98" font-family="Archivo, sans-serif" font-size="12.5" fill="var(--accent)" text-anchor="middle" font-weight="700">Approval gate</text>
-        <text x="787" y="115" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)" text-anchor="middle">human · four eyes</text>
 
-        <!-- fleet flow -->
-        <g stroke="currentColor" stroke-width="1.4" marker-end="url(#a)" fill="none">
-          <line x1="146" y1="103" x2="174" y2="103"/>
-          <line x1="296" y1="103" x2="324" y2="103"/>
-          <line x1="526" y1="103" x2="554" y2="103"/>
-          <line x1="684" y1="103" x2="706" y2="103"/>
-        </g>
-        <line x1="862" y1="103" x2="890" y2="103" stroke="var(--deny)" stroke-width="1.6" marker-end="url(#ad)"/>
-        <text x="876" y="146" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">only after</text>
-        <text x="876" y="157" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">approval</text>
-
-        <!-- triage consults the registry -->
-        <path d="M238 130 V196 H345 V284" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#a)" color="var(--accent)"/>
-        <text x="252" y="190" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">discover(category)</text>
-
-        <!-- fleet down into the control plane -->
-        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
-          <line x1="88"  y1="130" x2="88"  y2="242"/>
-          <line x1="428" y1="166" x2="428" y2="242"/>
-          <line x1="622" y1="130" x2="622" y2="242"/>
-        </g>
-        <text x="96" y="180" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">call_tool(name, args)</text>
-        <text x="436" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">evidence</text>
-        <text x="630" y="200" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">nav lookups</text>
+        <line x1="517" y1="180" x2="517" y2="192" stroke="var(--ink-faint)" stroke-width="1.1" marker-end="url(#bf)"/>
+        <line x1="517" y1="292" x2="517" y2="316" stroke="currentColor" stroke-width="1.4" marker-end="url(#b)"/>
+        <text x="527" y="308" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">call_tool(name, args)</text>
 
         <!-- control plane band -->
-        <rect x="30" y="246" width="980" height="104" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
-        <text x="46" y="272" font-family="Archivo, sans-serif" font-size="13.5" font-weight="700" fill="var(--accent)" letter-spacing=".04em">AGENT GATEWAY</text>
-        <text x="46" y="292" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">resolves tools</text>
-        <text x="46" y="304" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">by name</text>
-        <text x="46" y="322" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">records every</text>
-        <text x="46" y="334" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)">decision</text>
-
-        <g fill="none" stroke="var(--accent)" stroke-width="1.3">
-          <rect x="260" y="284" width="170" height="50" rx="2"/>
-          <rect x="446" y="284" width="170" height="50" rx="2"/>
-          <rect x="632" y="284" width="358" height="50" rx="2"/>
+        <rect x="296" y="320" width="442" height="166" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.8"/>
+        <text x="308" y="340" font-family="Archivo, sans-serif" font-size="12.5" font-weight="700" fill="var(--accent)" letter-spacing=".04em">CONTROL PLANE — PROCESS-AGNOSTIC</text>
+        <g fill="none" stroke="var(--accent)" stroke-width="1.2">
+          <rect x="308" y="350" width="140" height="42" rx="2"/>
+          <rect x="458" y="350" width="128" height="42" rx="2"/>
+          <rect x="596" y="350" width="130" height="42" rx="2"/>
+          <rect x="308" y="404" width="418" height="74" rx="2"/>
         </g>
-        <g font-family="Archivo, sans-serif" font-size="11.5" fill="var(--accent)" text-anchor="middle" font-weight="600">
-          <text x="345" y="304">Agent Registry</text>
-          <text x="531" y="304">Agent Identity</text>
+        <g font-family="Archivo, sans-serif" font-size="11" fill="var(--accent)" text-anchor="middle">
+          <text x="378" y="367">Agent Registry</text>
+          <text x="522" y="367">Agent Identity</text>
+          <text x="661" y="367">Observations</text>
         </g>
         <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">
-          <text x="345" y="321">manifests · versions · authority</text>
-          <text x="531" y="321">one service account per agent</text>
+          <text x="378" y="382">manifests · authority</text>
+          <text x="522" y="382">one SA per agent</text>
+          <text x="661" y="382">evidence, digested</text>
         </g>
-        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)">
-          <rect x="644" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="670" y="303" text-anchor="middle">P-001</text>
-          <rect x="704" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="730" y="303" text-anchor="middle">P-002</text>
-          <rect x="764" y="292" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="790" y="303" text-anchor="middle">P-003</text>
-          <rect x="644" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="670" y="324" text-anchor="middle">P-004</text>
-          <rect x="704" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="730" y="324" text-anchor="middle">P-005</text>
-          <rect x="764" y="313" width="52" height="15" rx="2" fill="none" stroke="var(--accent)" stroke-width=".8"/>
-          <text x="790" y="324" text-anchor="middle">P-006</text>
-          <text x="826" y="298">allowlist · drafting</text>
-          <text x="826" y="310">posting · materiality</text>
-          <text x="826" y="322">ingest · data scope</text>
-        </g>
+        <text x="517" y="422" font-family="Archivo, sans-serif" font-size="12.5" font-weight="700" fill="var(--accent)" text-anchor="middle">AGENT GATEWAY — the only path to data</text>
+        <text x="517" y="438" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--accent)" text-anchor="middle">resolves every tool by name · records every decision</text>
+        <text x="517" y="456" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">P-001 allowlist · P-002 drafting · P-003 no autonomous posting</text>
+        <text x="517" y="469" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--accent)" text-anchor="middle">P-004 approval route · P-005 ingest · P-006 scope · P-007 evidence</text>
 
-        <!-- control plane down to data -->
-        <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#a)">
-          <line x1="112" y1="350" x2="112" y2="448"/>
-          <line x1="454" y1="350" x2="454" y2="448"/>
-          <line x1="635" y1="350" x2="635" y2="448"/>
-          <line x1="872" y1="350" x2="872" y2="448"/>
-        </g>
+        <!-- human approval, inside the container but outside the fleet's authority -->
+        <rect x="296" y="504" width="442" height="46" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.6"/>
+        <text x="517" y="524" font-family="Archivo, sans-serif" font-size="12" font-weight="700" fill="var(--deny)" text-anchor="middle">Human approval gate — four eyes</text>
+        <text x="517" y="540" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">no agent in the fleet may post; posting without a recorded approval is refused</text>
+        <line x1="517" y1="486" x2="517" y2="500" stroke="var(--deny)" stroke-width="1.4" marker-end="url(#bd)"/>
 
-        <!-- data band -->
+        <text x="296" y="576" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">Application Default Credentials from the metadata server — no API keys anywhere in the system</text>
+        <text x="296" y="592" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">FastAPI · uvicorn · python 3.12 · google-adk 2.7 · google-genai 2.18</text>
+        <text x="296" y="608" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">Adding a process: register one pack. No control-plane change.</text>
+
+        <!-- ============ right column: managed services ============ -->
         <g fill="none" stroke="currentColor" stroke-width="1.3">
-          <rect x="30"  y="450" width="164" height="58" rx="3"/>
-          <rect x="210" y="450" width="146" height="58" rx="3"/>
-          <rect x="372" y="450" width="164" height="58" rx="3"/>
-          <rect x="734" y="450" width="276" height="58" rx="3"/>
+          <rect x="800" y="42" width="210" height="96" rx="3"/>
+          <rect x="800" y="158" width="210" height="76" rx="3"/>
+          <rect x="800" y="254" width="210" height="150" rx="3"/>
+          <rect x="800" y="424" width="210" height="76" rx="3"/>
         </g>
-        <rect x="552" y="450" width="166" height="58" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.6"/>
-        <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" text-anchor="middle">
-          <text x="112" y="474">Books &amp; records</text>
-          <text x="283" y="474">Memory</text>
-          <text x="454" y="474">ECB reference rates</text>
-          <text x="872" y="474">Vertex AI · Gemini</text>
-        </g>
-        <text x="635" y="474" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--deny)" text-anchor="middle" font-weight="600">SEC EDGAR</text>
-        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" text-anchor="middle">
-          <text x="112" y="491">Firestore · read-only</text>
-          <text x="283" y="491">recurrence, cross-cycle</text>
-          <text x="454" y="491">authoritative, structured</text>
-          <text x="872" y="491">3.7 Flash · 3.5 Flash-Lite · location: global</text>
-        </g>
-        <text x="635" y="491" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)" text-anchor="middle">untrusted · quarantined</text>
-        <text x="635" y="526" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--deny)" text-anchor="middle">see figure 3</text>
 
-        <!-- telemetry -->
-        <rect x="30" y="576" width="980" height="32" rx="3" fill="none" stroke="var(--ink-faint)" stroke-width="1.1" stroke-dasharray="4 3"/>
-        <text x="46" y="597" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--ink-soft)">Cloud Trace via OpenTelemetry — one trace per exception case, carrying every policy decision and every piece of evidence</text>
-        <g stroke="var(--ink-faint)" stroke-width=".9" stroke-dasharray="3 3" fill="none" marker-end="url(#af)" color="var(--ink-faint)">
-          <line x1="364" y1="350" x2="364" y2="572"/>
-          <line x1="726" y1="350" x2="726" y2="572"/>
+        <text x="812" y="64" font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">Vertex AI</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">
+          <text x="812" y="81">generateContent · ADC</text>
+          <text x="812" y="93">GOOGLE_CLOUD_LOCATION=global</text>
+          <text x="812" y="109">(Gemini 3.x is global-only)</text>
+          <text x="812" y="121">gemini-3.7-flash · reason</text>
+          <text x="812" y="133">gemini-3.5-flash-lite · classify</text>
         </g>
-      
-        <!-- band labels, drawn last over a halo so arrows pass behind the lettering -->
-        <g fill="var(--paper-sunk)">
-          <rect x="26" y="10"  width="278" height="16"/>
-          <rect x="26" y="222" width="112" height="16"/>
-          <rect x="26" y="426" width="186" height="16"/>
-          <rect x="26" y="550" width="82"  height="16"/>
+
+        <text x="812" y="180" font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">Model Armor</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">
+          <text x="812" y="197">screen() before extraction</text>
+          <text x="812" y="209">modelarmor.us-central1.rep</text>
+          <text x="812" y="225">regional endpoint only</text>
         </g>
-        <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--ink-faint)" letter-spacing="1.3">
-          <text x="30" y="22">THE FLEET · ADK AGENTS ON VERTEX AI</text>
-          <text x="30" y="234">CONTROL PLANE</text>
-          <text x="30" y="438">DATA AND MODEL SERVICES</text>
-          <text x="30" y="562">TELEMETRY</text>
+
+        <text x="812" y="276" font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">Firestore — where state lives</text>
+        <text x="812" y="292" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">native mode · us-central1</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-soft)">
+          <text x="812" y="312">nav_cases</text>
+          <text x="812" y="330">nav_observations</text>
+          <text x="812" y="348">nav_decisions</text>
+          <text x="812" y="366">nav_approvals</text>
         </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">
+          <text x="906" y="312">current state</text>
+          <text x="906" y="330">append-only</text>
+          <text x="906" y="348">append-only</text>
+          <text x="906" y="366">append-only</text>
+        </g>
+        <text x="812" y="388" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">read + append · create(), never set()</text>
+
+        <text x="812" y="446" font-family="Archivo, sans-serif" font-size="12.5" fill="currentColor">Cloud Trace</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">
+          <text x="812" y="463">OTLP · telemetry.googleapis.com</text>
+          <text x="812" y="475">one trace per case</text>
+          <text x="812" y="491">flushed in-request (CPU throttle)</text>
+        </g>
+
+        <!-- centre to services -->
+        <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#b)">
+          <path d="M752 90 H796"/>
+          <path d="M752 196 H796"/>
+          <path d="M752 330 H796"/>
+        </g>
+        <path d="M752 462 H796" stroke="var(--ink-faint)" stroke-width="1.2" fill="none" marker-end="url(#bf)"/>
+
+        <!-- ============ bottom: external truth and build ============ -->
+        <text x="30" y="632" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" letter-spacing=".8">EXTERNAL SOURCES OF TRUTH</text>
+        <g fill="none" stroke="currentColor" stroke-width="1.3">
+          <rect x="30" y="658" width="234" height="66" rx="3"/>
+        </g>
+        <rect x="284" y="658" width="234" height="66" rx="3" fill="none" stroke="var(--deny)" stroke-width="1.3" stroke-dasharray="5 3"/>
+        <text x="42" y="678" font-family="Archivo, sans-serif" font-size="12" fill="currentColor">ECB reference rates</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)">
+          <text x="42" y="695">data-api.ecb.europa.eu</text>
+          <text x="42" y="709">structured · authoritative</text>
+        </g>
+        <text x="296" y="678" font-family="Archivo, sans-serif" font-size="12" fill="var(--deny)">SEC EDGAR filings</text>
+        <g font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--deny)">
+          <text x="296" y="695">untrusted prose · quarantined</text>
+          <text x="296" y="709">screened, then extracted unprivileged</text>
+        </g>
+
+        <path d="M330 620 V644 H147 V654" stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#b)"/>
+        <path d="M401 620 V654" stroke="var(--deny)" stroke-width="1.3" fill="none" marker-end="url(#bd)"/>
+
+        <text x="560" y="632" font-family="JetBrains Mono, monospace" font-size="8.5" fill="var(--ink-faint)" letter-spacing=".8">BUILD AND DEPLOY</text>
+        <g fill="none" stroke="var(--ink-faint)" stroke-width="1.2">
+          <rect x="560" y="658" width="140" height="66" rx="3"/>
+          <rect x="726" y="658" width="140" height="66" rx="3"/>
+          <rect x="892" y="658" width="118" height="66" rx="3"/>
+        </g>
+        <g font-family="Archivo, sans-serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle">
+          <text x="630" y="682">Cloud Build</text>
+          <text x="796" y="682">Artifact Registry</text>
+          <text x="951" y="682">Cloud Run</text>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)" text-anchor="middle">
+          <text x="630" y="700">from source</text>
+          <text x="796" y="700">nav-sentinel image</text>
+          <text x="951" y="700">new revision</text>
+        </g>
+        <g stroke="var(--ink-faint)" stroke-width="1.2" fill="none" marker-end="url(#bf)">
+          <path d="M700 691 H722"/>
+          <path d="M866 691 H888"/>
+        </g>
+
+        <text x="30" y="762" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">Two auth layers on ingress: Cloud Run rejects anonymous callers, and the handler verifies the OIDC token audience — a push that skips either is refused, not logged and accepted.</text>
+        <text x="30" y="778" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">Every arrow crossing out of the container is a gateway call. There is no second path to data, which is what makes the policy list above enforceable rather than advisory.</text>
+        <text x="30" y="794" font-family="JetBrains Mono, monospace" font-size="8" fill="var(--ink-faint)">Local runs use the same code and the same control plane; only the credential source and the repository backend differ (Application Default Credentials from gcloud, in-memory store).</text>
       </svg>
     </div>
     <figcaption><b>Every data access crosses the gateway.</b> Investigators are discovered through the registry rather than wired in, so publishing a specialist changes routing without a code change. The ledger arrow is red and dashed because no agent in the fleet holds posting authority at any materiality — the only path to the books runs through a human approval.</figcaption>

@@ -288,12 +288,38 @@ class TestThePlatformWasNotTouched:
         assert [f for f in changed if f.startswith("src/nav_sentinel/registry/")] == []
         assert any(f.startswith("src/nav_sentinel/transfer_agency/") for f in changed)
 
-    def test_the_only_platform_file_touched_is_the_one_the_readme_admits(self):
+    #: Platform files that changed after the second process arrived, each with the reason it had to.
+    #: A maintained list, not a snapshot: a failure here is a prompt to decide whether a platform
+    #: change was really necessary and to record why, which is the discipline the claim rests on.
+    #: The first version asserted an exact equality against one file and went stale the moment a
+    #: legitimate second change landed -- and it passed at commit time only because `git diff`
+    #: reads the *previous* HEAD, so the assertion was one commit behind the tree it described.
+    ADMITTED_PLATFORM_CHANGES = {
+        # `CaseBrief`, so an investigator takes a flat value instead of fund accounting's case type.
+        "src/nav_sentinel/control_plane/governance.py",
+        # `register` refuses two processes shipping one prompt filename, and one definition of where
+        # a pack's templates live. Both are rules *about* hosting processes, not about any process.
+        "src/nav_sentinel/control_plane/packs.py",
+        # The call counter is readable by the caller, so a span can record calls and observations
+        # as the different numbers they are.
+        "src/nav_sentinel/control_plane/agent_surface.py",
+    }
+
+    def test_no_platform_file_changed_without_a_recorded_reason(self):
+        """The honest form of "adding a process touches no platform code".
+
+        It touched three files, each recorded above and in README defects 11 and 15. What did not
+        change is the registry, which the test above asserts separately -- and that is the claim
+        worth making, because routing and authority are what a second process would most plausibly
+        have needed to bend.
+        """
         changed = self._changed_since(self.BEFORE_THE_SECOND_PROCESS)
         if changed is None:
             pytest.skip("shallow checkout: the baseline commit is not present")
-        platform = [f for f in changed if f.startswith("src/nav_sentinel/control_plane/")]
-        assert platform == ["src/nav_sentinel/control_plane/governance.py"], platform
+        platform = {f for f in changed if f.startswith("src/nav_sentinel/control_plane/")}
+        assert platform <= self.ADMITTED_PLATFORM_CHANGES, sorted(
+            platform - self.ADMITTED_PLATFORM_CHANGES
+        )
 
     def test_the_transfer_agency_package_imports_no_fund_accounting_module(self):
         """If it did, the "second process" would be a second view of the first."""

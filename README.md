@@ -53,11 +53,26 @@ A model cannot declare victory here. The arithmetic either closes or it does not
 
 ## Architecture
 
-Four figures — the system, the enforcement path, the quarantine boundary, and the closure
-proof — are in [docs/diagrams/](docs/diagrams/), with the full write-up in
+Four figures — the deployed architecture, the enforcement path, the quarantine boundary, and the
+closure proof — are in [docs/diagrams/](docs/diagrams/), with the full write-up in
 [docs/architecture.html](docs/architecture.html).
 
-![System architecture](docs/diagrams/01-system.svg)
+The figure below is the one to read first: triggers on the left, one container in the middle,
+managed Google Cloud services on the right. The middle column is deliberately **generic** — the two
+process packs are interchangeable and the control plane beneath them knows nothing about either.
+Fund accounting measures materiality in basis points and transfer agency in units, and the same
+`band_for` derives the approval band from both. An earlier version of this figure drew the
+fund-accounting pipeline, which described one process rather than the platform that hosts any.
+
+![Deployed architecture on Google Cloud](docs/diagrams/01-system.svg)
+
+**Where Gemini sits:** the fleet is ADK 2.0 agents inside a single Cloud Run service, calling Vertex
+AI at location `global` — Gemini 3.x is served from nowhere else — authenticated by Application
+Default Credentials from the metadata server. There are no API keys in this project.
+
+**Where state lives:** Firestore, in four collections. `nav_cases` is current state; observations,
+decisions and approvals are **append-only**, written with `create()` rather than `set()`, so the
+audit trail cannot be rewritten by a later run.
 
 | Brief requirement | Google Cloud component | What we designed on top |
 | :--- | :--- | :--- |
@@ -148,55 +163,216 @@ No client, proprietary or personal data is used anywhere in this project.
 
 ## Spin-up
 
+Written for someone who has never seen this repository. Two paths: **everything in Part A runs with
+no Google Cloud project, no credentials and no network** — that is the reproducibility claim, and it
+is the fastest way to confirm the project is real. Part B adds a live model.
+
 ### Prerequisites
 
-- Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and the `gcloud` CLI
-- A Google Cloud project with billing enabled
+| Need | Why | Check |
+| --- | --- | --- |
+| Python 3.12+ | `StrEnum`, `datetime.UTC`, PEP 695 generics | `python3 --version` |
+| [`uv`](https://docs.astral.sh/uv/) | creates the venv and resolves the lock | `uv --version` |
+| `make` | every command below is a target | `make --version` |
+| `gcloud` CLI | **Part B only** | `gcloud version` |
+| A GCP project with billing | **Part B only** — Vertex AI is not free | `gcloud billing projects describe PROJECT_ID` |
+
+`rsvg-convert` is optional and only used to re-export diagram PNGs (`brew install librsvg`).
+
+---
+
+## Part A — offline, no credentials (about 3 minutes)
 
 ### 1. Install
 
 ```bash
-git clone <repository-url> && cd nav-sentinel
+git clone https://github.com/fpachisa/nav-sentinel.git
+cd nav-sentinel
 make venv
-cp .env.example .env      # then set GOOGLE_CLOUD_PROJECT
 ```
 
-### 2. Provision Google Cloud
+`make venv` creates `.venv/` and installs from the lockfile. No `.env` is needed for Part A —
+[`src/nav_sentinel/config.py`](src/nav_sentinel/config.py) has working defaults for every setting.
 
-```bash
-make bootstrap PROJECT=your-project-id REGION=us-central1
-```
-
-This enables the required APIs, creates the Model Armor template, mints one service account
-per registry manifest (see Known defects on the scope of those roles), and creates the Pub/Sub topic and Firestore
-database. It is idempotent — re-run it freely.
-
-> **Gotcha worth knowing:** Model Armor is only reachable on its *regional* endpoint. Calls to
-> the global endpoint return `PERMISSION_DENIED` even for a project owner, which is a
-> misleading error. `infra/bootstrap.sh` sets the override for you.
-
-### 3. Generate the books and records
+### 2. Generate the books and records
 
 ```bash
 make fixtures
 ```
 
-Regenerates the synthetic books from the recorded ECB cassette — no network needed — plus
-`eval/golden_breaks.yaml`.
+Builds the synthetic fund books — positions, cash, trades, a share register — with the breaks
+seeded into them, plus `eval/golden_breaks.yaml`, the expected answer for each. FX comes from a
+**recorded ECB cassette** committed to the repo, so this needs no network. Nothing here is
+hand-written: the golden file is generated from the same seeds as the books, which is why the
+evaluation can be scored automatically.
 
-### 4. Verify
-
-```bash
-make investigate # one case, investigated by the fleet (needs a live model)
-make test        # 634 invariant tests, including "no agent may post"
-make registry    # the published fleet and its coverage
-```
-
-### 5. Run a NAV cycle
+### 3. Prove it with the tests
 
 ```bash
-make demo      # NOT YET IMPLEMENTED -- see Known defects
+make verify
 ```
+
+Lint, the diagram geometry checks, then **634 invariant tests** in about five seconds. These are
+not smoke tests — they assert properties like *no agent in the fleet may post a journal entry*,
+*a units magnitude bands through the same policy as a basis-point one*, and *the transfer-agency
+package imports no fund-accounting module*.
+
+To prove the offline claim rather than take it on trust, cut the network and hide every credential:
+
+```bash
+env -u GOOGLE_APPLICATION_CREDENTIALS CLOUDSDK_CONFIG=/nonexistent \
+    HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+    .venv/bin/python -m pytest tests/ -q
+```
+
+Same 634 passes.
+
+### 4. Run a reconciliation cycle
+
+```bash
+make demo
+```
+
+Detects the breaks, scores materiality in basis points, derives the approval band for each, and
+records a policy decision per case — **with no model involved**. Expect seven cases, a control
+total of `-4,529,562.69 EUR`, and every capability reading `nav.unclassified` with `NONE` as the
+authorised investigator. That is correct and it is the point: classifying a break is triage's job,
+triage is a model, and no model has run yet. Everything a model did *not* do is arithmetic and
+reproducible.
+
+```bash
+make registry
+```
+
+The published fleet and which capability each agent is authorised for. Five rows read `NONE`:
+`nav.cash_fees`, `nav.pricing` and `ta.transfer_mismatch` are declared by a process and published
+by nobody, and the two `unclassified` rows are where a case sits before triage has run. The
+registry refuses to route any of them rather than picking whichever agent looks closest — an
+unhandled capability is a governance outcome, not a gap to paper over.
+
+---
+
+## Part B — with a live model
+
+Part B calls Vertex AI, which bills to your project. A single `make investigate` is a handful of
+requests; `make eval` runs the whole golden and is the most expensive target here.
+
+### 5. Authenticate
+
+**There are no API keys in this project and no way to supply one.** Authentication is
+Application Default Credentials throughout, and `GOOGLE_GENAI_USE_VERTEXAI=true` routes Gemini
+through Vertex AI:
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+There is deliberately no fallback to an API key if ADC is missing — a silent fallback is how a
+service ends up authenticating as something other than what you think it is. On Cloud Run the same
+code reads credentials from the metadata server as the `nav-runtime` service account, so no secret
+ever enters the image.
+
+### 6. Configure
+
+```bash
+cp .env.example .env
+```
+
+Then set `GOOGLE_CLOUD_PROJECT` to your project id. Two settings are worth reading before you
+change them:
+
+- `GOOGLE_CLOUD_LOCATION=global` — **Gemini 3.x is served only from `global` on Vertex AI.** Every
+  3.x model id returns 404 in a regional location. This is the single most likely thing to waste
+  your afternoon.
+- `NAV_REGION=us-central1` — the regional services: Model Armor, Cloud Run, Firestore, Pub/Sub.
+  Kept separate from the model location precisely because they disagree.
+
+Set `NAV_SEC_CONTACT` to an email address if you intend to hit live SEC EDGAR; it requires a
+contact in the User-Agent for automated access.
+
+### 7. Provision Google Cloud
+
+```bash
+make bootstrap PROJECT=your-project-id REGION=us-central1
+```
+
+Enables the APIs, creates the Model Armor template, mints one service account per registry manifest
+(see [Known defects](#known-defects) on the scope of those roles), creates the Pub/Sub topic and the
+Firestore database. Idempotent — re-run it freely.
+
+> **Model Armor is reachable only on its *regional* endpoint.** Calls to the global endpoint return
+> `PERMISSION_DENIED` even for a project owner, which is a misleading error for a routing problem.
+> `infra/bootstrap.sh` sets the override for you.
+
+### 8. Investigate one case with the fleet
+
+```bash
+make investigate
+```
+
+Triage classifies the break, the registry decides which agent is authorised for that capability,
+and that agent investigates using only the tools its manifest allows. Expect a diagnosis of the
+stale `2026-08-14` USD rate of `1.1567`, with citations pointing at the ECB observations behind it.
+Pass another ISIN to pick a different case — `make investigate` defaults to `US0378331005`, and the
+CLI lists the available ISINs if you name one it cannot find.
+
+### 9. Watch the second process run on the same control plane
+
+```bash
+make ta
+```
+
+Transfer agency, reconciling a share register **in units rather than currency**. The same
+`investigate()` function, the same gateway, the same seven policies — with a manifest and prompt
+that this process ships. Its correction uses **no model at all**, because a subscription dealt
+before the valuation point and settling after it differs by exactly the dealt units, and that is
+signed arithmetic against a date. Adding this process changed five lines in the composition root
+and nothing under `registry/`.
+
+### 10. Score the fleet against the golden
+
+```bash
+make eval        # needs a live model, and is the priciest target here
+make eval-score  # re-render the last recorded run, no model calls
+```
+
+Scores the fleet beside a **deterministic rule engine over the same signals** — not a strawman.
+Where the baseline matches, the honest finding is that the work was arithmetic.
+
+### 11. Deploy to Cloud Run
+
+```bash
+make deploy
+```
+
+Builds through Cloud Build into Artifact Registry, deploys as the `nav-runtime` service account with
+`--no-allow-unauthenticated`, and wires the Pub/Sub push subscription with an OIDC token plus a
+dead-letter topic. Then check it end to end:
+
+```bash
+gcloud run services describe nav-sentinel --region us-central1 --format='value(status.url)'
+curl -s -o /dev/null -w '%{http_code}\n' "$(gcloud run services describe nav-sentinel \
+  --region us-central1 --format='value(status.url)')/health"     # expect 403 — anonymous is refused
+```
+
+`make teardown` removes the service and subscription, keeping identities and fixtures.
+
+---
+
+### Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| `404` on any `gemini-3.*` model | `GOOGLE_CLOUD_LOCATION` is a region. Gemini 3.x is served only from `global`. |
+| `PERMISSION_DENIED` from Model Armor as project owner | The global endpoint. Model Armor is regional-only; use `modelarmor.us-central1.rep.googleapis.com`. |
+| `DefaultCredentialsError` | `gcloud auth application-default login` has not been run. There is no API-key fallback by design. |
+| `403` from your own Cloud Run URL | Correct. The service is `--no-allow-unauthenticated`; use `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)"`. |
+| `/healthz` returns Google's own page | Cloud Run's frontend intercepts that path before the container. The route here is `/health`. |
+| `FailedPrecondition: The query requires an index` | A Firestore composite index. The repository avoids these; if you add a filtered+ordered query you will need one. |
+| A trace is missing from Cloud Trace for ~45s | Indexing lag, not a dropped span. Spans are flushed in-request because Cloud Run throttles CPU after a response. |
+| `make eval` says a control rejected a draft | The domain refusing a malformed proposal. It is counted as a miss and the run continues. |
 
 ## Repository layout
 

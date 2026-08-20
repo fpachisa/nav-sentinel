@@ -23,7 +23,7 @@ LIGHT = {
     "--deny": "#A8322A", "--closed": "#2C6E5A",
 }
 FIGURES = [
-    ("01-system", "NAV Sentinel — system architecture"),
+    ("01-system", "NAV Sentinel — deployed architecture on Google Cloud"),
     ("02-enforcement-path", "NAV Sentinel — what happens to a tool call"),
     ("03-quarantine-boundary", "NAV Sentinel — the quarantine boundary"),
     ("04-nav-closure", "NAV Sentinel — definition of done is arithmetic"),
