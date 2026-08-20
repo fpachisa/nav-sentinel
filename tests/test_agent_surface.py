@@ -222,10 +222,54 @@ class TestEveryCallIsRecorded:
             for t in agent_surface.build(ca, case_id=CASE, trace_id=None, store=store)
         }
         with identity.acting_as("corporate-actions-investigator"):
-            rendered = tools["books_and_records.security"](isin="US02319V1035")
+            rendered = tools["books_and_records.security"](isin="US02319V1035")["result"]
         assert isinstance(rendered, dict)
         assert rendered["isin"] == "US02319V1035"
         assert all(not hasattr(v, "model_dump") for v in rendered.values())
+
+
+class TestTheModelCanActuallyCiteWhatItSaw:
+    """The mechanism is unusable unless the id reaches the model.
+
+    It did not. The wrapper returned only the result, so `Verdict.citations` could never be
+    legitimately populated -- and every other test here still passed, because they all read the
+    store directly instead of going through what a model receives. That is the defect family this
+    project keeps hitting: a test passing for a reason unrelated to the property it names.
+    """
+
+    def test_a_call_returns_an_id_the_verdict_can_cite(self, fx, store):
+        with identity.acting_as("fx-rates-investigator"):
+            returned = fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+        assert set(returned) == {"observation_id", "result"}
+        assert returned["observation_id"] in store
+
+    def test_the_returned_id_resolves_through_the_contract(self, fx, store):
+        """End to end: what the model gets back is enough to build a valid verdict."""
+        from nav_sentinel.agents.contract import Citation, Verdict, resolve_citations
+
+        with identity.acting_as("fx-rates-investigator"):
+            returned = fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+
+        verdict = Verdict(
+            case_id=CASE,
+            capability="nav.fx_rate",
+            root_cause="Accounting applied a stale rate",
+            confidence=0.8,
+            citations=[
+                Citation(observation_id=returned["observation_id"], relevance="the rate and date")
+            ],
+        )
+        assert resolve_citations(verdict, store.as_mapping())
+
+    def test_the_result_is_still_reachable_beside_the_id(self, fx):
+        with identity.acting_as("fx-rates-investigator"):
+            returned = fx["ecb_fx.rate_on"](currency="USD", day="2026-08-17")
+        assert returned["result"] == "1.1593"
+
+    def test_the_docstring_tells_the_model_to_cite(self, fx):
+        """The model cannot be expected to cite an id nobody told it to cite."""
+        assert "observation_id" in fx["ecb_fx.rate_on"].__doc__
+        assert "cannot cite will be rejected" in fx["ecb_fx.rate_on"].__doc__
 
 
 class TestTheCallBudget:

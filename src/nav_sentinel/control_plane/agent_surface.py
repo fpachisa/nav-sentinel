@@ -227,7 +227,7 @@ def build(
 
             args = ",".join(f"{k}={coerced[k]}" for k in sorted(coerced))
             digest = digest_of(result)
-            store.record(
+            recorded = store.record(
                 Observation(
                     observation_id=observation_id(case_id, name, args, digest),
                     case_id=case_id,
@@ -244,7 +244,15 @@ def build(
                     summary=_summarise(name, result),
                 )
             )
-            return _renderable(result)
+            # Return the observation id alongside the result, because a verdict cites evidence by
+            # id and the model has no other way to learn one. Without this the surface worked, the
+            # store filled up, and `Verdict.citations` could never be legitimately populated -- the
+            # evidence mechanism was unusable and every test still passed, because they all built
+            # observations directly instead of going through a model.
+            return {
+                "observation_id": recorded.observation_id,
+                "result": _renderable(result),
+            }
 
         # A dotted name cannot be `def`d, so the ADK-facing name substitutes underscores while
         # `nav_tool_name` keeps the catalogue's exact string -- the audit record and the model's
@@ -287,7 +295,14 @@ def _document(name: str, description: str, signature: Any, hints: dict[str, Any]
     Argument types are spelled out because every parameter is exposed as a string: the model has to
     be told that `day` is an ISO date and not a free-form one.
     """
-    lines = [f"{description} (tool: {name})", "", "Args:"]
+    lines = [
+        f"{description} (tool: {name})",
+        "",
+        "Returns a mapping with `observation_id` and `result`. Cite the `observation_id` in your "
+        "verdict for any fact you draw from `result`; a claim you cannot cite will be rejected.",
+        "",
+        "Args:",
+    ]
     for parameter in signature.parameters.values():
         annotation = hints.get(parameter.name, str)
         hint = {
