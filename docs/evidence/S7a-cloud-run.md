@@ -1,7 +1,8 @@
 # S7a evidence — the fleet running on Cloud Run
 
 Captured 20 August 2026 against project `all-things-agentic-hack-fp`, service `nav-sentinel`,
-region `us-central1`, revision `nav-sentinel-00006-4ps`.
+region `us-central1`, revision **`nav-sentinel-00008-dkh`** (the post-review revision; the figures
+below were re-measured on it, not carried over).
 
 Reproduce with `make deploy`, then hit `/selftest` and `/cycle/2026-08-17` with an identity token.
 
@@ -14,9 +15,12 @@ Reproduce with `make deploy`, then hit `/selftest` and `/cycle/2026-08-17` with 
 | Not publicly invokable | Anonymous `GET /readyz` → **403** from Cloud Run IAM; authenticated → 200 |
 | Gateway polices the path | `/cycle/2026-08-17` → **28 policy decisions** recorded for 7 cases |
 | Vertex Gemini reachable from Cloud Run | `/selftest` → `gemini-3.7-flash` returned, `location: global`, `transport: vertex-ai`, `google-adk 2.7.1` |
-| Model Armor reachable **and denying** | `/selftest` → benign admitted, injection refused with `ContentBlocked`, endpoint `modelarmor.us-central1.rep.googleapis.com` |
+| Model Armor reachable **and denying** | `/selftest` → benign admitted, injection refused with `denial_verdict: MATCH_FOUND`, `matched_filters: ["pi_and_jailbreak"]`, endpoint `modelarmor.us-central1.rep.googleapis.com` |
 | Span in Cloud Trace from the **deployed** service | trace `0a5d058b…` (5 spans, the ADK call tree) and per-case traces (below) |
 | Cycle closes | `control_total −4529562.69`, matching the generator's asserted closure figure |
+| Spans reached Cloud Trace, not a fallback | `spans_exported: true` **and** `trace_backend: cloud-trace` |
+| An unknown cycle is refused, not retried forever | `GET /cycle/2020-01-01` → **404**; the same date by Pub/Sub → **204** with `outcome=undeliverable reason=unknown_cycle` |
+| Failed deliveries go to a real dead-letter queue | `deadLetterTopic: nav-exceptions-dlq`, `maxDeliveryAttempts: 5` — a distinct topic, not the source topic |
 
 ## A case trace, as a reviewer sees it
 
@@ -56,3 +60,32 @@ Spans are now flushed inside the request.
 **Cloud Trace takes roughly 45 seconds to index a new trace.** A first lookup returned
 `404 Trace not found` and the same id resolved fine on retry. The recording must not cut straight
 from the API call to the Console, or it will show an empty trace view.
+
+
+## What the log now says
+
+Both outcomes are distinguishable, at the right severity, which they were not one revision earlier:
+
+```
+INFO   outcome=handled as_of=2026-08-17 cases=7 decisions=28 spans_exported=True
+       target=cloud-trace pushed_by=nav-pubsub-push@…iam.gserviceaccount.com
+ERROR  outcome=undeliverable reason=unknown_cycle message=21372174447395117:
+       no NAV record for MERID-GEF on 2020-01-01; known cycles: 2026-07-17, 2026-08-17
+```
+
+Nothing configured logging before, so the root logger sat at WARNING with no handler: `logger.error`
+reached Cloud Logging through Python's handler of last resort and every `logger.info` was dropped.
+The `outcome=handled` line — added specifically because a bare `204` cannot distinguish a completed
+cycle from a discarded message — never appeared. Cloud Logging parses the structured records and
+lifts `message` into `textPayload` while honouring `severity`, which is why the two lines above show
+as INFO and ERROR rather than both as default.
+
+## What this evidence does *not* show
+
+- **Per-agent cloud identity.** Cloud Run gives one identity per service, so the container runs as
+  `nav-runtime` on behalf of all seven agents. Agent identity is enforced in-process by the gateway
+  against published manifests; the per-agent accounts exist for data-plane grants. PLAN.md's
+  "Cloud Run (per-agent SA)" overstates this slice. See README known defect 7, now live.
+- **Fan-out.** One Pub/Sub hop drives one cycle. Per-capability dispatch is S3.
+- **Investigation.** No model reasons about a break yet; `/selftest` proves Vertex is reachable, not
+  that anything is investigated. That is S1.
