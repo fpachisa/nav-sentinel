@@ -194,8 +194,14 @@ async def investigate(
         )
 
     with identity.acting_as(manifest.agent_id):
+        calls: dict[str, int] = {"n": 0}
         tools = agent_surface.build(
-            manifest, case_id=case.case_id, trace_id=trace_id, store=store, budget=budget
+            manifest,
+            case_id=case.case_id,
+            trace_id=trace_id,
+            store=store,
+            budget=budget,
+            counter=calls,
         )
         agent = Agent(
             name=adk_name(manifest.agent_id),
@@ -264,7 +270,11 @@ async def investigate(
             span.set_attribute("nav.verdict.root_cause", verdict.root_cause[:300])
             span.set_attribute("nav.verdict.confidence", verdict.confidence)
             span.set_attribute("nav.verdict.citations", len(verdict.citations))
-            span.set_attribute("nav.tool.calls", len(store))
+            # Both, and each named for what it is. `len(store)` is *distinct* observations --
+            # content-derived ids, `setdefault` on record -- so two identical calls collapse to one
+            # and reporting it as the call count understated it.
+            span.set_attribute("nav.tool.calls", calls["n"])
+            span.set_attribute("nav.tool.observations", len(store))
             return verdict, store
 
 

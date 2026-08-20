@@ -207,6 +207,7 @@ def build(
     trace_id: str | None,
     store: ObservationStore,
     budget: int = DEFAULT_CALL_BUDGET,
+    counter: dict[str, int] | None = None,
 ) -> list[Callable[..., Any]]:
     """The tools this agent may call on this case, as plain functions ADK can wrap.
 
@@ -218,7 +219,12 @@ def build(
     _validate(manifest)
     agent_ref = manifest.ref
     catalogue = packs.catalogue()
-    calls = {"n": 0}
+    # The caller may supply the counter to read the true number of calls afterwards. Without this
+    # the only figure available to a caller was `len(store)`, which is *distinct observations*:
+    # ids are content-derived and `record` is `setdefault`, so two identical calls collapse to one.
+    # Reporting that as "tool calls" understated the count and mislabelled it.
+    calls = counter if counter is not None else {"n": 0}
+    calls.setdefault("n", 0)
 
     def make(name: str) -> Callable[..., Any]:
         spec = catalogue[name]

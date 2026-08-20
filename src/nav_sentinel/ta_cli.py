@@ -25,7 +25,7 @@ from rich.text import Text
 
 from nav_sentinel import composition
 from nav_sentinel.agents import investigator
-from nav_sentinel.control_plane import gateway
+from nav_sentinel.control_plane import audit
 from nav_sentinel.registry import discover
 from nav_sentinel.transfer_agency import cycle
 
@@ -41,18 +41,20 @@ def main() -> None:
     composition.configure()
     console = Console()
 
-    async def investigate(brief):
+    async def investigate(brief, trace_id):
         # Routing is the registry's decision, not this file's. Asking it per brief is what makes
         # the NONE in `make registry` mean something: an unrouted capability stops here.
         agent = discover.discover_for_capability(brief.capability)
         if agent is None:
             raise SystemExit(f"no published agent handles {brief.capability}")
-        verdict, store = await investigator.investigate(brief, agent)
+        # The trace id comes from the case's root span, so this process's observations hang off
+        # the same audit record the fund fleet produces instead of being recorded untraced.
+        verdict, store = await investigator.investigate(brief, agent, trace_id=trace_id)
         console.print(
             Panel(
                 Text(
                     f"{verdict.root_cause}\n\nconfidence {verdict.confidence:.2f} · "
-                    f"{len(store)} tool calls · {len(verdict.citations)} citations"
+                    f"{len(store)} observations · {len(verdict.citations)} citations"
                 ),
                 title=f"{agent.ref} on {agent.model}",
                 border_style="cyan",
@@ -67,6 +69,7 @@ def main() -> None:
             investigate=investigate,
             # The registry answers this, not the process and not this file.
             routes=lambda capability: discover.discover_for_capability(capability) is not None,
+            trace=audit.case_trace,
         )
     )
     if not results:
@@ -79,18 +82,18 @@ def main() -> None:
 
     for result in results:
         case = result.case
-        # The band comes from the control plane, derived from a units magnitude. Nothing here
-        # computes it, and `to_facts` is deliberately lossy on the way over.
-        band = gateway.route_for_approval(case.to_facts()).metadata["band"]
+        # The band came from the case's audit record, where the control plane derived it from a
+        # unit-tagged magnitude. Deriving it again here would record a second identical P-004
+        # decision per case -- a defect already fixed once on the fund-accounting side.
         table.add_row(
             case.case_id.split("-holder-")[-1],
             case.capability,
             f"{case.units_at_risk:,}",
-            band,
+            result.band or "—",
             (
                 Text(
-                    f"+{result.restatement.units:,} units on "
-                    f"{result.restatement.settlement_date.isoformat()}",
+                    f"{result.restatement.units:+,} units, clears "
+                    f"{result.restatement.clears_on.isoformat()}",
                     style="green",
                 )
                 if result.resolved

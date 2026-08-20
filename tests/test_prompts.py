@@ -26,7 +26,15 @@ from nav_sentinel.tools import books_and_records as bnr
 
 AS_OF = date(2026, 8, 17)
 #: Agents that drive a model. The others are registry entries with no instruction of their own.
-PROMPTED = ("triage-agent", "investigator", "remediation-agent")
+#:
+#: Enumerated per process rather than as one hardcoded tuple, because the fund fleet's three were
+#: hardcoded and the transfer-agency template was covered by nothing: deleting the `$required` line
+#: from `register-investigator.md`, or all three of its "checked mechanically" clauses, left the
+#: suite green. The live effect would be a model refused by P-007 for a rule its own instruction no
+#: longer states -- the exact anti-pattern `TestTheTemplatesSayWhatTheCodeEnforces` exists to stop.
+NAV_PROMPTED = ("triage-agent", "investigator", "remediation-agent")
+TA_PROMPTED = ("register-investigator",)
+PROMPTED = NAV_PROMPTED + TA_PROMPTED
 
 
 @pytest.fixture
@@ -117,7 +125,37 @@ def _render(agent_id: str, case, verdict) -> str:
             return triage._instruction(manifest, case)
         if agent_id == "investigator":
             return investigator._instruction(manifest, case.to_brief())
+        if agent_id == "register-investigator":
+            # A transfer-agency brief, not a fund case. Feeding it the NAV fixture reached
+            # `books_and_records` and tripped P-001 -- correctly, since this agent may not read the
+            # fund's books, and that denial is itself the seam working.
+            return investigator._instruction(manifest, _register_brief())
         return remediation._instruction(manifest, case, verdict)
+
+
+def _nav_brief():
+    scored = next(
+        c for c in cycle_runner.detect(AS_OF) if any(b.isin == "US0378331005" for b in c.breaks)
+    )
+    materiality.score(
+        scored,
+        bnr.nav_record("custodian", "MERID-GEF", AS_OF),
+        cycle_runner._fixture_rates(AS_OF),
+    )
+    scored.category = BreakCategory.FX_RATE
+    return scored.to_brief()
+
+
+def _register_brief():
+    """A *classified* register case, as the cycle produces.
+
+    `detect` leaves the capability at `ta.unclassified`, and an unclassified case has no declared
+    evidence requirement -- so rendering from a raw detection made the instruction say "no particular
+    facts" and a test asserting the requirement reached the model passed vacuously.
+    """
+    from nav_sentinel.transfer_agency import cycle, tolerance
+
+    return cycle.classify(tolerance.detect("MERID-GEF", AS_OF)[0]).to_brief()
 
 
 class TestTheComputedPartsStillReachTheModel:
@@ -141,6 +179,37 @@ class TestTheComputedPartsStillReachTheModel:
         rendered = _render("investigator", case, verdict)
         for fact in gateway.evidence_requirement_for("nav.fx_rate"):
             assert fact in rendered
+
+    def test_every_prompted_investigator_is_told_its_own_processs_required_facts(self):
+        """Per capability, across processes, and asserted against the *pack* rather than against the
+        template's own placeholders.
+
+        The earlier version of this class iterated `prompts.placeholders(agent_id)` -- read from the
+        template -- so deleting the `$required` line deleted its own check and left the suite green.
+        The live consequence is a verdict refused by P-007 for a rule the model was never told, which
+        reads as a model failure and is a prompt failure.
+        """
+        checked = 0
+        for agent_id, capability in (
+            ("investigator", "nav.fx_rate"),
+            ("register-investigator", "ta.subscription_in_transit"),
+        ):
+            required = gateway.evidence_requirement_for(capability)
+            assert required, f"{capability} declares no requirement, so this proves nothing"
+            manifest = discover.get(
+                agent_id if agent_id != "investigator" else "fx-rates-investigator"
+            )
+            with identity.acting_as(manifest.agent_id):
+                brief = (
+                    _register_brief()
+                    if agent_id == "register-investigator"
+                    else _nav_brief()
+                )
+                rendered = investigator._instruction(manifest, brief)
+            for fact in required:
+                assert fact in rendered, f"{agent_id} is not told it must cite {fact}"
+            checked += 1
+        assert checked == 2
 
     def test_the_drafting_agent_is_told_the_funds_base_currency(self, case, verdict):
         """Without it the model produced the right account and the right amount to the cent in the
@@ -208,6 +277,13 @@ class TestASecondProcessWouldShipItsOwn:
 
     def test_templates_are_packaged_with_the_process(self):
         """They ship inside the package rather than beside the repo, or a deployed image would have
-        the manifests and none of the instructions."""
-        for agent_id in PROMPTED:
+        the manifests and none of the instructions.
+
+        Per process: each template must live under *its own* package, which is the property that
+        makes a second process able to ship instructions at all. Asserting one hardcoded directory
+        for every agent is what kept the transfer-agency template out of this class.
+        """
+        for agent_id in NAV_PROMPTED:
             assert "src/nav_sentinel/domain/prompts" in str(prompts.path_for(agent_id))
+        for agent_id in TA_PROMPTED:
+            assert "src/nav_sentinel/transfer_agency/prompts" in str(prompts.path_for(agent_id))

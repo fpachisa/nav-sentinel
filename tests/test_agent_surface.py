@@ -594,6 +594,32 @@ class TestUndeclaredProjectionsAreRefused:
                 f"{spec.name} declares fact(s) {undeclared} that no NAV verdict can cite"
             )
 
+    def test_every_declared_fact_is_one_its_own_tool_can_actually_produce(self):
+        """Process-agnostic, because the check above had to be narrowed to the NAV pack when a second
+        process arrived -- and producibility went with it.
+
+        The transfer-agency tools then declared `as_of` while taking no such parameter, so
+        `args.get("as_of")` returned None on every call and `stringify` dropped it: a fact the
+        registry advertised, no verdict could cite, and no test looked at. This asserts the weaker
+        but universal property -- a declared fact must be one the tool's own projection can emit --
+        by calling the projection and comparing keys.
+        """
+        import inspect
+
+        for name, spec in packs.catalogue().items():
+            if spec.observe is None:
+                continue
+            source = inspect.getsource(spec.observe)
+            parameters = set(inspect.signature(spec.fn).parameters)
+            for fact in spec.facts:
+                assert f'"{fact}"' in source, f"{name} declares {fact!r}; its projection never emits it"
+                # A fact read straight off the arguments must correspond to a real parameter.
+                if f'args.get("{fact}")' in source or f'_args.get("{fact}")' in source:
+                    assert fact in parameters, (
+                        f"{name} projects {fact!r} from its arguments but takes no such parameter, "
+                        f"so it is always None and always dropped"
+                    )
+
     def test_a_projection_returning_an_undeclared_key_is_caught(self, store, monkeypatch):
         spec = packs.catalogue()["ecb_fx.rate_on"]
         rogue = dict(packs.catalogue())

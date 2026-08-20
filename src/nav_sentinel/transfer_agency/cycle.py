@@ -16,18 +16,19 @@ where a comparison suffices would be theatre, and this file would rather be the 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from nav_sentinel.control_plane.governance import CaseBrief
-from nav_sentinel.transfer_agency import register, remediation, tolerance
+from nav_sentinel.control_plane.governance import CaseBrief, CaseFacts
+from nav_sentinel.transfer_agency import remediation, tolerance
 from nav_sentinel.transfer_agency.models import RegisterCase
 
 #: What the root must supply: something that takes a brief and returns a verdict-like object.
 #: Typed loosely on purpose -- `Verdict` lives in the agents layer, which this package cannot see.
-Investigate = Callable[[CaseBrief], Awaitable[Any]]
+Investigate = Callable[[CaseBrief, str | None], Awaitable[Any]]
 
 #: Whether the registry publishes an agent for a capability. Injected for the same reason
 #: `Investigate` is: this package cannot import `registry`, and it must not answer the question
@@ -38,6 +39,14 @@ Investigate = Callable[[CaseBrief], Awaitable[Any]]
 #: this codebase, and a hardcoded copy is how that becomes advisory.
 Routes = Callable[[str], bool]
 
+#: Opens the audit record for one case and yields `(span, trace_id, band)`. Injected for the same
+#: reason the other two are -- this package may not import `control_plane.audit` -- and required
+#: rather than optional, because the first version of this file simply had no audit record at all:
+#: no root span, no `nav.case.*` attributes, and `trace_id=None` on every observation the second
+#: process recorded. On a project whose thesis is that the audit trail is the deliverable, the
+#: second process was the one path that produced none.
+Trace = Callable[[CaseFacts], AbstractContextManager[tuple[Any, str | None, str]]]
+
 
 def classify(case: RegisterCase) -> RegisterCase:
     """Assign the capability from the data, without a model.
@@ -46,25 +55,33 @@ def classify(case: RegisterCase) -> RegisterCase:
     sets the capability the registry has nothing to route on, and `register-investigator` sits
     published and unreachable while `make registry` prints it beside a capability as though it were
     handled.
-    """
-    item = case.breaks[0]
-    transit = [
-        deal
-        for deal in register.in_transit(case.fund_id, case.as_of)
-        if deal.holder_id == item.holder_id
-    ]
-    units = sum((deal.units for deal in transit), Decimal(0))
 
-    if transit and abs(units - item.difference) <= item.tolerance_applied:
-        # The registrar counts from trade date and the ledger from settlement date, so between
-        # those two dates the books differ by exactly the dealt units and neither is wrong.
+    This asks what *kind* of break it is, not whether the arithmetic closes. Those are different
+    questions and merging them was a bug: the first version re-derived `restate`'s exact predicate
+    -- same filter, same sum, same tolerance -- so `restate`'s refusal branch became unreachable and
+    the one sentence that tells a human what is left over could never be printed. A break with
+    subscriptions in transit *is* a subscription-in-transit case whether or not they fully account
+    for it; the investigator investigates it and the arithmetic then confirms or refuses.
+    """
+    transit = remediation.transit_for(case)
+    if not transit:
+        return case.model_copy(update={"capability": "ta.unclassified"})
+
+    try:
+        net = sum((remediation.signed_units(deal) for deal in transit), Decimal(0))
+    except remediation.UnsignableDeal:
+        # A transfer, whose direction this register does not record. Not a capability this process
+        # can claim, and the refusal text belongs to `restate`.
+        return case.model_copy(update={"capability": "ta.unclassified"})
+
+    if net > 0:
+        # The registrar counts units the ledger does not: recognised on trade date, unsettled.
         capability = "ta.subscription_in_transit"
-    elif transit:
-        # Deals are in transit but they do not account for the difference. Partly timing, partly
-        # something else -- and "partly something else" is not a capability this process can claim
-        # to handle, so it escalates rather than guessing.
-        capability = "ta.unclassified"
+    elif net < 0:
+        # Struck off the register, still on the ledger until settlement.
+        capability = "ta.redemption_unsettled"
     else:
+        # Deals in transit that net to nothing cannot explain a non-zero difference.
         capability = "ta.unclassified"
     return case.model_copy(update={"capability": capability})
 
@@ -74,6 +91,9 @@ class CycleResult:
     """What one cycle produced, per case."""
 
     case: RegisterCase
+    #: Derived by the control plane from a unit-tagged magnitude, taken from the audit record rather
+    #: than computed again here -- a second derivation would record two identical P-004 decisions.
+    band: str | None = None
     verdict: Any | None = None
     restatement: remediation.UnitRestatement | None = None
     #: Why no correction was produced, when none was.
@@ -90,6 +110,7 @@ async def run(
     *,
     investigate: Investigate,
     routes: Routes,
+    trace: Trace,
 ) -> list[CycleResult]:
     """Reconcile the register and correct what arithmetic can explain.
 
@@ -102,17 +123,28 @@ async def run(
     for detected in tolerance.detect(fund_id, as_of):
         case = classify(detected)
 
-        if not routes(case.capability):
-            results.append(CycleResult(case=case, refused=f"no agent handles {case.capability}"))
-            continue
+        # Every case is traced, including one nothing can handle. A refusal that leaves no audit
+        # record is the least reviewable outcome the system can produce.
+        with trace(case.to_facts()) as (_span, trace_id, band):
+            if not routes(case.capability):
+                results.append(
+                    CycleResult(
+                        case=case, band=band, refused=f"no agent handles {case.capability}"
+                    )
+                )
+                continue
 
-        verdict = await investigate(case.to_brief())
-        try:
-            restatement = remediation.restate(case)
-        except remediation.NotExplainedByTransit as exc:
-            # Classification said the transit accounts for it and the arithmetic disagreed. That
-            # is a real disagreement, not a formality, so it surfaces rather than being smoothed.
-            results.append(CycleResult(case=case, verdict=verdict, refused=str(exc)))
-            continue
-        results.append(CycleResult(case=case, verdict=verdict, restatement=restatement))
+            verdict = await investigate(case.to_brief(), trace_id)
+            try:
+                restatement = remediation.restate(case)
+            except remediation.NotExplainedByTransit as exc:
+                # Classification said what kind of break this is; the arithmetic decides whether it
+                # closes. This branch is reachable precisely because those are separate questions.
+                results.append(
+                    CycleResult(case=case, band=band, verdict=verdict, refused=str(exc))
+                )
+                continue
+            results.append(
+                CycleResult(case=case, band=band, verdict=verdict, restatement=restatement)
+            )
     return results

@@ -7,9 +7,11 @@ writes a JSON report and the scoring reads it. That means a number in the README
 recorded run rather than to a paragraph, `--score` can re-score without spending a model call, and a
 disagreement about a figure is settled by opening the file.
 
-**N is stated everywhere it is quoted.** Six scenarios across two cycles. One miss is 16.7%, and a
-percentage over six cases invites a confidence it does not carry -- so every rate is printed with its
-fraction, and the report says `indicative at N=6` in the same breath.
+**N is stated everywhere it is quoted**, and taken from the golden rather than written down here.
+This paragraph used to say "six scenarios", "one miss is 16.7%" and "the report says `indicative at
+N=6`" -- all three stale once the golden grew to seven, in the one file whose subject is not
+overstating a measurement. A percentage over so few cases invites a confidence it does not carry, so
+every rate is printed with its fraction and the title carries the live N beside it.
 """
 
 from __future__ import annotations
@@ -135,6 +137,7 @@ async def _run_fleet(
         result.refused = verdict.unresolved[:200]
         return result, ([], [])
 
+    result.reached_drafting = True
     try:
         proposal = await remediation.draft(case, verdict, discover.get("remediation-agent"))
     except ValidationError as exc:
@@ -254,6 +257,11 @@ def run(live: bool = True) -> dict[str, Any]:
         "skipped": uncovered,
         "closure": closures,
         "metric_definitions": {
+            "rejected": (
+                "per case that reached drafting: proposals a domain control refused. Counted "
+                "separately because a scenario expecting no corrections contributes no legs, so a "
+                "rejected draft there moved no other metric and the table read as a clean run"
+            ),
             "classification": (
                 "per detected case, credited when the named capability belongs to any golden "
                 "scenario that case covers -- the USD cash balance carries two"
@@ -273,6 +281,10 @@ def run(live: bool = True) -> dict[str, Any]:
                 "legs": leg_totals[score.name],
                 "causes": list(score.causes),
                 "cycle_legs": score.cycle_legs,
+                "rejected": [
+                    sum(1 for s in score.scenarios if s.draft_rejected),
+                    sum(1 for s in score.scenarios if s.reached_drafting),
+                ],
                 "cases": [
                     {
                         "covers": s.scenario,
@@ -312,11 +324,16 @@ def render(report: dict[str, Any], console: Console | None = None) -> None:
         ("classification", "classification"),
         ("leg-level correction", "legs"),
         ("root cause", "causes"),
+        ("drafts a control rejected", "rejected"),
     ):
         row = [Text(f"{label}\n[{report['metric_definitions'][key]}]")]
         for name in report["systems"]:
             hit, total = report["systems"][name][key]
-            row.append(Text(f"{hit}/{total}" + (f"  ({hit / total:.0%})" if total else "")))
+            if key == "rejected":
+                # No percentage: this row counts failures, and a rate here would read as a score.
+                row.append(Text(f"{hit} of {total}" if total else "n/a"))
+            else:
+                row.append(Text(f"{hit}/{total}" + (f"  ({hit / total:.0%})" if total else "")))
         table.add_row(*row)
     console.print(table)
 

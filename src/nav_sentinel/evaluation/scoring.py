@@ -78,11 +78,18 @@ class ScenarioResult:
     refused: str | None = None
     #: A control rejected the proposal the model drafted. Kept distinct from `refused` because the
     #: two mean opposite things: `refused` is the fleet correctly declining (the adversarial pricing
-    #: case's expected outcome), while this is a model mistake a control caught. The distinction is
-    #: load-bearing for `posts_nothing_correctly` -- proposing nothing is the right answer for a
-    #: reconciling item, and a rejected draft also produces no legs, so without this field a
-    #: rejected draft would be *credited* as the correct answer.
+    #: case's expected outcome), while this is a model mistake a control caught.
+    #:
+    #: It has its own row in the scorecard. It has to: a scenario whose golden expects no
+    #: corrections contributes nothing to the legs denominator, so a rejected draft there moved no
+    #: metric at all and every number in the table matched a clean run. It also excludes the case
+    #: from `posts_nothing_correctly`, since proposing nothing is the right answer for a reconciling
+    #: item and a rejected draft produces no legs for the opposite reason.
     draft_rejected: str | None = None
+    #: Whether drafting was attempted at all -- the denominator for the row above. A case that was
+    #: never routed, or whose verdict asserted no cause, never reached a proposal and must not be
+    #: counted as one that drafted cleanly.
+    reached_drafting: bool = False
     note: str = ""
 
     @property

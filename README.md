@@ -188,7 +188,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 
 ```bash
 make investigate # one case, investigated by the fleet (needs a live model)
-make test        # 603 invariant tests, including "no agent may post"
+make test        # 634 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -258,7 +258,7 @@ such rather than as complete.
 | Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
 | Cloud Run deployment | works | Revision `nav-sentinel-00008-dkh`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |
 | Remediation drafting and approval | works | The remediation agent — the only one P-002 grants drafting, and still denied posting by P-003 — drafts the correction. Measured: the FX break yields `investments_at_market EUR -86,625.48` with an `unrealised_fx` contra, balanced in EUR, requiring four eyes: the golden's stated correction, reached independently. Journals must balance **in every currency they touch**; two of the six scenarios are not journals at all (a split is a quantity restatement, a trade-date difference a reconciling item that posts nothing). `make approve` records a real human approval — refusing the wrong role or too few signers — and then **posting is still refused**, because an approval is necessary and not sufficient. |
-| Evaluation harness | works, and the numbers are unflattering in a useful way | `make eval` scores the fleet against the golden **beside a deterministic rule engine over the same signals** — not a strawman. Measured: classification **7/8 both**; leg-level correction **3/7 both**; root cause **fleet 5/8, baseline 1/8**. The framing was committed before the numbers were seen, and it holds: deciding *which kind* of break this is turns out to be arithmetic, so claiming credit for it would be claiming a rule engine's work. What a heuristic cannot produce at any N is a cause citing published evidence. The closure invariant holds to the cent (residuals 0.0059 and 0.0074) once corrections are converted to base — summing raw amounts across currencies is off by 4,776. N=7, so one miss is 14%: indicative, not a benchmark. Recorded in `eval/last_run.json`. |
+| Evaluation harness | works, and the numbers are unflattering in a useful way | `make eval` scores the fleet against the golden **beside a deterministic rule engine over the same signals** — not a strawman. Measured: classification **7/8 both**; leg-level correction **3/7 both**; root cause **fleet 5/8, baseline 1/8**. The framing was committed before the numbers were seen, and it holds: deciding *which kind* of break this is turns out to be arithmetic, so claiming credit for it would be claiming a rule engine's work. What a heuristic cannot produce at any N is a cause citing published evidence. The closure invariant holds to the cent (residuals 0.0059 and 0.0074) once corrections are converted to base — summing raw amounts across currencies is off by 4,776. A fourth row counts **drafts a control rejected** against the cases that actually reached drafting — **0 of 8** on the recorded run, 1 of 8 on the run before it, which is the honest shape of model variance at this N. It has its own denominator because a scenario expecting no corrections contributes no legs, so a rejected draft there once moved no metric at all (defect 15). N=7, so one miss is 14%: indicative, not a benchmark. Recorded in `eval/last_run.json`. |
 
 ### Known defects
 
@@ -325,18 +325,51 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
     agent beside `ta.subscription_in_transit` as though that capability were handled. The control
     plane grew a `CaseBrief` boundary type — flat, process-rendered breaks, following the `CaseFacts`
     precedent rather than a Protocol, because break *shape* is the one genuinely process-specific
-    part. The agent now runs live. Three guards remain: an AST test that `agents/investigator.py`
-    imports no process module, an identity test that both processes call the same `investigate`
-    function object, and a test that the cycle actually invokes it. Found by asking what state would
-    make `make registry` lie.
+    part. The agent now runs live. Review found two of the three guards were decoration: the identity
+    test compared a module attribute to itself and never mentioned `ta_cli`, so swapping the entry
+    point's investigator for a private copy left the suite green; and the AST rule forbade only
+    `domain` and `tools`, so the `agents` import its own docstring claimed was forbidden was not.
+    Both now fail when broken, verified by breaking them. Found by asking what state would make
+    `make registry` lie.
 
-12. **`ta.redemption_unsettled` is declared and never exercised.** `register-investigator`'s
-    manifest claims two capabilities; only `ta.subscription_in_transit` has ever run. No fixture
-    produces a redemption paid but not struck off the register, and the deterministic `classify()`
-    cannot return that capability, so half the agent's declared competence is untested. Recorded
-    rather than quietly narrowed, because it is a milder form of defect 11 — the difference being
-    that this one is a plausible competence claim with no evidence behind it, not a claim that
-    could never be exercised at all. The fix is a fixture, not a code change.
+12. ~~**`ta.redemption_unsettled` is declared and never exercised.**~~ **Partly closed, and the
+    stated remedy was wrong.** This entry said "the fix is a fixture, not a code change". Review
+    showed it was a code change: `in_transit` returned every deal type and both `classify` and
+    `restate` summed them with a uniform `+`, so a redemption — whose difference is *negative*,
+    because the registrar strikes it off before the ledger does — measured
+    `abs(125000 − (−125000))` = 250,000 units unexplained and told a human "the remaining -250000
+    is not explained by timing". A fixture alone would have produced `ta.unclassified` and the agent
+    still would not have run. Deals are signed by type now, deals that net out are netted (a
+    200,000 subscription against a 75,000 redemption is a 125,000 difference, not 275,000), and a
+    transfer is *refused* because `Deal` carries one `holder_id` and cannot say which side this
+    holder is on. A redemption now routes to its own capability, verified by test. What remains open
+    is only the fixture: no committed register data produces one, so the path is tested and not yet
+    demonstrated.
+
+13. ~~**A fabricated date pair.**~~ **Closed.** `restate` reported `min(trade_date)` with
+    `min(settlement_date)` across every in-transit deal, so two subscriptions — 25,000 settling on
+    the 30th, 100,000 settling on the 18th — produced "125,000 units subscribed on the 10th settle
+    on the 18th": a triple belonging to no deal, telling a reviewer the whole difference clears on
+    the 18th when a fifth of it does not. The dataclass docstring justifying those fields argued
+    that a restatement citing dates can be checked, and aggregation had made them uncheckable. It
+    carries the legs now and reports `clears_on` as the *last* settlement.
+
+14. ~~**The second process produced no audit record.**~~ **Closed.** `ta_cli` never opened a case
+    span, so there was no `nav_sentinel.exception_case` root, no `nav.case.*` attributes, and every
+    transfer-agency observation was recorded with `trace_id=None` — on a project whose thesis is
+    that the audit trail is the deliverable. The units *banding* had been held to a higher standard
+    already: a test exists precisely because a hand-built `CaseFacts` shows the platform *could*
+    band units, not that the process ever asked. The same standard now applies to the trace, and
+    every case is traced including one nothing can handle, because a refusal that leaves no audit
+    record is the least reviewable outcome the system can produce.
+
+15. ~~**`make eval` could report a clean sweep over a rejected draft.**~~ **Closed.** Recording
+    `draft_rejected` stopped the harness dying, but nothing consumed it:
+    `SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE` expects no corrections, so it contributes nothing to the
+    legs denominator, and classification and cause are both scored before drafting — so a malformed
+    proposal there moved no metric at all and every number in the table matched a clean run. It has
+    its own scorecard row now, with the count of cases that actually reached drafting as its
+    denominator.
 
 ## Licence
 

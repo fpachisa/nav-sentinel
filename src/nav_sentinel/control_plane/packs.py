@@ -247,6 +247,25 @@ class DuplicateProcess(ValueError):
     pass
 
 
+def _prompt_dir_of(pack: ProcessPack) -> Path:
+    """Where a pack's templates live, whether or not it names the directory explicitly.
+
+    One definition, used by `prompt_dirs` and by the collision check below. Two definitions is how
+    that check first shipped broken: it read `pack.prompt_dir` alone, the fund-accounting pack leaves
+    that `None` and relies on this fallback, so the check saw an empty set for the very pack whose
+    `investigator.md` it existed to protect -- and a hijacking pack registered cleanly.
+    """
+    return pack.prompt_dir or pack.manifest_dir.parent / "prompts"
+
+
+def _prompt_names(pack: ProcessPack) -> set[str]:
+    """The template filenames a pack ships, or nothing if it ships no directory."""
+    directory = _prompt_dir_of(pack)
+    if not directory.is_dir():
+        return set()
+    return {path.name for path in directory.glob("*.md")}
+
+
 def register(pack: ProcessPack) -> None:
     """Register a process.
 
@@ -284,6 +303,18 @@ def register(pack: ProcessPack) -> None:
                 f"processes {other.key!r} and {pack.key!r} both declare thresholds for unit(s) "
                 f"{sorted(units)}. Threshold resolution is by unit, so this would make one "
                 f"process's materiality govern the other's cases."
+            )
+        # And the same reasoning for prompt filenames. `prompts.path_for` walks the registered
+        # directories and takes the first hit, and `registered()` sorts by key -- so two packs
+        # shipping `investigator.md` would let alphabetical ordering decide which process's
+        # instructions an agent is given, silently. Measured before this check: a pack keyed "aml"
+        # shipping `prompts/investigator.md` captured the fund fleet's template.
+        shared = _prompt_names(other) & _prompt_names(pack)
+        if shared:
+            raise DuplicateProcess(
+                f"processes {other.key!r} and {pack.key!r} both ship prompt template(s) "
+                f"{sorted(shared)}. Templates resolve by filename across every registered process, "
+                f"so this would decide by ordering which instructions an agent receives."
             )
 
     _packs[pack.key] = pack
@@ -330,12 +361,14 @@ def manifest_dirs() -> tuple[Path, ...]:
 
 
 def prompt_dirs() -> tuple[Path, ...]:
-    """Every registered process's prompt directory, in registration order."""
-    return tuple(
-        directory
-        for p in registered()
-        if (directory := p.prompt_dir or p.manifest_dir.parent / "prompts").is_dir()
-    )
+    """Every registered process's prompt directory.
+
+    Ordered by process key, because `registered()` sorts -- this said "in registration order",
+    which it never was. That order would decide which process's template an agent received if two
+    shipped the same filename, so `register` refuses the collision outright rather than leaving the
+    answer to sorting.
+    """
+    return tuple(directory for p in registered() if (directory := _prompt_dir_of(p)).is_dir())
 
 
 def thresholds_for(unit: str) -> ThresholdSet | None:

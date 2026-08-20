@@ -1,7 +1,12 @@
 """The transfer-agency process, as the control plane sees it.
 
-One object. Registering it is one line in the composition root, and no file under `control_plane/`
-or `registry/` changes -- which is the claim, and `git diff --stat` is the evidence.
+One object. Registering it is one line in the composition root and nothing under `registry/`
+changes.
+
+The first version of this docstring said nothing under `control_plane/` changed either, and named
+`git diff --stat` as the evidence -- while that command showed `control_plane/governance.py` gaining
+`CaseBrief`. Adding the *process* costs the composition root; making the investigator process-
+agnostic cost one platform type, once. See README defect 11.
 """
 
 from __future__ import annotations

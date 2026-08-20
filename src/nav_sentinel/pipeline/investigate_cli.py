@@ -137,7 +137,7 @@ def main() -> int:
     # where a denial reason derives from attacker-authored notice text.
     summary = Text(verdict.root_cause, style="bold")
     summary.append(
-        f"\n\nconfidence {verdict.confidence:.2f} · {len(store)} tool calls · "
+        f"\n\nconfidence {verdict.confidence:.2f} · {len(store)} observations · "
         f"{len(verdict.citations)} citations",
         style="none",
     )

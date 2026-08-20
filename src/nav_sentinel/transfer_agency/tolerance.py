@@ -17,7 +17,8 @@ from nav_sentinel.transfer_agency.models import (
     RegisterCase,
 )
 
-#: A quarter of a unit. Registers deal in fractional units, so exact equality is the wrong test.
+#: A ten-thousandth of a unit. Registers deal in fractional units, so exact equality is the
+#: wrong test. (This comment said "a quarter of a unit", which is 2,500 times the value.)
 TOLERANCE = Decimal("0.0001")
 
 
@@ -66,6 +67,9 @@ def detect(fund_id: str, as_of: date) -> list[RegisterCase]:
 
 def control_total(fund_id: str, as_of: date) -> Decimal:
     """Total units the two books disagree about. This process's control total, in units."""
+    # Every break, not the first of each case: `detect` builds one break per case today, and a
+    # control total that silently ignored the rest would understate the very number it exists to
+    # state.
     return sum(
-        (abs(c.breaks[0].difference) for c in detect(fund_id, as_of)), Decimal(0)
+        (abs(b.difference) for c in detect(fund_id, as_of) for b in c.breaks), Decimal(0)
     )

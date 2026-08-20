@@ -8,7 +8,7 @@ proposal, and the denial that survives a valid human approval.
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal as D
 
 import pytest
@@ -627,6 +627,135 @@ class TestOneModelMistakeDoesNotDestroyTheWholeEvaluation:
         )
         assert not rejected.posts_nothing_correctly
 
+    def test_run_fleet_records_a_rejected_draft_instead_of_dying(self):
+        """The property the class is named for, exercised through `_run_fleet` itself.
+
+        The first two tests here checked a `ScenarioResult` property and a message helper -- neither
+        reached the code path that used to abort. Deleting the whole `try/except` restored the
+        traceback and left the suite green, so the fix that this class exists to protect was
+        protected by nothing.
+        """
+        import asyncio
+
+        from nav_sentinel.agents.contract import Citation, Verdict
+        from nav_sentinel.control_plane.observations import Observation, ObservationStore
+        from nav_sentinel.evaluation import golden, runner
+
+        case = _scored_case("US0378331005")
+        routable = "nav.fx_rate"
+        scenarios = [
+            scenario
+            for _date, scenario in golden.load().scenarios()
+            if scenario.capability == routable
+        ][:1]
+
+        async def classify(_case, _agent):
+            from nav_sentinel.agents.triage import Classification
+
+            return Classification(
+                case_id=case.case_id,
+                capability=routable,
+                confidence=1.0,
+                reasoning="fixed for the test",
+            )
+
+        store = ObservationStore()
+        observation = store.record(
+            Observation(
+                observation_id="OBS-aaaa000000000000",
+                case_id=case.case_id,
+                trace_id="d8bc651a64bdcd4eac21517327b02b85",
+                agent_ref="fx-rates-investigator@1.3.0",
+                tool="ecb_fx.latest_rate_on_or_before",
+                args="currency=USD,day=2026-08-17",
+                digest="0123456789abcdef",
+                retrieved_at=datetime(2026, 8, 20, 9, 0, tzinfo=UTC),
+                source="ecb_fx_reference_rates",
+                source_uri="https://data-api.ecb.europa.eu/service/data/EXR",
+                observed={"rate": "1.1567"},
+                summary="USD reference rate 1.1567",
+            )
+        )
+
+        async def investigate(_brief, _agent, **_kw):
+            return (
+                Verdict(
+                    case_id=case.case_id,
+                    capability=routable,
+                    root_cause="a stale rate of 1.1567",
+                    confidence=0.9,
+                    citations=[Citation(observation_id=observation.observation_id, relevance="r")],
+                ),
+                store,
+            )
+
+        async def draft(*_a, **_kw):
+            # Exactly what the domain raises when the model attaches the wrong shape.
+            _proposal(
+                quantity_lines=[
+                    QuantityRestatementLine(
+                        account="stock_record",
+                        isin="US0378331005",
+                        from_quantity=D(96000),
+                        to_quantity=D(192000),
+                    )
+                ]
+            )
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(runner.triage, "classify", classify)
+            patch.setattr(runner.investigator, "investigate", investigate)
+            patch.setattr(runner.remediation, "draft", draft)
+            result, legs = asyncio.run(runner._run_fleet(case, scenarios))
+
+        assert result.draft_rejected is not None, "the rejection was not recorded"
+        assert "cannot restate a quantity" in result.draft_rejected
+        assert legs == ([], [])
+        assert not result.posts_nothing_correctly, "a rejected draft is not a correct abstention"
+
+    def test_a_governance_denial_is_not_swallowed_as_a_scoring_outcome(self):
+        """`PolicyViolation` must still propagate. A policy denying the action is not a model
+        mistake to be scored; it is the fleet being stopped, and burying it in a scorecard cell
+        would turn the loudest signal in the system into a table entry."""
+        import asyncio
+
+        from nav_sentinel.evaluation import golden, runner
+
+        case = _scored_case("US0378331005")
+        routable = "nav.fx_rate"
+        scenarios = [
+            scenario
+            for _date, scenario in golden.load().scenarios()
+            if scenario.capability == routable
+        ][:1]
+
+        async def classify(_case, _agent):
+            from nav_sentinel.agents.triage import Classification
+
+            return Classification(
+                case_id=case.case_id,
+                capability=routable,
+                confidence=1.0,
+                reasoning="fixed",
+            )
+
+        async def investigate(_brief, _agent, **_kw):
+            from nav_sentinel.control_plane.governance import Effect, PolicyDecision
+
+            raise PolicyViolation(
+                PolicyDecision(
+                    policy_id="P-001-TOOL-ALLOWLIST",
+                    effect=Effect.DENY,
+                    reason="reached for a tool it may never call",
+                )
+            )
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(runner.triage, "classify", classify)
+            patch.setattr(runner.investigator, "investigate", investigate)
+            with pytest.raises(PolicyViolation):
+                asyncio.run(runner._run_fleet(case, scenarios))
+
     def test_the_validators_own_message_survives_into_the_scorecard(self):
         """Not pydantic's wrapper, which buries it under a repr of the whole rejected proposal."""
         from nav_sentinel.evaluation.runner import _first_error
@@ -643,3 +772,49 @@ class TestOneModelMistakeDoesNotDestroyTheWholeEvaluation:
                 ]
             )
         assert "cannot restate a quantity" in _first_error(caught.value)
+
+    def test_a_rejected_draft_has_a_row_of_its_own_in_the_scorecard(self):
+        """Without one it moved no metric at all. `SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE` expects no
+        corrections, so it contributes nothing to the legs denominator, and classification and cause
+        are both scored before drafting -- so a malformed draft there left every number in the table
+        identical to a clean run, with only a banner to distinguish them."""
+        from rich.console import Console
+
+        from nav_sentinel.evaluation import runner
+
+        report = self._offline_report()
+        assert "rejected" in report["metric_definitions"]
+        for system in report["systems"].values():
+            rejected, attempted = system["rejected"]
+            assert rejected <= attempted
+
+        console = Console(width=100, record=True)
+        runner.render(report, console)
+        assert "drafts a control rejected" in console.export_text()
+
+    @staticmethod
+    def _offline_report():
+        """Score the baseline only, writing the report somewhere disposable.
+
+        `runner.run` persists to `eval/last_run.json`, which is a committed artefact holding the
+        *live* numbers the README quotes. Calling it from a test overwrote them with a
+        baseline-only run -- a test quietly replacing a deliverable with a weaker version of itself.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from nav_sentinel.evaluation import runner
+
+        with tempfile.TemporaryDirectory() as directory:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(runner, "REPORT", Path(directory) / "last_run.json")
+                return runner.run(live=False)
+
+    def test_the_denominator_counts_only_cases_that_reached_drafting(self):
+        """A case that never routed, or whose verdict asserted no cause, never proposed anything --
+        counting it as a clean draft would flatter the rate."""
+        from nav_sentinel.evaluation import scoring
+
+        never_drafted = scoring.ScenarioResult(scenario="s", capability_expected="nav.pricing")
+        assert never_drafted.reached_drafting is False
+        assert never_drafted.draft_rejected is None

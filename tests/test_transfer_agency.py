@@ -2,8 +2,8 @@
 
 The claim this section exists to make checkable: adding a process touches no platform code. The
 tests below assert the *consequences* of that -- the same registry, the same seven policies, the same
-band derivation from a unit-tagged magnitude -- and `test_the_platform_was_not_touched` asserts the
-claim itself against git.
+band derivation from a unit-tagged magnitude -- and `TestThePlatformWasNotTouched` asserts the claim
+itself against git, including which single platform file did change and why.
 """
 
 from __future__ import annotations
@@ -14,15 +14,39 @@ from decimal import Decimal as D
 
 import pytest
 
-from nav_sentinel.control_plane import gateway, identity, packs
+from nav_sentinel import composition
+from nav_sentinel.control_plane import audit, gateway, identity, packs, telemetry
 from nav_sentinel.control_plane.governance import CaseFacts, Impact
 from nav_sentinel.registry import discover
 from nav_sentinel.transfer_agency import register, remediation, tolerance
-from nav_sentinel.transfer_agency.models import RegisterCase
+from nav_sentinel.transfer_agency.models import (
+    Deal,
+    DealType,
+    RegisterBreak,
+    RegisterBreakType,
+    RegisterCase,
+)
 from nav_sentinel.transfer_agency.pack import PACK as TA
 
 FUND = "MERID-GEF"
 AS_OF = date(2026, 8, 17)
+AS_OF_NEXT = date(2026, 8, 19)
+
+
+#: No process-side package may be imported from another process-side package. `domain` and `tools`
+#: were the original two -- if this process reached them, the "second process" would be a second view
+#: of the first. `agents` was missing and mattered more: `cycle.py`'s docstring claimed a test forbade
+#: importing it, and none did, so the injection that keeps the seam honest was enforced by prose
+#: alone. `agents` is a *shared* process-side layer, not a process, and the seam test's
+#: `PROCESS_PACKAGES` entry buys only the platform-may-not-reach-it rule -- not this one.
+FORBIDDEN_TO_A_PROCESS = (
+    "nav_sentinel.domain",
+    "nav_sentinel.tools",
+    "nav_sentinel.agents",
+    "nav_sentinel.pipeline",
+    "nav_sentinel.evaluation",
+    "nav_sentinel.memory",
+)
 
 
 def _case() -> RegisterCase:
@@ -228,13 +252,48 @@ class TestNothingHereMayPostEither:
 class TestThePlatformWasNotTouched:
     """The claim itself, against git rather than against a paragraph."""
 
-    @staticmethod
-    def _changed_since(ref: str) -> list[str]:
+    #: The commit immediately before the transfer-agency process existed. Hardcoded on purpose: the
+    #: claim is about a specific span of history, and a test that recomputes its own baseline can be
+    #: satisfied by moving the baseline.
+    BEFORE_THE_SECOND_PROCESS = "8f40b22"
+
+    @classmethod
+    def _changed_since(cls, ref: str) -> list[str] | None:
+        """Files changed between `ref` and HEAD, or None if this checkout cannot answer."""
+        known = subprocess.run(
+            ["git", "cat-file", "-e", f"{ref}^{{commit}}"], capture_output=True, check=False
+        )
+        if known.returncode != 0:
+            return None
         result = subprocess.run(
             ["git", "diff", "--name-only", ref, "HEAD"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         return [line for line in result.stdout.splitlines() if line]
+
+    def test_adding_the_second_process_changed_nothing_under_the_registry(self):
+        """The headline claim, against git rather than against a paragraph.
+
+        This helper existed with no caller while the module docstring said it "asserts the claim
+        itself against git" -- so the one test named for the claim was a dead method and a sentence.
+        The narrower claim is the true one: the *registry* is untouched. `control_plane/governance.py`
+        gained `CaseBrief`, which README defect 11 records and this test deliberately permits.
+        """
+        changed = self._changed_since(self.BEFORE_THE_SECOND_PROCESS)
+        if changed is None:
+            pytest.skip("shallow checkout: the baseline commit is not present")
+        assert changed, "the diff is empty, so this test is proving nothing"
+        assert [f for f in changed if f.startswith("src/nav_sentinel/registry/")] == []
+        assert any(f.startswith("src/nav_sentinel/transfer_agency/") for f in changed)
+
+    def test_the_only_platform_file_touched_is_the_one_the_readme_admits(self):
+        changed = self._changed_since(self.BEFORE_THE_SECOND_PROCESS)
+        if changed is None:
+            pytest.skip("shallow checkout: the baseline commit is not present")
+        platform = [f for f in changed if f.startswith("src/nav_sentinel/control_plane/")]
+        assert platform == ["src/nav_sentinel/control_plane/governance.py"], platform
 
     def test_the_transfer_agency_package_imports_no_fund_accounting_module(self):
         """If it did, the "second process" would be a second view of the first."""
@@ -247,7 +306,7 @@ class TestThePlatformWasNotTouched:
             reached = []
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                    ("nav_sentinel.domain", "nav_sentinel.tools")
+                    FORBIDDEN_TO_A_PROCESS
                 ):
                     reached.append(node.module or "")
             if reached:
@@ -294,17 +353,63 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
 
         assert cycle.classify(_case()).capability == "ta.subscription_in_transit"
 
-    def test_a_break_transit_does_not_explain_is_not_claimed(self):
-        """Half a timing difference is not a timing difference. Claiming the capability would hand
-        the case to an agent whose whole competence is explaining transit, for a break that is
-        partly something else."""
+    def test_a_partly_explained_break_routes_and_is_then_refused_by_arithmetic(self):
+        """Classification asks what kind of break it is; the arithmetic decides whether it closes.
+
+        These were the same predicate once -- `classify` re-derived `restate`'s filter, sum and
+        tolerance -- so `restate`'s refusal branch was structurally unreachable and the sentence
+        naming the unexplained remainder could never be produced. Putting `raise AssertionError` in
+        the cycle's handler left the suite green. The two questions are separate now, and this test
+        exists to keep them separate.
+        """
         from nav_sentinel.transfer_agency import cycle
 
         case = _case()
         inflated = case.model_copy(
-            update={"breaks": [case.breaks[0].model_copy(update={"registrar_units": D(9999999)})]}
+            update={"breaks": [case.breaks[0].model_copy(update={"registrar_units": D(1625000)})]}
         )
-        assert cycle.classify(inflated).capability == "ta.unclassified"
+        classified = cycle.classify(inflated)
+        assert classified.capability == "ta.subscription_in_transit", "it is still a transit case"
+
+        with pytest.raises(remediation.NotExplainedByTransit) as refused:
+            remediation.restate(classified)
+        message = str(refused.value)
+        assert "125000" in message.replace(",", ""), "it states what transit does explain"
+        assert "175000" in message.replace(",", ""), "and what the books actually differ by"
+        assert "needs a human" in message
+
+    def test_the_cycles_refusal_branch_is_reachable(self):
+        """The handler that was dead code. Reached through `cycle.run`, not by calling `restate`."""
+        import asyncio
+
+        from nav_sentinel.transfer_agency import cycle, tolerance
+
+        real_detect = tolerance.detect
+
+        def partly_explained(fund_id, as_of):
+            cases = real_detect(fund_id, as_of)
+            return [
+                c.model_copy(
+                    update={
+                        "breaks": [c.breaks[0].model_copy(update={"registrar_units": D(1625000)})],
+                        "units_at_risk": D(175000),
+                    }
+                )
+                for c in cases
+            ]
+
+        async def fake(_brief, _trace_id):
+            return "verdict"
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(cycle.tolerance, "detect", partly_explained)
+            results = asyncio.run(
+                cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: True, trace=audit.case_trace)
+            )
+
+        assert len(results) == 1
+        assert not results[0].resolved
+        assert "not explained by timing" in results[0].refused
 
     def test_a_holder_with_no_deals_in_transit_is_not_claimed(self):
         from nav_sentinel.transfer_agency import cycle
@@ -323,12 +428,12 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
 
         seen = []
 
-        async def fake(brief):
+        async def fake(brief, _trace_id):
             seen.append(brief)
             return "verdict"
 
         results = asyncio.run(
-            cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: True)
+            cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: True, trace=audit.case_trace)
         )
         assert len(seen) == 1, "the investigator was not called"
         brief = seen[0]
@@ -345,11 +450,11 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
 
         called = []
 
-        async def fake(brief):
+        async def fake(brief, _trace_id):
             called.append(brief)
             return "verdict"
 
-        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: False))
+        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: False, trace=audit.case_trace))
         assert called == []
         assert results and not results[0].resolved
         assert "no agent handles" in results[0].refused
@@ -373,10 +478,19 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
 
     def test_it_runs_the_same_investigator_the_fund_fleet_runs(self):
         """The extensibility claim, as an identity check rather than a paragraph. Not a copy, not a
-        subclass -- the same function object."""
+        subclass -- the same function object.
+
+        Both entry points are named, and that is the whole test. The first version asserted only
+        `investigate_cli.investigator.investigate is investigator.investigate`, where both sides
+        resolve to the same module attribute and `ta_cli` -- the entry point that actually runs this
+        process -- went unmentioned. Swapping `ta_cli`'s investigator for a private copy left the
+        suite green, so the one test the README cites by name for this claim proved nothing.
+        """
+        from nav_sentinel import ta_cli
         from nav_sentinel.agents import investigator
         from nav_sentinel.pipeline import investigate_cli
 
+        assert ta_cli.investigator.investigate is investigator.investigate
         assert investigate_cli.investigator.investigate is investigator.investigate
 
     def test_the_investigator_imports_no_process_module(self):
@@ -417,3 +531,344 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
         from nav_sentinel.agents import prompts
 
         assert prompts.first_available(("fx-rates-investigator", "investigator")) == "investigator"
+
+
+class TestTheArithmeticIsSignedAndDoesNotFabricate:
+    """The sign discipline. `in_transit` returns every deal type and both `classify` and `restate`
+    summed them with a uniform `+`, so a redemption in transit -- whose difference is *negative*
+    because the registrar strikes it off first -- reported `abs(125000 - (-125000))` = 250,000 units
+    unexplained, and then told a human "the remaining -250000 is not explained by timing". The
+    fixture has one subscription and one holder, so every test passed."""
+
+    @staticmethod
+    def _case(registrar: str, ledger: str) -> RegisterCase:
+        item = RegisterBreak(
+            break_id="TABRK-test",
+            fund_id=FUND,
+            as_of=AS_OF,
+            break_type=RegisterBreakType.HOLDER_BALANCE,
+            holder_id="HOLD-002",
+            registrar_units=D(registrar),
+            ledger_units=D(ledger),
+            tolerance_applied=D("0.0001"),
+        )
+        return RegisterCase(
+            case_id="TACASE-test",
+            fund_id=FUND,
+            as_of=AS_OF,
+            breaks=[item],
+            units_at_risk=abs(item.difference),
+        )
+
+    @staticmethod
+    def _deal(deal_id: str, deal_type: DealType, units: str, trade: date, settle: date) -> Deal:
+        return Deal(
+            deal_id=deal_id,
+            fund_id=FUND,
+            holder_id="HOLD-002",
+            deal_type=deal_type,
+            trade_date=trade,
+            settlement_date=settle,
+            units=D(units),
+            source="registrar",
+        )
+
+    def test_a_subscription_contributes_positive_units(self):
+        deal = self._deal("D", DealType.SUBSCRIPTION, "100", AS_OF, date(2026, 8, 19))
+        assert remediation.signed_units(deal) == D(100)
+
+    def test_a_redemption_contributes_negative_units(self):
+        deal = self._deal("D", DealType.REDEMPTION, "100", AS_OF, date(2026, 8, 19))
+        assert remediation.signed_units(deal) == D(-100)
+
+    def test_a_transfers_direction_is_not_recorded_so_it_is_refused(self):
+        """One `holder_id` per deal cannot say whether this holder is source or destination.
+        Guessing the sign would be wrong half the time, which is worse than no explanation."""
+        deal = self._deal("D", DealType.TRANSFER, "100", AS_OF, date(2026, 8, 19))
+        with pytest.raises(remediation.UnsignableDeal):
+            remediation.signed_units(deal)
+
+    def test_a_redemption_in_transit_routes_to_its_own_capability(self, monkeypatch):
+        """Previously `ta.unclassified`, so README defect 12's stated remedy -- "a fixture, not a
+        code change" -- would not have closed it: the agent still would not have run."""
+        from nav_sentinel.transfer_agency import cycle
+
+        deals = [self._deal("D-R", DealType.REDEMPTION, "125000", date(2026, 8, 14), AS_OF_NEXT)]
+        monkeypatch.setattr(register, "in_transit", lambda _f, _a: deals)
+        case = cycle.classify(self._case("1450000", "1575000"))
+        assert case.breaks[0].difference == D(-125000)
+        assert case.capability == "ta.redemption_unsettled"
+
+        restated = remediation.restate(case)
+        assert restated.units == D(-125000)
+        # And it must not claim the registrar is the book that is ahead.
+        assert "struck them off" in restated.rationale
+        assert "the registrar counts them" not in restated.rationale
+
+    def test_deals_that_net_out_are_netted_not_summed(self, monkeypatch):
+        """A subscription of 200,000 against a redemption of 75,000 is a difference of 125,000.
+        Uniform addition made it 275,000 and refused a break it fully explains."""
+        from nav_sentinel.transfer_agency import cycle
+
+        deals = [
+            self._deal("D-S", DealType.SUBSCRIPTION, "200000", date(2026, 8, 12), AS_OF_NEXT),
+            self._deal("D-R", DealType.REDEMPTION, "75000", date(2026, 8, 13), AS_OF_NEXT),
+        ]
+        monkeypatch.setattr(register, "in_transit", lambda _f, _a: deals)
+        case = cycle.classify(self._case("1575000", "1450000"))
+        assert case.capability == "ta.subscription_in_transit"
+        assert remediation.restate(case).units == D(125000)
+
+    def test_no_date_pair_is_reported_that_belongs_to_no_deal(self, monkeypatch):
+        """`min(trade)` with `min(settlement)` across deals produced "125,000 units subscribed on
+        the 10th settle on the 18th" when 25,000 of it settles on the 30th -- a triple belonging to
+        no deal, and a reviewer reconciling on the 19th finds 25,000 outstanding."""
+        early, late = date(2026, 8, 18), date(2026, 8, 30)
+        deals = [
+            self._deal("D-A", DealType.SUBSCRIPTION, "25000", date(2026, 8, 10), late),
+            self._deal("D-B", DealType.SUBSCRIPTION, "100000", date(2026, 8, 16), early),
+        ]
+        monkeypatch.setattr(register, "in_transit", lambda _f, _a: deals)
+        restated = remediation.restate(self._case("1575000", "1450000"))
+
+        assert restated.clears_on == late, "the whole difference clears at the *last* settlement"
+        rationale = restated.rationale
+        for deal in deals:
+            assert deal.deal_id in rationale, "every deal is named"
+            assert deal.settlement_date.isoformat() in rationale, "with its own settlement date"
+        assert "125000 units subscribed on 2026-08-10" not in rationale.replace(",", "")
+
+
+class TestTheSecondProcessProducesAnAuditRecord:
+    """The thesis of the whole project is that the audit trail is the deliverable, and the second
+    process was the one runnable path that produced none: `ta_cli` never opened a case span, so
+    there was no `nav_sentinel.exception_case` root, no `nav.case.*` attributes, and every TA
+    observation was recorded with `trace_id=None`. The units *banding* had been held to a higher
+    standard than this -- `test_the_band_comes_from_facts_this_process_actually_emits` exists
+    precisely because a hand-built `CaseFacts` proves the platform could, not that the process
+    asked. The same standard, applied to the audit record."""
+
+    @staticmethod
+    def _run(recorder):
+        import asyncio
+
+        from nav_sentinel.transfer_agency import cycle
+
+        async def fake(_brief, trace_id):
+            recorder["trace_ids"].append(trace_id)
+            return "verdict"
+
+        return asyncio.run(
+            cycle.run(
+                FUND,
+                AS_OF,
+                investigate=fake,
+                routes=lambda _: True,
+                trace=recorder["trace"],
+            )
+        )
+
+    def test_a_case_span_is_opened_with_the_control_planes_own_attribute_names(self, monkeypatch):
+        opened: list[dict] = []
+        real_span = telemetry.span
+
+        def watch(name, **attributes):
+            opened.append({"name": name, **attributes})
+            return real_span(name, **attributes)
+
+        monkeypatch.setattr(telemetry, "span", watch)
+        recorder = {"trace_ids": [], "trace": audit.case_trace}
+        self._run(recorder)
+
+        roots = [s for s in opened if s["name"] == "nav_sentinel.exception_case"]
+        assert roots, "the second process opened no case span"
+        root = roots[0]
+        # The key names are the control plane's, so one governance log covers both processes.
+        assert root["nav.case.capability"] == "ta.subscription_in_transit"
+        assert root["nav.case.id"].startswith("TACASE-")
+
+    def test_the_band_reaches_the_result_from_the_audit_record_not_a_second_derivation(self):
+        """Two derivations meant two identical P-004 decisions per case, already fixed once on the
+        fund-accounting side. The band the cycle reports is the one the trace recorded."""
+        recorder = {"trace_ids": [], "trace": audit.case_trace}
+        results = self._run(recorder)
+        assert [r.band for r in results] == ["four_eyes"]
+
+    def test_only_one_approval_route_decision_is_recorded_per_case(self):
+        gateway.mark_decisions("ta-audit-test")
+        recorder = {"trace_ids": [], "trace": audit.case_trace}
+        self._run(recorder)
+        routes = [
+            d
+            for d in gateway.decisions_since("ta-audit-test")
+            if d.policy_id.startswith("P-004")
+        ]
+        assert len(routes) == 1, [d.policy_id for d in routes]
+
+    def test_the_investigator_is_given_the_cases_trace_id(self):
+        """Observations recorded under `trace_id=None` cannot be tied back to the case that caused
+        them, which is the one thing the audit record exists to do."""
+        recorder = {"trace_ids": [], "trace": audit.case_trace}
+        self._run(recorder)
+        assert len(recorder["trace_ids"]) == 1
+        # `None` is what this asserted against before: the parameter existed and nothing filled it.
+        assert recorder["trace_ids"][0] is not None
+
+    def test_the_entry_point_actually_supplies_the_tracer(self, monkeypatch):
+        """The tests above hand `cycle.run` a tracer themselves, so they prove the cycle traces when
+        asked -- not that anything asks. Replacing `ta_cli`'s `trace=audit.case_trace` with a null
+        context left all of them green, which is the same shape of hole as the identity test that
+        never mentioned `ta_cli`. This one names the wiring.
+        """
+        import sys
+
+        from nav_sentinel import ta_cli
+
+        captured: dict[str, object] = {}
+
+        async def fake_run(_fund, _as_of, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        monkeypatch.setattr(ta_cli.cycle, "run", fake_run)
+        monkeypatch.setattr(sys, "argv", ["ta_cli", "--as-of", AS_OF.isoformat()])
+        ta_cli.main()
+
+        assert captured["trace"] is audit.case_trace, "the entry point supplies no tracer"
+        assert captured["routes"]("ta.subscription_in_transit") is True
+        assert captured["routes"]("ta.transfer_mismatch") is False, "unrouted must stay unrouted"
+
+
+class TestTemplateNamesCannotBeHijacked:
+    """Templates resolve by filename across every registered process, and `registered()` returns
+    packs sorted by key -- so before this check, a pack keyed "aml" shipping `prompts/investigator.md`
+    captured the fund fleet's instructions. `register()` already refused colliding tool names and
+    colliding threshold units for exactly this reason, and the reason it gave was that alphabetical
+    ordering must not decide governance silently."""
+
+    def test_two_processes_shipping_one_template_name_are_refused(self, tmp_path):
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "investigator.md").write_text("HIJACKED TEMPLATE")
+
+        intruder = packs.ProcessPack(
+            key="aml",
+            name="Anti money laundering",
+            capabilities=("aml.screening",),
+            manifest_dir=tmp_path / "manifests",
+            prompt_dir=prompts_dir,
+            tools=(),
+            thresholds=(),
+            control_total_unit="alerts",
+        )
+        with pytest.raises(packs.DuplicateProcess) as refused:
+            packs.register(intruder)
+        assert "investigator.md" in str(refused.value)
+        assert "aml" not in {p.key for p in packs.registered()}, "a refused pack must not register"
+
+    def test_a_process_shipping_its_own_template_name_is_accepted(self, tmp_path):
+        """The check must not forbid the mechanism it protects: per-agent overrides are the point."""
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "aml-screening-agent.md").write_text("$display_name")
+
+        pack = packs.ProcessPack(
+            key="aml",
+            name="Anti money laundering",
+            capabilities=("aml.screening",),
+            manifest_dir=tmp_path / "manifests",
+            prompt_dir=prompts_dir,
+            tools=(),
+            thresholds=(),
+            control_total_unit="alerts",
+        )
+        try:
+            packs.register(pack)
+            assert "aml" in {p.key for p in packs.registered()}
+        finally:
+            composition.reset()
+            composition.configure()
+
+
+class TestTheOneHolderAssumptionIsStatedNotAssumed:
+    def test_a_multi_break_case_is_refused_rather_than_partly_explained(self):
+        """`breaks[0]` was read in three places while `to_brief` rendered all of them to the model
+        and `to_facts` reported `item_count`. Nothing constrained the list to one."""
+        case = _case()
+        doubled = case.model_copy(update={"breaks": [case.breaks[0], case.breaks[0]]})
+        with pytest.raises(remediation.NotASingleHolderBreak):
+            remediation.restate(doubled)
+
+    def test_the_control_total_counts_every_break_not_the_first_of_each_case(self):
+        from nav_sentinel.transfer_agency import tolerance
+
+        assert tolerance.control_total(FUND, AS_OF) == D("125000.0000")
+
+    def test_resolves_itself_discriminates_on_both_branches(self):
+        """It cannot be False for anything `restate` builds, since `in_transit` only returns deals
+        settling after the valuation point -- so asserting it against a real case compared a constant
+        to a constant. Asserted on the dataclass, where both branches exist."""
+        leg = remediation.TransitLeg(
+            deal_id="D",
+            deal_type="subscription",
+            units=D(1),
+            trade_date=date(2026, 8, 14),
+            settlement_date=date(2026, 8, 19),
+        )
+        pending = remediation.UnitRestatement(
+            holder_id="H", units=D(1), as_of=AS_OF, legs=(leg,)
+        )
+        assert pending.resolves_itself
+
+        settled = remediation.UnitRestatement(
+            holder_id="H",
+            units=D(1),
+            as_of=AS_OF,
+            legs=(leg.__class__(**{**leg.__dict__, "settlement_date": date(2026, 8, 15)}),),
+        )
+        assert not settled.resolves_itself
+
+
+class TestTheEntryPointRendersWhatTheCycleReturns:
+    """631 tests passed while `make ta` died on `AttributeError: 'UnitRestatement' object has no
+    attribute 'settlement_date'`. The field had been replaced by `clears_on` -- the fix for a
+    fabricated date pair -- and nothing rendered the table, so the only artefact the demo shows was
+    covered by no test at all. Family (b) in its purest form: complete coverage of everything except
+    the output."""
+
+    def _render(self, monkeypatch, results):
+        import sys
+
+        from nav_sentinel import ta_cli
+
+        async def fake_run(_fund, _as_of, **_kwargs):
+            return results
+
+        monkeypatch.setattr(ta_cli.cycle, "run", fake_run)
+        monkeypatch.setattr(sys, "argv", ["ta_cli", "--as-of", AS_OF.isoformat()])
+        ta_cli.main()
+
+    def test_a_resolved_case_renders(self, monkeypatch):
+        from nav_sentinel.transfer_agency import cycle
+
+        case = cycle.classify(_case())
+        result = cycle.CycleResult(
+            case=case,
+            band="four_eyes",
+            verdict="v",
+            restatement=remediation.restate(case),
+        )
+        self._render(monkeypatch, [result])
+
+    def test_a_refused_case_renders(self, monkeypatch):
+        from nav_sentinel.transfer_agency import cycle
+
+        result = cycle.CycleResult(
+            case=cycle.classify(_case()),
+            band="four_eyes",
+            refused="no agent handles ta.transfer_mismatch",
+        )
+        self._render(monkeypatch, [result])
+
+    def test_an_empty_register_renders(self, monkeypatch):
+        self._render(monkeypatch, [])

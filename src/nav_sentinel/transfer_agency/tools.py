@@ -28,14 +28,36 @@ def _observe_in_transit(result, args) -> dict:
         "units": sum(d.units for d in result),
         "trade_date": min(d.trade_date for d in result),
         "settlement_date": min(d.settlement_date for d in result),
+        # This tool does take `as_of`, so the fact is producible here. `register.positions` and
+        # `register.deals` declared it too and take no such parameter, so `args.get` returned None
+        # on every call and `stringify` dropped it -- a declared fact that could never be produced,
+        # cited by nothing and noticed by no test.
         "as_of": args.get("as_of"),
     }
 
 
-def _observe_positions(result, args) -> dict:
+def _observe_positions(result, _args) -> dict:
+    """A book total across every holder it returned, labelled as such.
+
+    `units` here is the sum over all rows, which for a per-holder break is not the break -- the
+    fixture has one holder, so a fund-wide total and one holder's balance were the same number and
+    nothing distinguished them. `holders` is recorded beside it so a citation of this observation
+    cannot be mistaken for a single holder's position.
+    """
     if not result:
         return {}
-    return {"units": sum(p.units for p in result), "as_of": args.get("as_of")}
+    return {
+        "units": sum(p.units for p in result),
+        "holders": len({p.holder_id for p in result}),
+    }
+
+
+def _observe_deals(result, _args) -> dict:
+    """Every deal the call returned, aggregated. Deliberately not `_observe_positions`: deals have
+    no holder balance, and sharing one function is what let both declare `as_of`."""
+    if not result:
+        return {}
+    return {"units": sum(d.units for d in result), "deals": len(result)}
 
 
 TA_TOOLS: tuple[ToolSpec, ...] = (
@@ -44,7 +66,7 @@ TA_TOOLS: tuple[ToolSpec, ...] = (
         register.positions,
         ("holder_positions",),
         observe=_observe_positions,
-        facts=("units", "as_of"),
+        facts=("units", "holders"),
         source=_REGISTER,
         uri_template=_REGISTER_URI,
         description="Unit-holder balances from one book. `source` is 'registrar' or "
@@ -54,8 +76,8 @@ TA_TOOLS: tuple[ToolSpec, ...] = (
         "register.deals",
         register.deals,
         ("deals",),
-        observe=_observe_positions,
-        facts=("units", "as_of"),
+        observe=_observe_deals,
+        facts=("units", "deals"),
         source=_REGISTER,
         uri_template=_REGISTER_URI,
         description="Every instruction on the register -- subscriptions, redemptions, transfers -- "
