@@ -10,6 +10,8 @@ test session fixture.
 
 from __future__ import annotations
 
+import os
+
 from nav_sentinel.control_plane import approvals, packs, repository
 from nav_sentinel.registry import discover
 
@@ -53,8 +55,19 @@ def configure(
     # since the two answer the same question and a service persisting approvals durably while
     # writing its governance log to memory would be the worst of both; else whatever is already
     # installed; else memory.
-    requested = repository_backend or approvals_backend or _installed_repository_backend() or "memory"
-    approvals_backend = approvals_backend or _approvals_backend or "memory"
+    # `NAV_REPOSITORY` sits between the explicit argument and whatever is installed, so a CLI can
+    # be pointed at the durable store without every entry point growing a flag -- and so the
+    # cross-process claim can actually be run: `NAV_REPOSITORY=firestore make demo` then
+    # `NAV_REPOSITORY=firestore make approve` is two processes sharing one trail.
+    from_env = os.environ.get("NAV_REPOSITORY")
+    requested = (
+        repository_backend
+        or approvals_backend
+        or from_env
+        or _installed_repository_backend()
+        or "memory"
+    )
+    approvals_backend = approvals_backend or _approvals_backend or from_env or "memory"
 
     if requested != _installed_repository_backend():
         _repository = repository.build(requested)

@@ -219,13 +219,27 @@ class TestACyclePersistsItsOwnTrail:
 
     def test_each_case_gets_only_its_own_decisions(self):
         """The log is per-context and a cycle works several cases in one context, so persisting
-        without a boundary would have given every case the whole cycle's decisions."""
+        without a boundary would have given every case the whole cycle's decisions.
+
+        Scoped to this run's trace. Case ids became content-derived, so a case accumulates the
+        history of every run against it -- which is the append-only property working, and means a
+        count across all runs is not what this test is about.
+        """
         from nav_sentinel.pipeline import cycle_runner
 
         composition.configure(approvals_backend="memory", repository_backend="memory")
         result = cycle_runner.run(date(2026, 8, 17))
         store = composition.store()
-        counts = {len(store.decisions_for(row["case_id"])) for row in result["cases"]}
+        counts = {
+            len(
+                [
+                    d
+                    for d in store.decisions_for(row["case_id"])
+                    if d["trace_id"] == row["trace_id"]
+                ]
+            )
+            for row in result["cases"]
+        }
         assert counts == {result["decisions"] // len(result["cases"])}, counts
 
     def test_the_stored_band_matches_the_reported_band(self):

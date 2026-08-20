@@ -188,7 +188,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 
 ```bash
 make investigate # one case, investigated by the fleet (needs a live model)
-make test        # 481 invariant tests, including "no agent may post"
+make test        # 513 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -256,6 +256,7 @@ such rather than as complete.
 | Memory Bank recurrence recall | not started | — |
 | Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
 | Cloud Run deployment | works | Revision `nav-sentinel-00008-dkh`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |
+| Remediation drafting and approval | works | The remediation agent — the only one P-002 grants drafting, and still denied posting by P-003 — drafts the correction. Measured: the FX break yields `investments_at_market EUR -86,625.48` with an `unrealised_fx` contra, balanced in EUR, requiring four eyes: the golden's stated correction, reached independently. Journals must balance **in every currency they touch**; two of the six scenarios are not journals at all (a split is a quantity restatement, a trade-date difference a reconciling item that posts nothing). `make approve` records a real human approval — refusing the wrong role or too few signers — and then **posting is still refused**, because an approval is necessary and not sufficient. |
 | Evaluation harness | not started | — |
 
 ### Known defects

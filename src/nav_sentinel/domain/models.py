@@ -11,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Governance vocabulary belongs to the control plane, not to fund accounting. Imported here so
 # the domain speaks it; defined there so the control plane never imports a domain type.
@@ -146,6 +146,14 @@ class NavRecord(BaseModel):
         return self.net_assets / self.shares_outstanding
 
 
+#: Accounts whose movement changes net assets. A correction's effect on NAV is the sum of its legs
+#: touching these, which is what the golden's `expected_corrections` state -- the contra leg is
+#: required for the entry to balance but does not move NAV.
+NAV_ACCOUNTS = frozenset(
+    {"investments_at_market", "cash_at_bank", "dividends_receivable", "accrued_expenses"}
+)
+
+
 # ---------------------------------------------------------------------- exceptions
 
 
@@ -278,6 +286,24 @@ class RootCauseHypothesis(BaseModel):
     investigator_version: str | None = None
 
 
+class Outcome(StrEnum):
+    """What a correction actually is. Not every break is fixed by a journal.
+
+    Four of the six seeded scenarios are journals; two are not, and forcing them into a journal
+    shape would have produced a fabricated entry for a break that needs none.
+    """
+
+    #: Debits and credits. Balances per currency.
+    JOURNAL_ENTRY = "journal_entry"
+    #: The books are both right and the difference is timing -- a trade recognised on trade date by
+    #: one side and settlement date by the other. There is nothing to post; the item is stated,
+    #: explained and carried. Drafting an entry here would create an error rather than fix one.
+    RECONCILING_ITEM = "reconciling_item"
+    #: A share count is wrong and no value moves: an unapplied split changes quantity while market
+    #: value agrees exactly. A journal cannot express it, because there is no amount.
+    QUANTITY_RESTATEMENT = "quantity_restatement"
+
+
 class JournalEntryLine(BaseModel):
     account: str
     currency: str
@@ -285,13 +311,38 @@ class JournalEntryLine(BaseModel):
     credit: Decimal = Decimal(0)
     narrative: str = ""
 
+    @property
+    def signed(self) -> Decimal:
+        """Debit positive, credit negative -- the effect on the account."""
+        return self.debit - self.credit
+
+
+class QuantityRestatementLine(BaseModel):
+    """A share count corrected, with no money involved.
+
+    Carries both counts rather than a delta: a restatement a reviewer cannot check against the
+    books is not reviewable, and "from 96,000 to 192,000" is checkable where "+96,000" is not.
+    """
+
+    account: str
+    isin: str
+    from_quantity: Decimal
+    to_quantity: Decimal
+    narrative: str = ""
+
+    @property
+    def delta(self) -> Decimal:
+        return self.to_quantity - self.from_quantity
+
 
 class RemediationProposal(BaseModel):
     """A *proposal*. No agent in the fleet is permitted to post one; the Agent Gateway
     rejects any attempt to commit without a recorded human approval."""
 
     proposal_id: str
-    lines: list[JournalEntryLine]
+    outcome: Outcome = Outcome.JOURNAL_ENTRY
+    lines: list[JournalEntryLine] = Field(default_factory=list)
+    quantity_lines: list[QuantityRestatementLine] = Field(default_factory=list)
     expected_residual: Decimal
     rationale: str
     proposed_by_agent: str
@@ -299,8 +350,80 @@ class RemediationProposal(BaseModel):
     requires: ApprovalClass
 
     @property
+    def balances_by_currency(self) -> dict[str, Decimal]:
+        """Net debit minus credit, per currency. Every entry must be zero."""
+        totals: dict[str, Decimal] = {}
+        for line in self.lines:
+            totals[line.currency] = totals.get(line.currency, Decimal(0)) + line.signed
+        return totals
+
+    @property
     def balances(self) -> bool:
-        return sum(x.debit for x in self.lines) == sum(x.credit for x in self.lines)
+        """Balanced in **every** currency it touches.
+
+        Summing all debits against all credits regardless of currency let a proposal with a USD leg
+        and an EUR leg net to zero while balancing in neither -- an entry no ledger would accept,
+        passing the only arithmetic check there was.
+        """
+        return all(total == 0 for total in self.balances_by_currency.values())
+
+    @property
+    def nav_legs(self) -> list[tuple[str, str | None, Decimal]]:
+        """The individual legs that move net assets, as `(account, currency, signed amount)`.
+
+        Legs, not a per-currency net. The golden's `expected_corrections` state each affected leg
+        separately -- the failed trade lists securities and cash as two -- and S5's criterion is
+        *leg-level* accuracy. Netting per currency collapsed those two to zero, which would have
+        scored a correct two-leg entry as having no effect at all.
+
+        A journal's contra leg is excluded because it is a P&L or equity line rather than an asset
+        or liability, so it does not itself appear in net assets: an FX correction reducing
+        investments by 86,625.48 lowers NAV by exactly that, and the golden states one leg for it.
+        """
+        return [
+            (line.account, line.currency, line.signed)
+            for line in self.lines
+            if line.account in NAV_ACCOUNTS
+        ] + [
+            (line.account, None, line.delta)
+            for line in self.quantity_lines
+        ]
+
+    @model_validator(mode="after")
+    def _the_outcome_matches_what_is_attached(self) -> RemediationProposal:
+        """Each outcome has exactly one shape, and mismatches are refused rather than tolerated.
+
+        A reconciling item with journal lines is a contradiction: it says the books are both right
+        and then posts a correction. A quantity restatement with an amount says money moved when the
+        market values agree exactly. Both were expressible before.
+        """
+        if self.outcome is Outcome.JOURNAL_ENTRY:
+            if not self.lines:
+                raise ValueError("a journal entry with no lines corrects nothing")
+            if self.quantity_lines:
+                raise ValueError(
+                    "a journal entry cannot restate a quantity; propose a quantity_restatement"
+                )
+            unbalanced = {c: t for c, t in self.balances_by_currency.items() if t != 0}
+            if unbalanced:
+                raise ValueError(
+                    f"the entry does not balance in {sorted(unbalanced)}: {unbalanced}. Every "
+                    f"currency must net to zero."
+                )
+        elif self.outcome is Outcome.QUANTITY_RESTATEMENT:
+            if not self.quantity_lines:
+                raise ValueError("a quantity restatement with no quantity lines restates nothing")
+            if self.lines:
+                raise ValueError(
+                    "a quantity restatement moves no money; a split changes the share count while "
+                    "market value agrees exactly"
+                )
+        elif self.lines or self.quantity_lines:
+            raise ValueError(
+                "a reconciling item posts nothing: it states that both books are right and the "
+                "difference is timing"
+            )
+        return self
 
 
 class ExceptionCase(BaseModel):

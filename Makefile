@@ -53,5 +53,8 @@ demo: ## Run one reconciliation cycle: detect, score, band, route, trace
 investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike `demo`
 	$(PY) -m nav_sentinel.pipeline.investigate_cli
 
+approve: ## The human step: list persisted cases, or approve one and watch posting still be denied
+	$(PY) -m nav_sentinel.pipeline.approve_cli $(CASE) $(SIGNERS)
+
 clean:
 	rm -rf .pytest_cache .ruff_cache **/__pycache__ fixtures/data/*.json

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from itertools import count
 
 from pydantic import BaseModel, Field
 
@@ -25,12 +24,24 @@ from nav_sentinel.domain.models import (
     ReconciliationBreak,
 )
 
-_case_counter = count(1)
 CLOSE_TOLERANCE = Decimal("1.00")  # base currency; rounding across many lines
 
 
-def _case_id(fund_id: str, as_of: date) -> str:
-    return f"CASE-{fund_id}-{as_of.isoformat()}-{next(_case_counter):04d}"
+def _case_id(fund_id: str, as_of: date, key: tuple[str, str]) -> str:
+    """Derived from what the case *is*, not from how many have been made.
+
+    `next(_case_counter)` was a process-global `itertools.count`, so the same cycle run twice in one
+    process produced different ids -- 0001..0007, then 0008..0014, then 0019. Break ids were
+    content-hashed for exactly this reason and case ids were missed, which S8a's byte-identical
+    criterion would have failed on.
+
+    The grouping key is the identity: one case per security or per currency per fund per date, which
+    is precisely how the buckets are formed. Readable rather than hashed, because a case id appears
+    in the governance log, the approval console and the trace, and a reviewer quoting
+    `CASE-MERID-GEF-2026-08-17-security-US0378331005` can find it.
+    """
+    kind, value = key
+    return f"CASE-{fund_id}-{as_of.isoformat()}-{kind}-{value or 'none'}"
 
 
 def group_into_cases(
@@ -55,7 +66,7 @@ def group_into_cases(
     for key in sorted(buckets):
         cases.append(
             ExceptionCase(
-                case_id=_case_id(fund_id, as_of),
+                case_id=_case_id(fund_id, as_of, key),
                 fund_id=fund_id,
                 as_of=as_of,
                 breaks=buckets[key],
