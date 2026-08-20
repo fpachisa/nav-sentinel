@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from nav_sentinel import server
+from nav_sentinel.control_plane import model_armor
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = (ROOT / "infra" / "deploy.sh").read_text()
@@ -29,6 +30,28 @@ DOCKERFILE = (ROOT / "Dockerfile").read_text()
 @pytest.fixture
 def client():
     return TestClient(server.app)
+
+
+PUSH_SA = "nav-pubsub-push@example.iam.gserviceaccount.com"
+PUSH_AUD = "https://nav-sentinel.example.run.app"
+
+
+def _configure_push(monkeypatch, *, email=PUSH_SA, email_verified=True):
+    """Set the service up the way a real deployment does, then accept one token.
+
+    Earlier versions of these tests set both push variables to "" and relied on the handler
+    skipping verification -- encoding the fail-open as expected behaviour. The handler now refuses
+    when either is unset, so tests must configure it like production.
+    """
+    from google.oauth2 import id_token
+
+    monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", PUSH_SA)
+    monkeypatch.setattr(server, "PUSH_AUDIENCE", PUSH_AUD)
+    monkeypatch.setattr(
+        id_token,
+        "verify_oauth2_token",
+        lambda *a, **k: {"email": email, "email_verified": email_verified},
+    )
 
 
 def _envelope(payload: dict | None = None, *, raw: str | None = None) -> dict:
@@ -77,44 +100,70 @@ class TestThePushEndpointAuthenticates:
         )
         assert response.status_code == 401
 
-    def test_an_unverifiable_token_is_rejected(self, client):
+    def test_an_unverifiable_token_is_rejected(self, client, monkeypatch):
+        monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", PUSH_SA)
+        monkeypatch.setattr(server, "PUSH_AUDIENCE", PUSH_AUD)
         response = client.post(
             "/pubsub/exceptions", json=_envelope(), headers={"Authorization": "Bearer not.a.jwt"}
         )
         assert response.status_code == 401
 
-    def test_a_valid_token_from_the_wrong_identity_is_rejected(self, monkeypatch):
-        """A Google-signed token from the wrong service account is still the wrong identity, and
-        Cloud Run's IAM check would have let it through if that identity held run.invoker."""
-        monkeypatch.setattr(
-            server, "PUSH_SERVICE_ACCOUNT", "expected@example.iam.gserviceaccount.com"
-        )
-        monkeypatch.setattr(server, "PUSH_AUDIENCE", "https://nav-sentinel.example.run.app")
-
+    @pytest.mark.parametrize("missing", ["audience", "service_account", "both"])
+    def test_an_unconfigured_service_refuses_rather_than_accepting_anything(
+        self, client, monkeypatch, missing
+    ):
+        """`audience=PUSH_AUDIENCE or None` meant an empty variable disabled audience checking
+        outright -- google.auth documents None as "the audience is not verified" -- and an empty
+        service account skipped the identity check. With both unset the endpoint accepted any
+        Google-signed token carrying email_verified. deploy.sh sets the audience only in a
+        *second* revision, so every deployment passed through that state."""
         from google.oauth2 import id_token
 
         monkeypatch.setattr(
+            server, "PUSH_AUDIENCE", "" if missing in ("audience", "both") else PUSH_AUD
+        )
+        monkeypatch.setattr(
+            server,
+            "PUSH_SERVICE_ACCOUNT",
+            "" if missing in ("service_account", "both") else PUSH_SA,
+        )
+        monkeypatch.setattr(
             id_token,
             "verify_oauth2_token",
-            lambda *a, **k: {
-                "email": "someone-else@example.iam.gserviceaccount.com",
-                "email_verified": True,
-            },
+            lambda *a, **k: {"email": "anyone@gmail.com", "email_verified": True},
         )
+        response = client.post(
+            "/pubsub/exceptions", json=_envelope(), headers={"Authorization": "Bearer x"}
+        )
+        assert response.status_code == 500
+
+    def test_the_audience_is_passed_to_verification_verbatim(self, client, monkeypatch):
+        """Guards the `or None` regression specifically: the audience must reach google.auth."""
+        from google.oauth2 import id_token
+
+        seen = {}
+        monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", PUSH_SA)
+        monkeypatch.setattr(server, "PUSH_AUDIENCE", PUSH_AUD)
+
+        def capture(_token, _request, audience=None, **_kw):
+            seen["audience"] = audience
+            return {"email": PUSH_SA, "email_verified": True}
+
+        monkeypatch.setattr(id_token, "verify_oauth2_token", capture)
+        client.post("/pubsub/exceptions", json=_envelope(), headers={"Authorization": "Bearer x"})
+        assert seen["audience"] == PUSH_AUD
+
+    def test_a_valid_token_from_the_wrong_identity_is_rejected(self, monkeypatch):
+        """A Google-signed token from the wrong service account is still the wrong identity, and
+        Cloud Run's IAM check would have let it through if that identity held run.invoker."""
+        _configure_push(monkeypatch, email="someone-else@example.iam.gserviceaccount.com")
         response = TestClient(server.app).post(
             "/pubsub/exceptions", json=_envelope(), headers={"Authorization": "Bearer x"}
         )
         assert response.status_code == 403
 
     def test_an_unverified_email_claim_is_rejected(self, monkeypatch):
-        from google.oauth2 import id_token
-
-        monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", "")
-        monkeypatch.setattr(
-            id_token,
-            "verify_oauth2_token",
-            lambda *a, **k: {"email": "anyone@example.com", "email_verified": False},
-        )
+        _configure_push(monkeypatch, email_verified=False)
         response = TestClient(server.app).post(
             "/pubsub/exceptions", json=_envelope(), headers={"Authorization": "Bearer x"}
         )
@@ -126,16 +175,8 @@ class TestUndeliverableMessagesAreNotRetriedForever:
     be acknowledged rather than rejected."""
 
     @pytest.fixture(autouse=True)
-    def _accept_any_token(self, monkeypatch):
-        from google.oauth2 import id_token
-
-        monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", "")
-        monkeypatch.setattr(server, "PUSH_AUDIENCE", "")
-        monkeypatch.setattr(
-            id_token,
-            "verify_oauth2_token",
-            lambda *a, **k: {"email": "push@example.com", "email_verified": True},
-        )
+    def _accept_the_push_token(self, monkeypatch):
+        _configure_push(monkeypatch)
 
     @pytest.mark.parametrize(
         "envelope",
@@ -152,11 +193,27 @@ class TestUndeliverableMessagesAreNotRetriedForever:
         )
         assert response.status_code == 204
 
+    def test_a_valid_but_unknown_cycle_is_acknowledged_not_retried(self):
+        """`2020-01-01` parses fine and has no NAV record, so the cycle raised, the response was a
+        500, and Pub/Sub redelivered it forever -- the exact outcome the 204 design exists to
+        avoid. The previous tests only covered dates that fail to *parse*."""
+        response = TestClient(server.app).post(
+            "/pubsub/exceptions",
+            json=_envelope({"as_of": "2020-01-01"}),
+            headers={"Authorization": "Bearer x"},
+        )
+        assert response.status_code == 204
+
 
 class TestTheDeploymentPosture:
     def test_the_service_is_not_publicly_invokable(self):
+        """Checking that `--allow-unauthenticated` is absent is not the property: the script could
+        grant `allUsers` the invoker role with a separate `add-iam-policy-binding`, which it
+        already uses that exact command shape for elsewhere."""
         assert "--no-allow-unauthenticated" in DEPLOY
         assert "--allow-unauthenticated" not in DEPLOY.replace("--no-allow-unauthenticated", "")
+        for principal in ("allUsers", "allAuthenticatedUsers"):
+            assert principal not in DEPLOY, f"{principal} is granted access"
 
     def test_it_runs_as_a_dedicated_service_account(self):
         assert "--service-account" in DEPLOY
@@ -170,8 +227,34 @@ class TestTheDeploymentPosture:
         assert "--push-auth-token-audience" in DEPLOY
 
     def test_the_runtime_holds_no_publish_permission(self):
-        """The service consumes exceptions; it does not produce them."""
-        assert "roles/pubsub.publisher" not in DEPLOY
+        """The service consumes exceptions; it does not produce them.
+
+        Asserting the *string* `roles/pubsub.publisher` is absent stopped working once the
+        dead-letter policy required granting it to Pub/Sub's own service agent -- a different
+        principal entirely. The property is about who receives it."""
+        for line in DEPLOY.splitlines():
+            if "roles/pubsub.publisher" in line:
+                assert "gcp-sa-pubsub" in line or "PUBSUB_AGENT" in line, line
+                assert "nav-runtime" not in line, line
+
+    def test_the_dead_letter_topic_is_not_the_source_topic(self):
+        """It was, so a message failing five attempts was republished to the topic it came from
+        and redelivered by the same subscription -- an unbounded loop spending Gemini and Model
+        Armor calls on every turn."""
+        assert 'DLQ_TOPIC="nav-exceptions-dlq"' in DEPLOY
+        assert '--dead-letter-topic "$TOPIC"' not in DEPLOY
+        assert '--dead-letter-topic "$DLQ_TOPIC"' in DEPLOY
+
+    def test_the_dead_letter_policy_is_not_silently_optional(self):
+        """The create was `2>/dev/null || <create with no dead-letter policy>`, so the broken form
+        failed silently and the fallback -- which retries forever -- is what actually ran."""
+        assert "--max-delivery-attempts 5 2>/dev/null" not in DEPLOY
+
+    def test_redeploy_preserves_unacknowledged_messages(self):
+        """Delete-and-recreate discards the backlog, and on an exception queue those are the
+        audit-bearing messages."""
+        assert "subscriptions delete nav-exceptions-push" not in DEPLOY
+        assert "subscriptions update nav-exceptions-push" in DEPLOY
 
     def test_deploy_refuses_the_wrong_project(self):
         assert "gcloud config get-value project" in DEPLOY
@@ -235,21 +318,17 @@ class TestSpansAreExportedBeforeTheResponse:
         body = TestClient(server.app).get("/cycle/2026-08-17").json()
         assert body["spans_exported"] is False
 
-    def test_the_push_handler_flushes_before_acknowledging(self, monkeypatch):
-        """Acking a message whose audit span was dropped leaves the work unevidenced."""
-        from google.oauth2 import id_token
+    def test_the_push_handler_flushes_its_audit_spans(self, monkeypatch):
+        """Acking a message whose audit span was dropped leaves the work unevidenced.
 
+        Named for what it actually checks: the flush happened during the request. An earlier
+        version claimed to assert ordering while comparing a single-element list against itself.
+        """
         from nav_sentinel.control_plane import telemetry
 
-        order: list[str] = []
-        monkeypatch.setattr(server, "PUSH_SERVICE_ACCOUNT", "")
-        monkeypatch.setattr(server, "PUSH_AUDIENCE", "")
-        monkeypatch.setattr(
-            id_token,
-            "verify_oauth2_token",
-            lambda *a, **k: {"email": "push@example.com", "email_verified": True},
-        )
-        monkeypatch.setattr(telemetry, "flush", lambda *a, **k: (order.append("flush"), True)[1])
+        calls: list[str] = []
+        _configure_push(monkeypatch)
+        monkeypatch.setattr(telemetry, "flush", lambda *a, **k: (calls.append("flush"), True)[1])
 
         response = TestClient(server.app).post(
             "/pubsub/exceptions",
@@ -257,7 +336,7 @@ class TestSpansAreExportedBeforeTheResponse:
             headers={"Authorization": "Bearer x"},
         )
         assert response.status_code == 204
-        assert order == ["flush"], "the handler acknowledged without flushing its audit spans"
+        assert calls == ["flush"], "the handler acknowledged without flushing its audit spans"
 
 
 class TestTheServiceConfiguresItself:
@@ -266,15 +345,25 @@ class TestTheServiceConfiguresItself:
     configures the registry, so `/readyz` passing proves nothing about the app's wiring -- these
     exercise the app's lifespan directly."""
 
-    def test_startup_registers_the_processes(self, monkeypatch):
-        called: list[str] = []
-        monkeypatch.setattr(
-            server.composition, "configure", lambda **kw: called.append(kw.get("approvals_backend"))
-        )
-        monkeypatch.setattr(server.telemetry, "configure_tracing", lambda **kw: None)
-        with TestClient(server.app):
-            pass
-        assert called, "the service started without registering any process pack"
+    def test_startup_registers_the_processes(self):
+        """Runs the *real* `configure()` through the app's own lifespan after a reset.
+
+        The earlier version of this test monkeypatched `configure` to a no-op and asserted it had
+        been called, so it would still have passed in the failure mode it was written for -- a
+        manifest relocation making the real `configure()` raise, which has already shipped twice.
+        """
+        from nav_sentinel import composition
+        from nav_sentinel.control_plane import packs
+
+        composition.reset()
+        assert not packs.registered(), "reset left processes registered; the test proves nothing"
+        try:
+            with TestClient(server.app) as fresh:
+                body = fresh.get("/readyz").json()
+                assert body["status"] == "ready"
+                assert "nav" in body["processes"]
+        finally:
+            composition.configure()
 
     def test_the_deployed_default_approvals_backend_is_firestore(self, monkeypatch):
         """In-memory approvals in production would make four-eyes approval a per-instance
@@ -295,7 +384,17 @@ class TestTheSelfTestProvesReachabilityHonestly:
     """The self-test is the S7a evidence, so it must not be able to report healthy when the
     managed services are unreachable or when the filter denies nothing."""
 
-    def _run(self, monkeypatch, *, vertex_ok=True, armor_raises=None, injection_blocked=True):
+    def _run(
+        self,
+        monkeypatch,
+        *,
+        vertex_ok=True,
+        armor_raises=None,
+        injection_verdict="MATCH_FOUND",
+        matched=(model_armor.PRIMARY_FILTER,),
+        injection_blocked=True,
+        flush_ok=True,
+    ):
         from nav_sentinel import compliance
         from nav_sentinel.control_plane import telemetry
 
@@ -314,13 +413,19 @@ class TestTheSelfTestProvesReachabilityHonestly:
                 raise armor_raises("unreachable")
             if "IGNORE ALL PREVIOUS" in text:
                 if injection_blocked:
-                    raise server.gateway.ContentBlocked("blocked")
+                    raise model_armor.ContentBlocked(
+                        model_armor.ArmorVerdict(
+                            blocked=True, verdict=injection_verdict, matched_filters=tuple(matched)
+                        ),
+                        source_uri,
+                    )
                 return text
             return text
 
         monkeypatch.setattr(compliance, "probe_async", fake_probe)
         monkeypatch.setattr(server.gateway, "admit_untrusted_content", fake_admit)
-        monkeypatch.setattr(telemetry, "flush", lambda *a, **k: True)
+        monkeypatch.setattr(telemetry, "flush", lambda *a, **k: flush_ok)
+        monkeypatch.setattr(telemetry, "export_target", lambda: "cloud-trace")
         return TestClient(server.app).get("/selftest").json()
 
     def test_healthy_when_both_services_answer_and_the_filter_denies(self, monkeypatch):
@@ -338,6 +443,47 @@ class TestTheSelfTestProvesReachabilityHonestly:
         assert body["healthy"] is False
         assert body["model_armor"]["reachable"] is False
 
+    @pytest.mark.parametrize(
+        "verdict",
+        ["screening_unavailable", "invocation_incomplete", "primary_filter_absent",
+         "primary_filter_skipped", "too_large_to_screen"],
+    )
+    def test_a_failure_to_screen_is_never_reported_as_a_denial(self, monkeypatch, verdict):
+        """`screen()` funnels six fail-closed reasons through one exception type. Recording only
+        the exception class name scored a 503 on the injection call as a successful denial, so a
+        Model Armor outage during the probe reported healthy: true."""
+        body = self._run(monkeypatch, injection_verdict=verdict, matched=())
+        assert body["model_armor"]["injection_denied"] is False
+        assert body["model_armor"]["denial_verdict"] == verdict
+        assert body["healthy"] is False
+
+    def test_a_match_on_some_other_filter_is_not_a_prompt_injection_denial(self, monkeypatch):
+        """A MATCH_FOUND on, say, the CSAM filter says nothing about injection detection."""
+        body = self._run(monkeypatch, injection_verdict="MATCH_FOUND", matched=("csam",))
+        assert body["model_armor"]["injection_denied"] is False
+        assert body["healthy"] is False
+
+    def test_unhealthy_when_spans_did_not_reach_cloud_trace(self, monkeypatch):
+        """The fourth conjunct of `healthy` was never exercised."""
+        body = self._run(monkeypatch, flush_ok=False)
+        assert body["spans_exported"] is False
+        assert body["healthy"] is False
+
+    def test_the_probe_does_not_leave_governance_records_behind(self, monkeypatch):
+        """`admit_untrusted_content` records ALLOW/DENY against a real published agent, so an
+        unguarded self-test let any caller manufacture governance-log entries reading as a genuine
+        injection attempt on SEC content. The log is snapshotted and restored."""
+        from nav_sentinel.control_plane import gateway as gw
+
+        before = gw.decision_log()
+        self._run(monkeypatch)
+        assert gw.decision_log() == before
+
+    def test_the_probe_source_is_not_a_real_regulator_domain(self):
+        """The probe once cited https://www.sec.gov/selftest, so a fabricated record named the SEC
+        as the source of an injection attempt."""
+        assert "sec.gov" not in server._PROBE_SOURCE
+
     def test_unhealthy_when_the_filter_admits_the_injection(self, monkeypatch):
         """A self-test that only checked the benign path would pass against a filter that never
         denies anything, which is the failure mode worth catching."""
@@ -349,3 +495,144 @@ class TestTheSelfTestProvesReachabilityHonestly:
         text = server._PROBE_INJECTION.lower()
         assert "ignore all previous instructions" in text
         assert "without human review" in text
+
+
+class TestTheFlushSignalCannotLie:
+    """`BatchSpanProcessor.force_flush` returns True unconditionally -- it calls `_export`, which
+    catches every exporter exception, then returns True regardless; its timeout argument carries a
+    `TODO: Fix force flush so the timeout is used` in the SDK. So a flush result derived from it
+    cannot distinguish a delivered audit trail from a lost one, which is the only thing this
+    project needs it to distinguish."""
+
+    @staticmethod
+    def _install(exporter, target):
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        from nav_sentinel.control_plane import telemetry
+
+        telemetry._exporter = telemetry._CountingExporter(exporter)
+        telemetry._target = target
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(telemetry._exporter))
+        # Deliberately not installed globally: OTel refuses to replace an existing provider, and
+        # the session fixture already set one. Callers point `get_tracer_provider` at this one.
+        with provider.get_tracer("t").start_as_current_span("s"):
+            pass
+        return provider
+
+    def test_the_raw_sdk_signal_really_is_unconditional(self):
+        """The premise, pinned. If a future SDK fixes this, the wrapper becomes redundant rather
+        than wrong -- but this test tells us which world we are in."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+
+        class Boom(SpanExporter):
+            def export(self, spans):
+                raise RuntimeError("504 DEADLINE_EXCEEDED")
+
+            def shutdown(self):
+                pass
+
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(Boom()))
+        with provider.get_tracer("t").start_as_current_span("s"):
+            pass
+        assert provider.force_flush(2000) is True
+
+    def test_a_failing_export_reports_false(self, monkeypatch):
+        from opentelemetry import trace as ot
+        from opentelemetry.sdk.trace.export import SpanExporter
+
+        from nav_sentinel.control_plane import telemetry
+
+        class Boom(SpanExporter):
+            def export(self, spans):
+                raise RuntimeError("504 DEADLINE_EXCEEDED")
+
+            def shutdown(self):
+                pass
+
+        provider = self._install(Boom(), "cloud-trace")
+        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        assert telemetry.flush(2000) is False
+
+    def test_a_successful_export_to_cloud_trace_reports_true(self, monkeypatch):
+        from opentelemetry import trace as ot
+        from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+
+        from nav_sentinel.control_plane import telemetry
+
+        class Fine(SpanExporter):
+            def export(self, spans):
+                return SpanExportResult.SUCCESS
+
+            def shutdown(self):
+                pass
+
+        provider = self._install(Fine(), "cloud-trace")
+        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        assert telemetry.flush(2000) is True
+
+    def test_the_console_fallback_is_not_reported_as_cloud_trace(self, monkeypatch):
+        """Console export succeeds perfectly while putting nothing in Cloud Trace, and S7a exists
+        to prove spans reach Cloud Trace. Reporting success here is how that became unfalsifiable."""
+        from opentelemetry import trace as ot
+        from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+
+        from nav_sentinel.control_plane import telemetry
+
+        class Fine(SpanExporter):
+            def export(self, spans):
+                return SpanExportResult.SUCCESS
+
+            def shutdown(self):
+                pass
+
+        provider = self._install(Fine(), "console")
+        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        assert telemetry.flush(2000) is False
+        assert telemetry.export_target() == "console"
+
+
+class TestTheGovernanceLogSurvivesConcurrency:
+    """The log was a module-global list on a service that clears it per request, deployed at Cloud
+    Run's default concurrency. Concurrent requests destroyed each other's audit records: one cycle
+    serially recorded 28 decisions while eight concurrent cycles reported 80, 28, 54, 132, 184,
+    106, 158 and 210."""
+
+    def test_concurrent_cycles_each_see_only_their_own_decisions(self):
+        import asyncio
+        from datetime import date
+
+        from nav_sentinel.control_plane import gateway
+        from nav_sentinel.pipeline import cycle_runner
+
+        def one() -> int:
+            gateway.clear_decision_log()
+            return cycle_runner.run(date(2026, 8, 17))["decisions"]
+
+        expected = one()
+        assert expected > 0
+
+        async def eight():
+            return await asyncio.gather(*[asyncio.to_thread(one) for _ in range(8)])
+
+        assert asyncio.run(eight()) == [expected] * 8
+
+    def test_a_snapshot_can_be_restored(self):
+        """What keeps `/selftest` from leaving fabricated governance records behind."""
+        from nav_sentinel.control_plane import gateway, identity
+
+        gateway.clear_decision_log()
+        with identity.acting_as("triage-agent"):
+            gateway.call_tool("registry.coverage")
+        snapshot = gateway.decision_log()
+        assert snapshot
+
+        with identity.acting_as("triage-agent"):
+            gateway.call_tool("registry.coverage")
+        assert len(gateway.decision_log()) > len(snapshot)
+
+        gateway.restore_decision_log(snapshot)
+        assert gateway.decision_log() == snapshot

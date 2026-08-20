@@ -564,4 +564,4 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | S0-R.7 windowed screening + extractor | covered by plan reviews | done | **APPROVE WITH CHANGES** — applied | **yes** |
 | **S0-R gate** | — | — | **closed** | **yes** |
 | S0c offline reproducibility | covered by plan reviews | done | pending | — |
-| S7a deployment vertical slice | pending | — | — | — |
+| S7a deployment vertical slice | done | done | done | done, 3 CRITICAL + 7 MAJOR fixed |

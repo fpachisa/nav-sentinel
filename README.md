@@ -186,7 +186,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 198 invariant tests, including "no agent may post"
+make test        # 221 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -247,11 +247,11 @@ such rather than as complete.
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
 | Agent Gateway policy enforcement | works, within a stated boundary | All six policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
 | Model Armor screening | works, and is **not** the boundary | Windowed, gated on all three response fields, fails closed four distinguishable ways. Detection is content-sensitive: the same injection is caught alone and missed 0/8 beside one particular filing paragraph, so screening reduces what gets through rather than stopping it. Coverage is of two kinds — the gateway-wiring tests **stub** `model_armor.screen`, and two `live` tests exercise the real service. The boundary is the quarantined extractor, `tests/test_quarantine.py` |
-| Least-privilege IAM | **overstated** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM |
+| Least-privilege IAM | **overstated, and the deployment makes it more so** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM. Cloud Run gives one identity per service, so the deployed container collapses all seven per-agent accounts into `nav-runtime` — see defect 7, now active |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
 | Memory Bank recurrence recall | not started | — |
-| Pub/Sub async orchestration | not started | `make demo` does not run |
-| Cloud Run deployment | not started | — |
+| Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
+| Cloud Run deployment | works | Revision `nav-sentinel-00006-4ps`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |
 | Evaluation harness | not started | — |
 
 ### Known defects
@@ -285,12 +285,20 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    runtime. Resolving from "the published registry" only raises the bar if publication is itself
    a controlled act.
 7. **`bootstrap.sh` grants project-level `roles/datastore.user`** to any agent with a write
-   scope, which is not collection-scoped. Once approvals live in Firestore, the drafting agent's
-   service account could write approval records directly — defeating P-003 at the infra layer.
+   scope, which is not collection-scoped, so an agent's service account could write approval
+   records directly — defeating P-003 at the infra layer. **This condition is now live**, and in a
+   stronger form than written: approvals moved to Firestore with the S7a deployment, and Cloud Run
+   gives one identity per service, so the container runs as a single `nav-runtime` account holding
+   `datastore.user` on behalf of all seven agents. In-process the gateway still denies posting, and
+   `bootstrap.sh` still mints the seven per-agent accounts for the data-plane grants — but the
+   *cloud* identity of a call is not per-agent, and PLAN.md's "Cloud Run (per-agent SA)" overstates
+   what this slice delivers. Closing it needs either token impersonation per agent or
+   collection-scoped conditions, and is not done.
 8. **Approvals are unbounded in use.** One record authorises repeated postings on its case, never
    expires, and is not bound to the drafted entry.
-9. `FirestoreApprovalStore` is written but never executed; the offline default is an in-process
-   store, chosen explicitly and fail-closed when Firestore is requested and unavailable.
+9. ~~`FirestoreApprovalStore` is written but never executed.~~ **Closed.** The deployed service
+   runs with `NAV_APPROVALS=firestore`; the offline default remains the in-process store, chosen
+   explicitly and fail-closed when Firestore is requested and unavailable.
 10. Nothing outstanding here. `make demo`, `make fixtures`, `make test` and `make verify` all
     run with the network unreachable, from committed fixtures and a recorded ECB cassette.
     `make fixtures-live` re-records the rates and requires network access.

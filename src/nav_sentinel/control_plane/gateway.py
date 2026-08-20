@@ -10,6 +10,7 @@ one prompt away from deciding it has them.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -19,25 +20,62 @@ from nav_sentinel.control_plane.governance import CaseFacts
 from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
 
 
-# Every decision, in order, for the life of the process. The exception console renders this
-# as the governance log and the demo reads from it directly.
 class ContentUnscreenable(RuntimeError):
     """An untrusted tool returned a value the screener cannot inspect. Fail closed."""
 
 
-_decision_log: list[PolicyDecision] = []
+# Every decision, in order, for the current unit of work. The exception console renders this as
+# the governance log and the demo reads from it directly.
+#
+# A ContextVar, not a module-level list, because this was a process-global list on a service
+# deployed with Cloud Run's default concurrency of 80. Both HTTP handlers call
+# `clear_decision_log()` and then report `len(decision_log())`, so concurrent requests destroyed
+# each other's audit records: measured, one cycle serially recorded 28 decisions while eight
+# concurrent cycles reported 80, 28, 54, 132, 184, 106, 158 and 210. For a project whose
+# deliverable *is* the audit trail, that loses audit records under ordinary operation.
+#
+# asyncio gives each request task its own context, so per-request isolation comes for free --
+# the same reason `identity` is already a ContextVar.
+#
+# One property to know before S3 fans work out across tasks: a child task inherits a *copy of the
+# context*, which holds the same list object, so a child's decisions append to the parent's log.
+# That is what we want for per-case fan-out -- the parent's audit trail should contain what its
+# children decided -- but it means a child must NOT call `clear_decision_log()`, which would
+# rebind only its own context and hide its records from the parent.
+_decision_log: ContextVar[list[PolicyDecision]] = ContextVar("nav_decision_log")
+
+
+def _log() -> list[PolicyDecision]:
+    """The current context's log, created on first use."""
+    try:
+        return _decision_log.get()
+    except LookupError:
+        fresh: list[PolicyDecision] = []
+        _decision_log.set(fresh)
+        return fresh
 
 
 def decision_log() -> list[PolicyDecision]:
-    return list(_decision_log)
+    return list(_log())
 
 
 def clear_decision_log() -> None:
-    _decision_log.clear()
+    """Start a fresh log for this context. Cannot affect a concurrent request."""
+    _decision_log.set([])
+
+
+def restore_decision_log(decisions: list[PolicyDecision]) -> None:
+    """Put back a snapshot, discarding anything recorded since it was taken.
+
+    For self-tests and probes, which necessarily exercise real policy paths and would otherwise
+    leave fabricated ALLOW/DENY records -- attributed to a real published agent -- in the log the
+    exception console renders as the governance trail.
+    """
+    _decision_log.set(list(decisions))
 
 
 def _record(decision: PolicyDecision) -> PolicyDecision:
-    _decision_log.append(decision)
+    _log().append(decision)
     telemetry.record_policy_decision(decision.as_span_attributes())
     return decision
 

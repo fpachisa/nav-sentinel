@@ -21,6 +21,7 @@ SERVICE="${NAV_SERVICE:-nav-sentinel}"
 RUNTIME_SA="nav-runtime@${PROJECT}.iam.gserviceaccount.com"
 PUSH_SA="nav-pubsub-push@${PROJECT}.iam.gserviceaccount.com"
 TOPIC="nav-exceptions"
+DLQ_TOPIC="nav-exceptions-dlq"
 
 say() { printf "\n\033[1m== %s\033[0m\n" "$1"; }
 
@@ -68,28 +69,57 @@ URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PR
 echo "  ${URL}"
 
 say "Audience"
-# The handler checks the token audience, which is only knowable after the URL exists.
+# The handler checks the token audience, which is only knowable after the URL exists, so it lands
+# in a second revision. That used to mean the first revision served with audience verification
+# silently disabled -- `audience=PUSH_AUDIENCE or None` skips the check entirely. The handler now
+# refuses with 500 when either push variable is unset, so the window between these two revisions
+# fails closed rather than accepting any Google-signed token. The subscription is created after
+# this update, so no push is ever sent into that window.
 gcloud run services update "$SERVICE" --region "$REGION" --project "$PROJECT" \
   --update-env-vars "NAV_PUSH_AUDIENCE=${URL}" >/dev/null
 
 say "Pub/Sub push subscription"
 gcloud run services add-iam-policy-binding "$SERVICE" --region "$REGION" --project "$PROJECT" \
   --member "serviceAccount:${PUSH_SA}" --role roles/run.invoker >/dev/null
-gcloud pubsub subscriptions describe nav-exceptions-push --project "$PROJECT" >/dev/null 2>&1 \
-  && gcloud pubsub subscriptions delete nav-exceptions-push --project "$PROJECT" --quiet
-gcloud pubsub subscriptions create nav-exceptions-push \
-  --topic "$TOPIC" --project "$PROJECT" \
-  --push-endpoint "${URL}/pubsub/exceptions" \
-  --push-auth-service-account "$PUSH_SA" \
-  --push-auth-token-audience "$URL" \
-  --ack-deadline 300 \
-  --dead-letter-topic "$TOPIC" --max-delivery-attempts 5 2>/dev/null \
-  || gcloud pubsub subscriptions create nav-exceptions-push \
-       --topic "$TOPIC" --project "$PROJECT" \
-       --push-endpoint "${URL}/pubsub/exceptions" \
-       --push-auth-service-account "$PUSH_SA" \
-       --push-auth-token-audience "$URL" \
-       --ack-deadline 300
+# The dead-letter topic must NOT be the subscription's own source topic. It was: a message that
+# failed five attempts was republished to nav-exceptions and redelivered by the same subscription,
+# an unbounded loop spending Gemini and Model Armor calls on every turn. And the create was
+# `2>/dev/null || <create with no dead-letter policy at all>`, so the broken form failed silently
+# and the fallback -- which retries a permanently-failing message forever -- is what actually ran.
+# No silencing here: a failure to attach the policy should be loud.
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
+PUBSUB_AGENT="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+gcloud pubsub topics describe "$DLQ_TOPIC" --project "$PROJECT" >/dev/null 2>&1 \
+  || gcloud pubsub topics create "$DLQ_TOPIC" --project "$PROJECT" >/dev/null
+
+# A dead-letter policy needs the Pub/Sub service agent to publish to the DLQ and to acknowledge on
+# the source subscription. Without both grants the policy is rejected.
+gcloud pubsub topics add-iam-policy-binding "$DLQ_TOPIC" --project "$PROJECT" \
+  --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.publisher >/dev/null
+
+if gcloud pubsub subscriptions describe nav-exceptions-push --project "$PROJECT" >/dev/null 2>&1
+then
+  # Update rather than delete-and-recreate: recreating discards every unacknowledged message, and
+  # on an exception queue those are the audit-bearing ones.
+  gcloud pubsub subscriptions update nav-exceptions-push --project "$PROJECT" \
+    --push-endpoint "${URL}/pubsub/exceptions" \
+    --push-auth-service-account "$PUSH_SA" \
+    --push-auth-token-audience "$URL" \
+    --ack-deadline 300 \
+    --dead-letter-topic "$DLQ_TOPIC" --max-delivery-attempts 5 >/dev/null
+else
+  gcloud pubsub subscriptions create nav-exceptions-push \
+    --topic "$TOPIC" --project "$PROJECT" \
+    --push-endpoint "${URL}/pubsub/exceptions" \
+    --push-auth-service-account "$PUSH_SA" \
+    --push-auth-token-audience "$URL" \
+    --ack-deadline 300 \
+    --dead-letter-topic "$DLQ_TOPIC" --max-delivery-attempts 5 >/dev/null
+fi
+
+gcloud pubsub subscriptions add-iam-policy-binding nav-exceptions-push --project "$PROJECT" \
+  --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.subscriber >/dev/null
 
 say "Done"
 echo "Service : ${URL}"

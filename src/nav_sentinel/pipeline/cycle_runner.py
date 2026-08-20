@@ -28,6 +28,10 @@ from nav_sentinel.tools import books_and_records as bnr
 FUND = "MERID-GEF"
 
 
+class UnknownCycle(LookupError):
+    """No NAV record exists for the requested date, so there is no cycle to run."""
+
+
 def detect(as_of: date) -> list[ExceptionCase]:
     """Tolerance rules over both books. No model in the path."""
     breaks = (
@@ -48,6 +52,15 @@ def run(as_of: date) -> dict:
 
     custodian_nav = bnr.nav_record("custodian", FUND, as_of)
     accounting_nav = bnr.nav_record("accounting", FUND, as_of)
+    if custodian_nav is None or accounting_nav is None:
+        # A typed refusal, not an AttributeError on None. `as_of` arrives from a URL path and from
+        # Pub/Sub message bodies, where any well-formed date is syntactically valid; only two have
+        # NAV records. Callers need to tell "this cycle does not exist" from "this cycle failed",
+        # because retrying the first forever is what Pub/Sub does with a non-2xx.
+        raise UnknownCycle(
+            f"no NAV record for {FUND} on {as_of.isoformat()}; "
+            f"known cycles: {', '.join(r.as_of.isoformat() for r in bnr.nav_records('custodian'))}"
+        )
     control_total = accounting_nav.net_assets - custodian_nav.net_assets
 
     to_base = _fixture_rates(as_of)

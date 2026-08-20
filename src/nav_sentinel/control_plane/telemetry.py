@@ -20,7 +20,12 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    ConsoleSpanExporter,
+    SpanExporter,
+    SpanExportResult,
+)
 
 from nav_sentinel.config import settings
 
@@ -29,6 +34,49 @@ _configured = False
 
 SERVICE_NAME = "nav-sentinel"
 OTLP_ENDPOINT = "telemetry.googleapis.com"
+
+
+class _CountingExporter(SpanExporter):
+    """Wraps an exporter and remembers whether anything actually got out.
+
+    Needed because `BatchSpanProcessor.force_flush` returns True unconditionally. In
+    opentelemetry-sdk 1.42.1 it calls `_export(EXPORT_ALL)` -- which catches every exporter
+    exception and logs it -- and then returns True regardless; there is also a `TODO: Fix force
+    flush so the timeout is used` in the SDK, so its timeout argument is decorative. Measured:
+    an exporter raising 504 DEADLINE_EXCEEDED still yields `force_flush() is True`, and 34 of 50
+    spans dropped on queue overflow also yields True.
+
+    So a flush result derived from `force_flush` alone cannot distinguish a delivered audit trail
+    from a lost one, which is the only distinction this project needs it to make.
+    """
+
+    def __init__(self, inner: SpanExporter) -> None:
+        self._inner = inner
+        self.exported = 0
+        self.failures = 0
+
+    def export(self, spans):
+        try:
+            result = self._inner.export(spans)
+        except Exception:  # noqa: BLE001
+            self.failures += 1
+            raise
+        if result is SpanExportResult.SUCCESS:
+            self.exported += len(spans)
+        else:
+            self.failures += 1
+        return result
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
+#: The wrapper around whichever exporter is live, and where it sends. `None` until configured.
+_exporter: _CountingExporter | None = None
+_target: str = "none"
 
 
 def _otlp_exporter():
@@ -76,19 +124,25 @@ def configure_tracing(*, console: bool = False) -> None:
     )
     provider = TracerProvider(resource=resource)
 
-    exported = False
+    global _exporter, _target
+    _exporter, _target = None, "none"
     if s.enable_tracing and not console:
         try:
-            provider.add_span_processor(BatchSpanProcessor(_otlp_exporter()))
-            exported = True
+            _exporter = _CountingExporter(_otlp_exporter())
+            _target = "cloud-trace"
         except Exception as exc:  # noqa: BLE001  # pragma: no cover
             # Deliberately broad: credentials, network and endpoint problems all surface
             # differently here, and none of them should stop a local run from producing a
             # reasoning trace. The fallback is console export, never silence.
             logger.warning("Cloud Trace exporter unavailable (%s); falling back to console", exc)
 
-    if not exported:
-        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+    if _exporter is None:
+        # Console export keeps a local run auditable, but it is NOT Cloud Trace, and callers that
+        # publish a trace id have to be able to tell the difference. Silently falling back and
+        # still reporting success is how "the trace is in Cloud Trace" became unfalsifiable.
+        _exporter = _CountingExporter(ConsoleSpanExporter())
+        _target = "console"
+    provider.add_span_processor(BatchSpanProcessor(_exporter))
 
     trace.set_tracer_provider(provider)
     _configured = True
@@ -111,29 +165,43 @@ def tracer() -> trace.Tracer:
     return trace.get_tracer(SERVICE_NAME)
 
 
+def export_target() -> str:
+    """Where spans are actually going: `cloud-trace`, `console`, or `none`.
+
+    A caller that publishes a trace id for a reviewer to open needs this, because console export
+    succeeds perfectly while putting nothing in Cloud Trace.
+    """
+    return _target
+
+
 def flush(timeout_millis: int = 12_000) -> bool:
-    """Export everything buffered, now, and report whether it got out.
+    """Export everything buffered, now, and report whether it reached Cloud Trace.
 
     Cloud Run throttles a container's CPU to near zero as soon as a request finishes, so
     `BatchSpanProcessor`'s delayed flush runs with no CPU to run on. Measured on revision
     nav-sentinel-00002: the push returned at 02:02:28 and the exporter failed at 02:02:41 with
-    DEADLINE_EXCEEDED, thirteen seconds after the response, having never got the spans out.
+    DEADLINE_EXCEEDED, thirteen seconds after the response, having never got the spans out. So the
+    caller flushes inside the request, while CPU is still allocated.
 
-    So the caller flushes inside the request, while CPU is still allocated. For an audit trail
-    that is the right ordering anyway: a message whose audit span was dropped should not be
-    acknowledged as handled.
+    The return value deliberately does **not** come from `force_flush`, which returns True even
+    when every export raised and even when spans were dropped on queue overflow -- see
+    `_CountingExporter`. It is the conjunction of three things: the flush completed, the live
+    exporter recorded no failures, and that exporter is the Cloud Trace one rather than the
+    console fallback.
     """
     provider = trace.get_tracer_provider()
     force_flush = getattr(provider, "force_flush", None)
-    if force_flush is None:  # a no-op provider, i.e. tracing never configured
+    if force_flush is None or _exporter is None:  # tracing never configured
         return False
+    before = _exporter.failures
     try:
-        return bool(force_flush(timeout_millis))
+        completed = bool(force_flush(timeout_millis))
     except Exception as exc:  # noqa: BLE001
         # Never let telemetry failure become request failure; the caller decides what an
         # unexported span means for its own contract.
         logger.warning("span flush failed (%s)", exc)
         return False
+    return completed and _exporter.failures == before and _target == "cloud-trace"
 
 
 def _flatten(value: Any) -> Any:
