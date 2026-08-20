@@ -48,7 +48,39 @@ class ToolSpec:
     #: attribute of a holding is "the rate", and guessing wrong means a verdict cites a number that
     #: is not the one the tool returned. A tool without one contributes no facts, which is honest:
     #: it can still be cited as having been called.
-    observe: Callable[[Any], Mapping[str, object]] | None = None
+    observe: Callable[[Any, Mapping[str, Any]], Mapping[str, object]] | None = None
+    #: Which fact names `observe` may return. Declared, so a requirement can be validated against
+    #: it at registration and a projection returning an undeclared key is caught rather than
+    #: silently dropped -- `_observe_security` projected `domicile`, nothing consumed it, and the
+    #: fact the corporate-action cross-check turns on was uncitable with no test failing.
+    facts: tuple[str, ...] = ()
+    #: Where evidence from this tool comes from, in the process's vocabulary -- "ecb_fx_reference
+    #: _rates", "books_and_records". The platform stores it and never interprets it. Declared per
+    #: tool rather than inferred from the namespace, which is what the platform used to do: a
+    #: second process then got its bare namespace as a source name and `None` for every URI, so
+    #: its evidence could not satisfy the criterion that every citation names a source.
+    source: str = ""
+    #: Derives the specific resource a result came from, when there is one. `edgar.search_filings`
+    #: returns a per-filing URI; a books lookup has none, and saying so is better than inventing a
+    #: constant that identifies nothing.
+    locate: Callable[[Any], str | None] | None = None
+    #: A stable URI for this tool's evidence when no per-result one exists -- a service endpoint, or
+    #: a fixture path. Templated on the call's arguments so it identifies *this* retrieval rather
+    #: than the service in general, which is what a constant per namespace gave and why two of three
+    #: investigators could produce no citable source at all.
+    uri_template: str = ""
+
+    def default_uri(self, args: Mapping[str, Any]) -> str | None:
+        """`uri_template` filled from the call's arguments, or None if none is declared."""
+        if not self.uri_template:
+            return None
+        try:
+            return self.uri_template.format(tool=self.name, **args)
+        except (KeyError, IndexError):
+            # A template naming an argument this call did not pass would otherwise render with the
+            # placeholder still in it -- a citation pointing at `{source}`. Fall back to something
+            # that at least identifies the tool.
+            return f"{self.uri_template.split('{', 1)[0]}{self.name}"
 
 
 @dataclass(frozen=True)
@@ -68,9 +100,15 @@ class ProcessPack:
     thresholds: tuple[ThresholdSet, ...] = ()
     #: Human-readable unit for the process's control total, for reports.
     control_total_unit: str = ""
-    #: Per capability, the tool namespaces a verdict must have evidence from before it may assert a
-    #: cause. `("nav.fx_rate", ("ecb_fx",))` says: an FX verdict resting only on our own books is
-    #: not corroboration -- the investigator has to have checked external truth.
+    #: Per capability, the **facts** a verdict must cite before it may assert a cause.
+    #: `("nav.fx_rate", ("rate", "rate_date"))` says: an FX verdict has to name the rate it
+    #: believes was applied *and* the date that rate belongs to, because a stale-rate break is
+    #: precisely the gap between them.
+    #:
+    #: Facts, not tool namespaces, and the difference is the whole control. Requiring a namespace
+    #: only asks that *some* call was made to it -- measured, a GBP lookup for an unrelated July
+    #: date that returned nothing satisfied a namespace requirement while the verdict's every
+    #: number was invented. Requiring facts means the observation cited must actually carry them.
     #:
     #: A tuple of pairs rather than a dict because a dict on a frozen dataclass is mutable through
     #: the reference the pack hands out, and this is a governance rule.
@@ -81,8 +119,12 @@ class ProcessPack:
     evidence_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
     notes: str = ""
 
+    def declared_facts(self) -> frozenset[str]:
+        """Every fact name any of this process's tools can produce."""
+        return frozenset(name for spec in self.tools for name in spec.facts)
+
     def evidence_requirement(self, capability: str) -> tuple[str, ...]:
-        """Namespaces required for this capability. Empty means nothing is mandated."""
+        """Facts a verdict must cite for this capability. Empty means nothing is mandated."""
         for declared, namespaces in self.evidence_requirements:
             if declared == capability:
                 return namespaces
@@ -110,8 +152,15 @@ def _validate_evidence_requirements(pack: ProcessPack) -> None:
     present -- the shape this project has already had to fix once, where a policy got weaker while
     the commit said it got stronger.
     """
+    for spec in pack.tools:
+        if spec.observe is not None and not spec.facts:
+            raise ValueError(
+                f"{spec.name!r} projects observations but declares no `facts`, so nothing it "
+                f"produces could ever be required, validated, or cited."
+            )
+
     declared = set(pack.capabilities)
-    namespaces = {spec.name.partition(".")[0] for spec in pack.tools}
+    producible = pack.declared_facts()
     seen: set[str] = set()
     for capability, required in pack.evidence_requirements:
         if capability in seen:
@@ -131,12 +180,12 @@ def _validate_evidence_requirements(pack: ProcessPack) -> None:
                 f"process {pack.key!r} declares an empty evidence requirement for {capability!r}. "
                 f"Omit the entry instead, so 'no requirement' is stated once."
             )
-        unknown = sorted(set(required) - namespaces)
+        unknown = sorted(set(required) - producible)
         if unknown:
             raise ValueError(
-                f"process {pack.key!r} requires evidence for {capability!r} from namespace(s) "
-                f"{unknown}, which no tool of this process provides -- no verdict could ever "
-                f"satisfy it. Available: {sorted(namespaces)}"
+                f"process {pack.key!r} requires fact(s) {unknown} for {capability!r}, which no "
+                f"tool of this process can produce -- no verdict could ever satisfy it. "
+                f"Producible: {sorted(producible)}"
             )
 
 
@@ -179,6 +228,12 @@ def _on_change() -> None:
 def register_platform_tools(*specs: ToolSpec) -> None:
     """Register tools every process may declare. Called by the composition root, which is the
     only place that may import both the control plane and the modules these wrap."""
+    unsourced = sorted(spec.name for spec in specs if not spec.source.strip())
+    if unsourced:
+        raise ValueError(
+            f"platform tool(s) {unsourced} declare no `source`. Every citation must name where its "
+            f"evidence came from; pack tools are checked in `register` and these were not."
+        )
     for spec in specs:
         _platform_tools[spec.name] = spec
     _on_change()
@@ -203,6 +258,13 @@ def register(pack: ProcessPack) -> None:
     if pack.key in _packs and _packs[pack.key] is not pack:
         raise DuplicateProcess(f"process {pack.key!r} is already registered")
     _validate_evidence_requirements(pack)
+    unsourced = sorted(spec.name for spec in pack.tools if not spec.source.strip())
+    if unsourced:
+        raise ValueError(
+            f"process {pack.key!r} declares tool(s) {unsourced} with no `source`. Every citation "
+            f"must name where its evidence came from, and the platform cannot invent that."
+        )
+
 
     for other in _packs.values():
         if other.key == pack.key:

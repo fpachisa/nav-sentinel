@@ -27,6 +27,7 @@ decision log -- and a closure cannot leak a case into another agent's call.
 from __future__ import annotations
 
 import logging
+import typing
 from collections.abc import Callable  # noqa: TC003 -- used in a runtime annotation
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -83,7 +84,7 @@ def _coerce(value: Any, annotation: Any, *, tool: str, parameter: str) -> Any:
         return tuple(value)
 
     text = value if isinstance(value, str) else str(value)
-    convert = _CONVERTERS.get(annotation)
+    convert = _CONVERTERS.get(_unwrap_optional(annotation))
     if convert is None:
         return text
     try:
@@ -94,6 +95,18 @@ def _coerce(value: Any, annotation: Any, *, tool: str, parameter: str) -> Any:
             f"{getattr(annotation, '__name__', annotation)}"
             + (", e.g. 2026-08-17" if annotation is date else "")
         ) from exc
+
+
+def _unwrap_optional(annotation: Any) -> Any:
+    """`date | None` -> `date`.
+
+    Without this, six catalogue parameters skipped coercion -- including two dates on
+    `edgar.search_filings`, which is on a *published* manifest. The model's string reached the tool
+    and failed inside it with an AttributeError, which is verbatim the failure the wrapper exists to
+    prevent and which the commit introducing it claimed to have closed.
+    """
+    args = [a for a in typing.get_args(annotation) if a is not type(None)]
+    return args[0] if len(args) == 1 else annotation
 
 
 #: The only annotations the generator will coerce. Anything else is refused at generation time
@@ -111,7 +124,25 @@ _CONVERTERS: dict[Any, Callable[[str], Any]] = {
 # --------------------------------------------------------------------------- what was observed
 
 
-def _observe(spec: packs.ToolSpec, result: object) -> dict[str, str]:
+def _locate(spec: packs.ToolSpec, result: object, args: dict[str, Any]) -> str | None:
+    """The specific resource this evidence came from, if the tool can say.
+
+    Previously a constant per namespace, held in the platform: `ecb_fx` got one service URL
+    identical for every call and everything else got `None` -- so for two of the three published
+    investigators no citation could carry a source_uri at all, and the criterion requiring one was
+    unsatisfiable. A tool that genuinely has no URI says so, which is better than a constant that
+    identifies nothing.
+    """
+    if spec.locate is None:
+        return spec.default_uri(args)
+    try:
+        return spec.locate(result) or spec.default_uri(args)
+    except Exception:  # noqa: BLE001
+        logger.exception("source-uri projection failed for %s", spec.name)
+        return spec.default_uri(args)
+
+
+def _observe(spec: packs.ToolSpec, result: object, args: dict[str, Any]) -> dict[str, str]:
     """Ask the process what this result lets a verdict cite, and store it as opaque text.
 
     The platform does not know what `rate_date` means and must not: the projection is declared per
@@ -122,25 +153,22 @@ def _observe(spec: packs.ToolSpec, result: object) -> dict[str, str]:
     if spec.observe is None:
         return {}
     try:
-        return stringify(spec.observe(result))
+        projected = stringify(spec.observe(result, args))
+        undeclared = sorted(set(projected) - set(spec.facts))
+        if undeclared:
+            # Refused rather than dropped. Silently filtering meant `_observe_security` projected
+            # `domicile`, nothing declared it, and the fact the corporate-action cross-check turns
+            # on was uncitable with no test failing.
+            raise ValueError(
+                f"{spec.name} projected undeclared fact(s) {undeclared}; declared: "
+                f"{sorted(spec.facts)}"
+            )
+        return projected
     except Exception:  # noqa: BLE001
         # A broken projection must not fail the tool call: the observation is still recorded, with
         # no citable facts, and the requirement check will refuse a verdict that needed them.
         logger.exception("observation projection failed for %s", spec.name)
         return {}
-
-
-_SOURCE_OF = {
-    "ecb_fx": "ecb_fx_reference_rates",
-    "edgar": "sec_edgar",
-    "books_and_records": "books_and_records",
-    "registry": "agent_registry",
-    "corporate_action": "sec_edgar",
-}
-
-_URI_OF = {
-    "ecb_fx": "https://data-api.ecb.europa.eu/service/data/EXR",
-}
 
 
 def _summarise(tool: str, result: object) -> str:
@@ -186,7 +214,6 @@ def build(
     layer stays free of the agent framework, and a test can invoke a wrapper directly.
     """
     import inspect
-    import typing
 
     _validate(manifest)
     agent_ref = manifest.ref
@@ -209,6 +236,19 @@ def build(
         hints = {p.name: resolved.get(p.name, str) for p in signature.parameters.values()}
 
         def wrapper(**kwargs: Any) -> Any:
+            try:
+                return _invoke(**kwargs)
+            except (ToolBudgetExhausted, ValueError) as exc:
+                # Returned, not raised. ADK re-raises a tool exception out of `runner.run_async`
+                # unless a callback handles it, so a budget message written as an instruction to
+                # the model -- "state what you concluded, or return UNKNOWN" -- was undeliverable,
+                # and a coercion error the model was meant to fix on its next turn was a stack
+                # trace instead. `{"error": ...}` is ADK's own convention and its
+                # `_detect_error_in_response` already recognises it.
+                logger.info("%s returned an error to the model: %s", name, exc)
+                return {"error": str(exc)}
+
+        def _invoke(**kwargs: Any) -> Any:
             if calls["n"] >= budget:
                 raise ToolBudgetExhausted(
                     f"{agent_ref} used its {budget}-call budget on {case_id}. State what you "
@@ -237,9 +277,9 @@ def build(
                     args=args,
                     digest=digest,
                     retrieved_at=utcnow(),
-                    source=_SOURCE_OF.get(name.partition(".")[0], name.partition(".")[0]),
-                    source_uri=_URI_OF.get(name.partition(".")[0]),
-                    observed=_observe(spec, result),
+                    source=spec.source,
+                    source_uri=_locate(spec, result, coerced),
+                    observed=_observe(spec, result, coerced),
                     trusted=not spec.untrusted_output,
                     summary=_summarise(name, result),
                 )
@@ -270,7 +310,7 @@ def build(
             [
                 inspect.Parameter(
                     p.name,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
                     annotation=str,
                     default=inspect.Parameter.empty
                     if p.default is inspect.Parameter.empty
@@ -313,7 +353,7 @@ def _document(name: str, description: str, signature: Any, hints: dict[str, Any]
         }.get(annotation, "text")
         optional = parameter.default is not parameter.empty
         lines.append(f"    {parameter.name}: {hint}{' (optional)' if optional else ''}")
-    return "\n".join(lines) if len(lines) > 3 else lines[0]
+    return "\n".join(lines) if signature.parameters else "\n".join(lines[:3])
 
 
 def _renderable(value: Any) -> Any:

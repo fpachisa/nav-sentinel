@@ -275,18 +275,17 @@ def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
 
 
-def authorize_verdict(capability: str, cited_namespaces: frozenset[str]) -> PolicyDecision:
+def authorize_verdict(capability: str, cited_facts: frozenset[str]) -> PolicyDecision:
     """P-007. The acting agent comes from the bound identity; the requirement from the process.
 
-    Takes namespaces as plain strings rather than a verdict, so the control plane stays ignorant of
-    what a verdict is. Enforced, not merely recorded: an uncorroborated assertion is refused, and
-    the investigator turns that refusal into a verdict that asserts nothing.
+    Takes the *facts* the verdict's cited observations actually carry, as plain strings, so the
+    control plane stays ignorant of what a verdict is. Enforced, not merely recorded: an
+    uncorroborated assertion is refused, and the investigator turns that refusal into a verdict
+    that asserts nothing.
     """
     manifest = identity.current()
     required = packs.evidence_requirement_for(capability)
-    return _enforce(
-        policies.verdict_is_corroborated(manifest, capability, cited_namespaces, required)
-    )
+    return _enforce(policies.verdict_is_corroborated(manifest, capability, cited_facts, required))
 
 
 def admit_untrusted_content(text: str, *, source_uri: str | None = None) -> str:

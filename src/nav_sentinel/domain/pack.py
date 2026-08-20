@@ -46,19 +46,24 @@ PACK = ProcessPack(
     # process's own terms: before an investigator may assert *why* the books disagree, it must have
     # checked something outside them.
     #
-    # `nav.fx_rate` -> `ecb_fx`: the published reference rate is the external truth for a currency
-    # break, and the date it was published for is what makes a stale rate stale.
+    # Facts, not tool namespaces. Requiring a namespace only asks that *some* call was made to it:
+    # measured, a GBP lookup for an unrelated July date that returned nothing satisfied
+    # `("nav.fx_rate", ("ecb_fx",))` while every number in the verdict was invented. Requiring
+    # facts means the observation cited has to actually carry them.
     #
-    # `nav.corporate_action` will require the `corporate_action` namespace, and is added by the
-    # commit that builds that tool rather than now. Declaring it early was tried and the validator
-    # refused it -- no tool of this process provides that namespace yet, so no verdict could have
-    # satisfied the rule and it would have sat here looking like a control while denying every
-    # corporate-action verdict. That refusal is the validator working, so it is left as written.
+    # `nav.fx_rate` -> rate and rate_date, because a stale-rate break *is* the gap between the date
+    # a rate belongs to and the date it was applied on. A verdict naming the rate alone has not
+    # identified the break, which is why the acceptance criterion names both.
+    #
+    # `nav.corporate_action` will require the withholding and gross-rate facts, and lands with the
+    # tool that produces them rather than now: declaring it early was refused by the validator,
+    # because a rule no tool can satisfy denies every verdict for that capability while reading as
+    # a control. That refusal is the validator working, so it is recorded rather than worked around.
     #
     # `nav.settlement` mandates nothing: a trade-date versus settlement-date break is decided
-    # entirely by our own trade records, and inventing an external requirement for it would make
-    # the rule decorative.
-    evidence_requirements=(("nav.fx_rate", ("ecb_fx",)),),
+    # entirely by our own trade records, and inventing a requirement for it would make the rule
+    # decorative.
+    evidence_requirements=(("nav.fx_rate", ("rate", "rate_date")),),
     thresholds=(BPS_THRESHOLDS,),
     control_total_unit="base currency",
     notes=(

@@ -28,46 +28,94 @@ from nav_sentinel.tools import ecb_fx, edgar
 # the tool returned -- the exact failure the citation mechanism exists to prevent.
 
 
-def _observe_latest_rate(result) -> dict:
+def _observe_latest_rate(result, args) -> dict:
     """`(date, Decimal)`. The date is the whole point: a stale-rate break *is* the gap between the
-    rate's publication date and the valuation date, so a verdict that cites the rate without it has
-    not identified the break."""
+    rate's publication date and the valuation date, so a verdict citing the rate without it has not
+    identified the break."""
     if not result:
         return {}
     rate_date, rate = result
-    return {"rate": rate, "rate_date": rate_date}
+    return {"rate": rate, "rate_date": rate_date, "as_of": args.get("day")}
 
 
-def _observe_rate(result) -> dict:
-    return {"rate": result} if result is not None else {}
+def _observe_rate(result, args) -> dict:
+    """The rate *and the date it was asked for*.
+
+    The date matters as much here as above. Projecting the rate alone let a model cite a rate
+    fetched for one date as evidence about another -- the requested date lived only in the
+    observation's argument string, which no citation reads.
+    """
+    if result is None:
+        return {}
+    return {"rate": result, "rate_date": args.get("day"), "as_of": args.get("day")}
 
 
-def _observe_security(result) -> dict:
-    return (
-        {"currency": getattr(result, "currency", None), "domicile": getattr(result, "country", None)}
-        if result is not None
-        else {}
-    )
+def _observe_cross_rate(result, args) -> dict:
+    if result is None:
+        return {}
+    return {"rate": result, "rate_date": args.get("day"), "as_of": args.get("day")}
 
 
-def _observe_nav_record(result) -> dict:
-    return (
-        {"as_of": getattr(result, "as_of", None), "amount": getattr(result, "net_assets", None)}
-        if result is not None
-        else {}
-    )
+def _observe_security(result, _args) -> dict:
+    """Currency and country of domicile. The domicile determines the withholding rate a dividend
+    should have suffered, which is the fact the corporate-action cross-check turns on."""
+    if result is None:
+        return {}
+    return {
+        "currency": getattr(result, "currency", None),
+        "domicile": getattr(result, "country", None),
+    }
 
+
+def _observe_nav_record(result, _args) -> dict:
+    if result is None:
+        return {}
+    return {
+        "as_of": getattr(result, "as_of", None),
+        "amount": getattr(result, "net_assets", None),
+    }
+
+
+def _filing_uri(result) -> str | None:
+    """`search_filings` returns a per-filing URI; using it beats a constant that identifies nothing."""
+    if isinstance(result, list) and result and isinstance(result[0], dict):
+        return result[0].get("source_uri") or result[0].get("url")
+    return None
+
+
+#: Evidence source names, in this process's vocabulary. Declared per tool rather than inferred
+#: from the namespace: inference put NAV's own strings inside the platform, so a second process got
+#: its bare namespace as a source name and no URI at all.
+_ECB = "ecb_fx_reference_rates"
+_BOOKS = "books_and_records"
+_EDGAR = "sec_edgar"
+_REGISTRY = "agent_registry"
+
+#: URIs that identify the *retrieval*, not the service. A constant per namespace named the ECB's
+#: data API for every call and gave the books nothing at all, so no books-only investigator could
+#: produce a citation with a source. These template on the call's arguments.
+_ECB_URI = "https://data-api.ecb.europa.eu/service/data/EXR?currency={currency}&date={day}"
+#: Whose books a record came from is material to a reconciliation citation, so the template names
+#: it where the tool takes it. `{tool}` is supplied by the platform from the spec's own name.
+_BOOKS_URI = "books://merian/{tool}/{source}"
+_BOOKS_URI_NO_SOURCE = "books://merian/{tool}"
 
 NAV_TOOLS: tuple[ToolSpec, ...] = (
     # --- authoritative external reference data (structured, not free text) ----------------
     ToolSpec("ecb_fx.rate_on", ecb_fx.rate_on, (),
-             observe=_observe_rate,
+             observe=_observe_rate, facts=("rate", "rate_date", "as_of"),
+             source=_ECB,
+             uri_template=_ECB_URI,
              description="ECB reference rate published for an exact date, or None."),
     ToolSpec("ecb_fx.latest_rate_on_or_before", ecb_fx.latest_rate_on_or_before, (),
-             observe=_observe_latest_rate,
+             observe=_observe_latest_rate, facts=("rate", "rate_date", "as_of"),
+             source=_ECB,
+             uri_template=_ECB_URI,
              description="Most recent published rate at or before a date, with its date."),
     ToolSpec("ecb_fx.cross_rate", ecb_fx.cross_rate, (),
-             observe=_observe_rate,
+             observe=_observe_cross_rate, facts=("rate", "rate_date", "as_of"),
+             source=_ECB,
+             uri_template=_ECB_URI,
              description="Correctly-oriented cross rate via EUR."),
 
     # --- internal books and records, read-only -------------------------------------------
@@ -79,34 +127,52 @@ NAV_TOOLS: tuple[ToolSpec, ...] = (
     # the agent it was generated for. The build-time check in `agent_surface` now refuses an empty
     # description rather than certifying such a surface.
     ToolSpec("books_and_records.funds", bnr.funds, ("funds",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI_NO_SOURCE,
              description="Every fund on the platform: id, name, base currency, share class."),
     ToolSpec("books_and_records.securities", bnr.securities, ("securities",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI_NO_SOURCE,
              description="The security master: ISIN, name, currency, country of domicile, CIK."),
     ToolSpec("books_and_records.security", bnr.security, ("securities",),
-             observe=_observe_security,
+             observe=_observe_security, facts=("currency", "domicile"),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI_NO_SOURCE,
              description="One security from the master, by ISIN. Returns null if it is not held. "
                          "Use this for a security's country of domicile, which determines the "
                          "withholding rate a dividend should have suffered."),
     ToolSpec("books_and_records.positions", bnr.positions, ("positions",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI,
              description="Holdings as at each valuation date: quantity, local-currency price, the "
                          "FX rate applied, and the resulting base-currency market value. "
                          "`source` selects whose books: 'accounting' or 'custodian'. Comparing "
                          "the two is what a position break is."),
     ToolSpec("books_and_records.cash_movements", bnr.cash_movements, ("cash_movements",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI,
              description="Cash entries: amount, currency, value date, type and narrative. "
                          "`source` selects whose books: 'accounting' or 'custodian'."),
     ToolSpec("books_and_records.nav_records", bnr.nav_records, ("nav_records",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI,
              description="Every published NAV for a fund. `source` is 'accounting' or "
                          "'custodian'. Use this to find which valuation dates exist."),
     ToolSpec("books_and_records.nav_record", bnr.nav_record, ("nav_records",),
-             observe=_observe_nav_record,
+             observe=_observe_nav_record, facts=("as_of", "amount"),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI,
              description="One fund's NAV on one date: total assets, liabilities, shares "
                          "outstanding. `source` is 'accounting' or 'custodian'. Returns null "
                          "when no NAV was struck on that date."),
     ToolSpec("books_and_records.trades", bnr.trades, ("trades",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI_NO_SOURCE,
              description="Executed trades: trade date, settlement date, quantity, price. The gap "
                          "between the two dates is what a settlement-timing break turns on."),
     ToolSpec("books_and_records.trades_for_security", bnr.trades_for_security, ("trades",),
+             source=_BOOKS,
+             uri_template=_BOOKS_URI_NO_SOURCE,
              description="Trades in one security for one fund, by ISIN. Narrower than `trades` "
                          "and the right call when investigating a single holding."),
 
@@ -117,11 +183,15 @@ NAV_TOOLS: tuple[ToolSpec, ...] = (
     # types are SEC-formatted and cannot carry an instruction. Screening all of them cost 15,000
     # calls for one listing and overflowed the span queue carrying the audit trail.
     ToolSpec("edgar.recent_filings", edgar.recent_filings, (), untrusted_output=True,
-             untrusted_fields=("issuer", "description"),
+             untrusted_fields=("issuer", "description"), source=_EDGAR,
+             uri_template="https://data.sec.gov/submissions/CIK{cik}.json",
              description="Filing metadata for an issuer."),
     ToolSpec("edgar.search_filings", edgar.search_filings, (), untrusted_output=True,
-             untrusted_fields=("issuer",),
+             untrusted_fields=("issuer",), source=_EDGAR, locate=_filing_uri,
+             uri_template="https://efts.sec.gov/LATEST/search-index?q={query}",
              description="Full-text search across EDGAR."),
     ToolSpec("edgar.fetch_filing_text", edgar.fetch_filing_text, (), untrusted_output=True,
+             # The argument *is* the resource, so the citation can name it exactly.
+             source=_EDGAR, uri_template="{source_uri}",
              description="Raw filing text. Attacker-controllable; screened by the gateway."),
 )

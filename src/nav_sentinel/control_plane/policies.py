@@ -317,7 +317,7 @@ def untrusted_ingest_requires_armor(manifest: AgentManifest) -> PolicyDecision:
 def verdict_is_corroborated(
     manifest: AgentManifest,
     capability: str,
-    cited_namespaces: frozenset[str],
+    cited_facts: frozenset[str],
     required: tuple[str, ...],
 ) -> PolicyDecision:
     """P-007: an agent may not assert a root cause without the corroboration its process demands.
@@ -327,7 +327,13 @@ def verdict_is_corroborated(
     evidence_requirements`) and evaluated here, so a second process states its own and inherits the
     check without touching this function.
 
-    Takes namespaces and a requirement as plain strings, never a verdict: the control plane must not
+    **Facts, not tool namespaces.** Requiring a namespace only asked that *some* call to it had
+    happened: measured, a GBP rate lookup for an unrelated July date that returned nothing satisfied
+    an `ecb_fx` requirement, while every number in the verdict's root cause was invented. The facts
+    come from the cited observations' own projections, so a call that returned nothing contributes
+    nothing and cannot corroborate anything.
+
+    Takes fact names and a requirement as plain strings, never a verdict: the control plane must not
     know what a verdict is, and this keeps the check on the platform side of the seam where the
     governance log lives.
 
@@ -335,13 +341,13 @@ def verdict_is_corroborated(
     acted on, it belongs in the decision log the exception console renders, and a reviewer asking
     "why was this verdict rejected?" should find the answer in the same place as every other denial.
     """
-    missing = sorted(set(required) - cited_namespaces)
+    missing = sorted(set(required) - cited_facts)
     if not missing:
         return PolicyDecision(
             effect=Effect.ALLOW,
             policy_id="P-007-EVIDENCE-CORROBORATION",
             reason=(
-                f"verdict on {capability} cites {sorted(cited_namespaces) or 'no external source'}"
+                f"verdict on {capability} cites {sorted(cited_facts) or 'no observed fact'}"
                 + (f", satisfying {list(required)}" if required else " and none is required")
             ),
             agent_ref=manifest.ref,
@@ -351,9 +357,8 @@ def verdict_is_corroborated(
         effect=Effect.DENY,
         policy_id="P-007-EVIDENCE-CORROBORATION",
         reason=(
-            f"verdict on {capability} cites no evidence from {missing}. {manifest.ref} may not "
-            f"assert a cause from internal records alone; it cites "
-            f"{sorted(cited_namespaces) or 'nothing'}."
+            f"verdict on {capability} cites no observation carrying {missing}. {manifest.ref} may "
+            f"not assert a cause without them; it cites {sorted(cited_facts) or 'no fact at all'}."
         ),
         agent_ref=manifest.ref,
         resource=capability,

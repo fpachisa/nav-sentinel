@@ -62,6 +62,11 @@ def _import_graph() -> dict[str, set[str]]:
             if isinstance(node, ast.ImportFrom) and node.module:
                 if node.module.startswith("nav_sentinel"):
                     edges.add(node.module)
+                    # Also the per-alias target. `from nav_sentinel.control_plane import packs`
+                    # yields only `nav_sentinel.control_plane` above, which is this codebase's
+                    # dominant import style -- so a rule phrased "must not import
+                    # control_plane.packs" would have passed vacuously against every real use.
+                    edges |= {f"{node.module}.{a.name}" for a in node.names}
             elif isinstance(node, ast.Import):
                 edges |= {a.name for a in node.names if a.name.startswith("nav_sentinel")}
             elif isinstance(node, ast.Call):
@@ -79,14 +84,29 @@ def _import_graph() -> dict[str, set[str]]:
     return graph
 
 
+#: The composition root is where the layers are *supposed* to meet -- it is the only module
+#: permitted to import both a process and the platform, which is why it lives outside both. So the
+#: traversal stops there rather than through it. Without this, every entry point that calls
+#: `configure()` reaches every process, and the rule would forbid wiring the application together.
+#:
+#: This became visible only when the graph started recording per-alias edges. Before that,
+#: `from nav_sentinel import composition` produced the single edge `nav_sentinel`, whose layer is
+#: empty -- so the traversal never followed it, and **every import written in that form was
+#: invisible to this entire check**. The hole was in the codebase's usual way of reaching the
+#: composition root.
+_WIRING = frozenset({"nav_sentinel.composition"})
+
+
 def _reachable(graph: dict[str, set[str]], start: str) -> set[str]:
     seen: set[str] = set()
     stack = [start]
     while stack:
-        for nxt in graph.get(stack.pop(), ()):
+        current = stack.pop()
+        for nxt in graph.get(current, ()):
             if nxt not in seen:
                 seen.add(nxt)
-                stack.append(nxt)
+                if nxt not in _WIRING:
+                    stack.append(nxt)
     return seen
 
 
@@ -111,6 +131,30 @@ class TestControlPlaneDoesNotReachAProcess:
             "the control plane reaches a process package:\n"
             + "\n".join(f"  {k} -> {v}" for k, v in violations.items())
         )
+
+    def test_the_wiring_exemption_is_exactly_the_composition_root(self):
+        """One module, named, so the exemption cannot quietly grow into a way around the rule.
+
+        A platform module importing `composition` directly would still be a violation: the
+        exemption stops the traversal *through* it, it does not permit reaching it.
+        """
+        assert {"nav_sentinel.composition"} == _WIRING
+        graph = _import_graph()
+        for module, edges in graph.items():
+            if _layer(module) in PLATFORM_PACKAGES:
+                assert "nav_sentinel.composition" not in edges, (
+                    f"{module} imports the composition root; the platform must not depend on the "
+                    f"wiring that composes it"
+                )
+
+    def test_the_per_alias_edge_is_recorded(self):
+        """`from nav_sentinel import composition` must register as reaching `composition`.
+
+        Recorded as `node.module` alone it is just `nav_sentinel`, whose layer is empty, so the
+        traversal stopped dead and every import in that form was invisible to this check.
+        """
+        graph = _import_graph()
+        assert "nav_sentinel.composition" in graph["nav_sentinel.fleet_cli"]
 
     def test_the_graph_actually_found_edges(self):
         """A check that silently sees nothing passes forever. Pin that the graph is populated and
@@ -368,3 +412,71 @@ class TestTheAuditRecordHasTheSameShape:
         assert all(k.startswith("nav.") for k in keys), sorted(keys)
         assert "nav.case.impact_unit" in keys
         assert "nav.case.approval_class" in keys
+
+
+class TestAgentsReachToolsOnlyThroughTheGateway:
+    """The S1 acceptance criterion, and the invariant the surface generator's placement rests on.
+
+    `agent_surface` lives in the control plane precisely because generating a surface means reading
+    the pack catalogue, and `packs.resolve(name).fn` is the live ungated callable. That argument is
+    worth nothing unless something forbids a module under `agents/` from doing the same, and until
+    now nothing did: the transitive scan above treats `agents` and `tools` as *both* process
+    packages, so `agents/ -> tools/` was allowed.
+    """
+
+    FORBIDDEN = (
+        "nav_sentinel.tools",
+        "nav_sentinel.control_plane.packs",
+        "nav_sentinel.domain.pack",
+    )
+
+    def _agent_modules(self) -> dict[str, set[str]]:
+        graph = _import_graph()
+        return {m: e for m, e in graph.items() if _layer(m) == "agents"}
+
+    def test_the_scan_sees_the_agents_package(self):
+        """It must actually be looking at something, or it passes forever on an empty result."""
+        modules = self._agent_modules()
+        assert modules, "no modules under agents/ were parsed"
+        assert any(edges for edges in modules.values()), "no imports found in agents/ at all"
+
+    def test_no_agent_module_imports_a_tool_or_the_catalogue(self):
+        violations = {
+            module: sorted(e for e in edges if e.startswith(self.FORBIDDEN))
+            for module, edges in self._agent_modules().items()
+        }
+        offenders = {m: v for m, v in violations.items() if v}
+        assert not offenders, (
+            "a module under agents/ can reach the ungated tool callables:\n"
+            + "\n".join(f"  {m} -> {v}" for m, v in offenders.items())
+            + "\nAgents receive a built surface; the generator lives in the control plane."
+        )
+
+    def test_the_rule_would_catch_the_dominant_import_style(self):
+        """`from nav_sentinel.control_plane import packs` must register as reaching `packs`.
+
+        Phrased against `node.module` alone it registers only as reaching `control_plane`, so the
+        rule above would pass while an agent module did exactly the forbidden thing.
+        """
+        import ast as _ast
+
+        tree = _ast.parse("from nav_sentinel.control_plane import packs\n")
+        edges: set[str] = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.ImportFrom) and node.module:
+                edges.add(node.module)
+                edges |= {f"{node.module}.{a.name}" for a in node.names}
+        assert "nav_sentinel.control_plane.packs" in edges
+
+    def test_no_module_outside_the_platform_touches_a_tool_callable(self):
+        """`spec.fn` is the ungated callable. Only the gateway may invoke it, and only the surface
+        generator and the pack module may name it."""
+        allowed = {"gateway.py", "packs.py", "agent_surface.py"}
+        offenders: dict[str, int] = {}
+        for path in sorted(SRC.rglob("*.py")):
+            if path.name in allowed:
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Attribute) and node.attr == "fn":
+                    offenders[str(path.relative_to(SRC))] = node.lineno
+        assert not offenders, f"`.fn` referenced outside the gateway: {offenders}"

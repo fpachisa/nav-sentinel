@@ -114,11 +114,19 @@ class Verdict(BaseModel):
         reaches `source_uri`, `retrieved_at` or `observed`.
         """
         agent, _, version = agent_ref.partition("@")
+        # Resolve first. Indexing `observations` directly skipped the cross-case check entirely, so
+        # the refusal the design calls "the one that matters" was enforced only on a path nothing
+        # called, while the path that actually builds the domain object let it through -- and an
+        # unknown id raised a bare KeyError rather than UnknownObservation.
+        resolved = resolve_citations(self, observations)
         return RootCauseHypothesis(
             category=category_for(self.capability),
             statement=self.root_cause,
             confidence=self.confidence,
-            evidence=[evidence_from(observations[c.observation_id], c) for c in self.citations],
+            evidence=[
+                evidence_from(observation, citation)
+                for observation, citation in zip(resolved, self.citations, strict=True)
+            ],
             investigator_agent=agent,
             investigator_version=version or None,
         )
@@ -206,7 +214,11 @@ def refusal(
         capability=capability,
         root_cause=UNKNOWN,
         confidence=0.0,
-        citations=[Citation(observation_id=evidence.observation_id, relevance=reason)]
+        # Truncated, because a real ContentBlocked or ExtractionRejected message -- an armor match
+        # plus the offending span plus a treaty mismatch -- runs past the 400-character cap, and
+        # this helper exists precisely so the poisoned notice returns a verdict rather than raising.
+        # The full text is kept in `unresolved`, which has no cap.
+        citations=[Citation(observation_id=evidence.observation_id, relevance=reason[:400])]
         if evidence is not None
         else [],
         unresolved=reason,

@@ -1,4 +1,11 @@
-"""`python -m nav_sentinel.registry.cli` -- show the published fleet and its coverage."""
+"""`python -m nav_sentinel.fleet_cli` -- show the published fleet and its coverage.
+
+Outside both layers, beside `composition`, for the same reason it is: an entry point has to call
+`configure()`, which imports a process and the platform both. Inside `registry/` it made a platform
+package depend on the wiring that composes it -- and the seam test could not see that, because
+`from nav_sentinel import composition` recorded only the edge `nav_sentinel`, so every import in
+that form was invisible to the whole check.
+"""
 
 from __future__ import annotations
 

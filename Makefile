@@ -39,7 +39,7 @@ bootstrap: ## Provision Google Cloud: APIs, per-agent identities, Model Armor, P
 	PROJECT=$(PROJECT) REGION=$(REGION) bash infra/bootstrap.sh
 
 registry: ## Show the published agent fleet and its coverage
-	$(PY) -m nav_sentinel.registry.cli
+	$(PY) -m nav_sentinel.fleet_cli
 
 deploy: ## Build and deploy to Cloud Run, and wire Pub/Sub push
 	bash infra/deploy.sh

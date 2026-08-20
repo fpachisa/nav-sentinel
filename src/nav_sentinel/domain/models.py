@@ -172,6 +172,11 @@ class ObservedFacts(BaseModel):
     quantity: Decimal | None = None
     amount: Decimal | None = None
     currency: str | None = None
+    #: Country of domicile. Declared because the corporate-action cross-check turns on it -- a
+    #: dividend's expected withholding follows the issuer's domicile -- and because the security
+    #: projection was already producing it while nothing here declared it, so the fact was recorded
+    #: and then silently dropped on the way back.
+    domicile: str | None = None
     as_of: date | None = None
 
     @classmethod

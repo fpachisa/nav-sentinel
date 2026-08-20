@@ -34,10 +34,12 @@ def configure(*, approvals_backend: str = "memory") -> tuple[packs.ProcessPack, 
     packs.register_platform_tools(
         packs.ToolSpec(
             "registry.discover_for_capability", discover.discover_for_capability, ("registry",),
+            source="agent_registry", uri_template="registry://agents/{capability}",
             description="Highest-versioned agent declaring support for a capability.",
         ),
         packs.ToolSpec(
             "registry.coverage", discover.coverage, ("registry",),
+            source="agent_registry", uri_template="registry://coverage",
             description="Which capabilities currently have an authorised investigator.",
         ),
     )

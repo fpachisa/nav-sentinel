@@ -8,6 +8,7 @@ a citation can be checked against a fact rather than against a plausible sentenc
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from datetime import date
 from decimal import Decimal
@@ -17,7 +18,6 @@ import pytest
 from nav_sentinel.control_plane import agent_surface, gateway, identity, packs
 from nav_sentinel.control_plane.agent_surface import (
     SurfaceInvalid,
-    ToolBudgetExhausted,
 )
 from nav_sentinel.control_plane.observations import ObservationStore
 from nav_sentinel.registry import discover
@@ -119,8 +119,11 @@ class TestArgumentsArriveAsTextAndAreCoerced:
     def test_a_bad_date_fails_at_the_boundary_with_a_correctable_message(self, fx):
         """The model gets to fix it on the next turn, so the message has to say what was wanted."""
         with identity.acting_as("fx-rates-investigator"):
-            with pytest.raises(ValueError, match="Expected date, e.g. 2026-08-17"):
-                fx["ecb_fx.rate_on"](currency="USD", day="17 August")
+            returned = fx["ecb_fx.rate_on"](currency="USD", day="17 August")
+        # Returned, not raised: ADK re-raises a tool exception out of the runner unless a callback
+        # handles it, so a message written for the model to correct on its next turn was in fact a
+        # stack trace it never saw.
+        assert "Expected date, e.g. 2026-08-17" in returned["error"]
 
     def test_annotations_are_resolved_not_read_as_strings(self):
         """Every tool module uses `from __future__ import annotations`, so an annotation is the
@@ -167,7 +170,7 @@ class TestEveryCallIsRecorded:
         with identity.acting_as("fx-rates-investigator"):
             fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
         observed = next(iter(store.as_mapping().values())).observed
-        assert set(observed) == {"rate", "rate_date"}
+        assert {"rate", "rate_date"} <= set(observed)
         assert observed["rate_date"] == "2026-08-17"
 
     def test_facts_are_stored_as_text_so_the_platform_stays_process_agnostic(self, fx, store):
@@ -286,8 +289,8 @@ class TestTheCallBudget:
         with identity.acting_as("fx-rates-investigator"):
             tools["ecb_fx.rate_on"](currency="USD", day="2026-08-17")
             tools["ecb_fx.rate_on"](currency="GBP", day="2026-08-17")
-            with pytest.raises(ToolBudgetExhausted, match="budget"):
-                tools["ecb_fx.rate_on"](currency="USD", day="2026-08-14")
+            exhausted = tools["ecb_fx.rate_on"](currency="USD", day="2026-08-14")
+        assert "budget" in exhausted["error"]
 
     def test_the_budget_is_per_surface_not_per_process(self, store):
         manifest = discover.get("fx-rates-investigator")
@@ -331,8 +334,11 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
     restated it. The rule is declared per capability by the pack and evaluated in the control
     plane, so a second process states its own and inherits the check."""
 
-    def test_the_nav_pack_requires_external_corroboration_for_fx(self):
-        assert packs.evidence_requirement_for("nav.fx_rate") == ("ecb_fx",)
+    def test_the_nav_pack_requires_the_rate_and_its_date(self):
+        """Facts, not a tool namespace. Requiring a namespace only asked that *some* call to it had
+        happened -- measured, a GBP lookup for an unrelated July date that returned nothing
+        satisfied it while every number in the verdict was invented."""
+        assert packs.evidence_requirement_for("nav.fx_rate") == ("rate", "rate_date")
 
     def test_a_capability_with_no_declared_rule_requires_nothing(self):
         """Honest rather than absent: a settlement break is decided by our own trade records, and
@@ -344,7 +350,7 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
         gateway.clear_decision_log()
         with identity.acting_as("fx-rates-investigator"):
             decision = gateway.authorize_verdict(
-                "nav.fx_rate", frozenset({"ecb_fx", "books_and_records"})
+                "nav.fx_rate", frozenset({"rate", "rate_date", "as_of"})
             )
         assert decision.allowed
         assert decision.policy_id == "P-007-EVIDENCE-CORROBORATION"
@@ -354,7 +360,7 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
 
         with identity.acting_as("fx-rates-investigator"):
             with pytest.raises(PolicyViolation, match="P-007"):
-                gateway.authorize_verdict("nav.fx_rate", frozenset({"books_and_records"}))
+                gateway.authorize_verdict("nav.fx_rate", frozenset({"amount"}))
 
     def test_the_refusal_is_recorded_in_the_governance_log(self):
         """A reviewer asking why a verdict was rejected should find it where every other denial is."""
@@ -367,11 +373,35 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
         denials = [d for d in gateway.decision_log() if not d.allowed]
         assert [d.policy_id for d in denials] == ["P-007-EVIDENCE-CORROBORATION"]
 
-    def test_the_namespaces_a_case_has_evidence_from_come_from_its_observations(self, fx, store):
+    def test_the_facts_a_verdict_cites_come_from_its_own_observations(self, fx, store):
         """The two halves must meet: what the surface records is what the check reads."""
         with identity.acting_as("fx-rates-investigator"):
-            fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
-            gateway.authorize_verdict("nav.fx_rate", store.namespaces())
+            returned = fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+            cited = store.facts_from([returned["observation_id"]])
+            assert gateway.authorize_verdict("nav.fx_rate", cited).allowed
+
+    def test_a_call_that_returned_nothing_corroborates_nothing(self, fx, store):
+        """The critical one. A GBP lookup for an unrelated July date returned None, carried no
+        facts, and satisfied a namespace-based requirement -- so a verdict whose every number was
+        invented was schema-valid, cited a real observation recorded for this case by this agent,
+        and passed P-007."""
+        from nav_sentinel.control_plane.policies import PolicyViolation
+
+        with identity.acting_as("fx-rates-investigator"):
+            returned = fx["ecb_fx.latest_rate_on_or_before"](currency="GBP", day="2026-07-01")
+            assert returned["result"] is None
+            cited = store.facts_from([returned["observation_id"]])
+            assert cited == frozenset(), "an empty result contributed citable facts"
+            with pytest.raises(PolicyViolation, match="no observation carrying"):
+                gateway.authorize_verdict("nav.fx_rate", cited)
+
+    def test_only_the_cited_observations_count(self, fx, store):
+        """An agent should not be corroborated by a call it made and then did not rely on."""
+        with identity.acting_as("fx-rates-investigator"):
+            good = fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+            empty = fx["ecb_fx.latest_rate_on_or_before"](currency="GBP", day="2026-07-01")
+        assert store.facts_from([good["observation_id"]])
+        assert store.facts_from([empty["observation_id"]]) == frozenset()
 
     def test_a_requirement_naming_an_undeclared_capability_is_refused(self):
         """The rule would bind to nothing while looking present -- a governance rule weakened to
@@ -385,17 +415,17 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
                 tools=(), evidence_requirements=(("nav2.b", ("ecb_fx",)),),
             )
 
-    def test_a_requirement_naming_a_namespace_no_tool_provides_is_refused(self):
+    def test_a_requirement_naming_a_fact_no_tool_can_produce_is_refused(self):
         """No verdict could ever satisfy it, so every verdict for that capability would be denied
         by a rule that reads as a typo."""
         from nav_sentinel.control_plane.packs import ProcessPack
 
-        with pytest.raises(ValueError, match="no tool of this process provides"):
+        with pytest.raises(ValueError, match="no\\s+tool of this process can produce"):
             ProcessPack(
                 key="nav3", name="n", capabilities=("nav3.a",),
                 manifest_dir=packs.registered()[0].manifest_dir,
                 tools=(packs.catalogue()["ecb_fx.rate_on"],),
-                evidence_requirements=(("nav3.a", ("ecb",)),),   # note the truncated namespace
+                evidence_requirements=(("nav3.a", ("rate_dat",)),),   # note the typo
             )
 
     def test_an_empty_requirement_is_refused(self):
@@ -466,3 +496,125 @@ class TestRunningWithNoIdentityBound:
             with identity.unbound():
                 pass
         assert len(gateway.decision_log()) >= before
+
+
+class TestEveryInvestigatorCanCiteASource:
+    """S1's criterion is that every verdict cites an item with a non-null `source_uri` **and**
+    `retrieved_at`. It was unsatisfiable for two of the three published investigators: the platform
+    held a constant URI per namespace, `ecb_fx` got one service URL identical for every call, and
+    everything else got `None`. Mutating the field to `None` left all 316 tests passing -- the field
+    the headline criterion is about had no test at all.
+    """
+
+    @staticmethod
+    def _arguments(fn) -> dict[str, str]:
+        """Plausible values for whatever this tool takes, so any tool can be driven."""
+        samples = {
+            "source": "accounting", "day": "2026-08-17", "isin": "US02319V1035",
+            "fund_id": "MERID-GEF", "currency": "USD", "from_ccy": "USD", "to_ccy": "EUR",
+            "cik": "320193", "query": "dividend", "capability": "nav.fx_rate",
+            "as_of": "2026-08-17", "source_uri": "https://www.sec.gov/Archives/x.txt",
+        }
+        return {
+            name: samples.get(name, "x")
+            for name, parameter in inspect.signature(fn).parameters.items()
+            if parameter.default is inspect.Parameter.empty
+        }
+
+    @pytest.mark.parametrize(
+        "agent_id",
+        ["fx-rates-investigator", "corporate-actions-investigator", "settlement-investigator"],
+    )
+    def test_at_least_one_tool_yields_a_citable_source(self, agent_id, store):
+        manifest = discover.get(agent_id)
+        tools = agent_surface.build(manifest, case_id=CASE, trace_id=None, store=store)
+        with identity.acting_as(agent_id):
+            for fn in tools:
+                # EDGAR has no cassette, so driving it here would reach the live SEC -- and the
+                # suite must pass with the network unreachable. Its citability is covered by
+                # `test_every_tool_can_name_where_its_evidence_came_from`, which is static.
+                if fn.nav_tool_name.startswith("edgar."):
+                    continue
+                with contextlib.suppress(Exception):
+                    fn(**self._arguments(fn))
+
+        recorded = list(store.as_mapping().values())
+        assert recorded, f"{agent_id} recorded no observations at all"
+        citable = [o for o in recorded if o.source_uri and o.retrieved_at and o.source]
+        assert citable, (
+            f"{agent_id} cannot produce a single evidence item with a source_uri, so no verdict of "
+            f"its can satisfy the criterion. Sources seen: "
+            f"{sorted({(o.tool, o.source_uri) for o in recorded})}"
+        )
+
+    def test_every_tool_can_name_where_its_evidence_came_from(self):
+        """Declared per tool, so a second process is not left with a bare namespace and no URI."""
+        for name, spec in packs.catalogue().items():
+            assert spec.source.strip(), f"{name} declares no source"
+            assert spec.uri_template or spec.locate, f"{name} can never name a resource"
+
+    def test_the_uri_identifies_the_retrieval_not_the_service(self, fx, store):
+        """A constant per namespace named the ECB's data API for every call, which does not say
+        which rate was read."""
+        with identity.acting_as("fx-rates-investigator"):
+            fx["ecb_fx.rate_on"](currency="USD", day="2026-08-17")
+            fx["ecb_fx.rate_on"](currency="GBP", day="2026-08-14")
+        uris = {o.source_uri for o in store.as_mapping().values()}
+        assert len(uris) == 2, f"both calls cite the same resource: {uris}"
+
+    def test_a_template_referencing_an_absent_argument_does_not_leak_a_placeholder(self):
+        """`books://merian/{source}` on a tool that takes no `source` would otherwise render with
+        the braces still in it -- a citation pointing at a format string."""
+        spec = packs.catalogue()["books_and_records.trades"]
+        uri = spec.default_uri({"fund_id": "MERID-GEF"})
+        assert uri and "{" not in uri, uri
+
+
+class TestUndeclaredProjectionsAreRefused:
+    """`_observe_security` projected `domicile`, `ObservedFacts` did not declare it, and the filter
+    dropped it silently -- so the fact the corporate-action cross-check turns on was uncitable and
+    removing the filter entirely left every test passing."""
+
+    def test_the_declared_facts_are_producible_and_consumable(self):
+        """Every fact a pack's tool declares must be a field the process can rebuild, or it is
+        recorded and then discarded on the way back."""
+        from nav_sentinel.domain.models import ObservedFacts
+
+        for name, spec in packs.catalogue().items():
+            undeclared = sorted(set(spec.facts) - set(ObservedFacts.model_fields))
+            assert not undeclared, f"{name} declares fact(s) {undeclared} that no verdict can cite"
+
+    def test_a_projection_returning_an_undeclared_key_is_caught(self, store, monkeypatch):
+        spec = packs.catalogue()["ecb_fx.rate_on"]
+        rogue = dict(packs.catalogue())
+        rogue["ecb_fx.rate_on"] = packs.ToolSpec(
+            name=spec.name, fn=spec.fn, reads=spec.reads, description=spec.description,
+            source=spec.source, uri_template=spec.uri_template, facts=("rate",),
+            observe=lambda _r, _a: {"rate": 1, "smuggled": 2},
+        )
+        monkeypatch.setattr(packs, "catalogue", lambda: rogue)
+        tools = {
+            t.nav_tool_name: t
+            for t in agent_surface.build(
+                discover.get("fx-rates-investigator"), case_id=CASE, trace_id=None, store=store
+            )
+        }
+        with identity.acting_as("fx-rates-investigator"):
+            tools["ecb_fx.rate_on"](currency="USD", day="2026-08-17")
+        # The call still succeeds -- telemetry must not break a tool -- but nothing is citable.
+        assert next(iter(store.as_mapping().values())).observed == {}
+
+    def test_a_tool_that_projects_must_declare_its_facts(self):
+        from nav_sentinel.control_plane.packs import ProcessPack
+
+        spec = packs.catalogue()["ecb_fx.rate_on"]
+        with pytest.raises(ValueError, match="declares no `facts`"):
+            ProcessPack(
+                key="nav9", name="n", capabilities=("nav9.a",),
+                manifest_dir=packs.registered()[0].manifest_dir,
+                tools=(
+                    packs.ToolSpec(
+                        name="x.y", fn=spec.fn, source="s", observe=lambda _r, _a: {}
+                    ),
+                ),
+            )

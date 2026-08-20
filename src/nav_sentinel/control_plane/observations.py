@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:  # pragma: no cover
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
 
 class Observation(BaseModel):
@@ -73,8 +73,14 @@ class ObservationStore:
         self._by_id: dict[str, Observation] = {}
 
     def record(self, observation: Observation) -> Observation:
-        self._by_id[observation.observation_id] = observation
-        return observation
+        """First write wins.
+
+        `setdefault`, not assignment: ids are content-derived, so an identical repeated call maps to
+        the same id, and overwriting moved the retained `retrieved_at` forward to the later call.
+        A cited `retrieved_at` should be when the data was obtained. The gateway's decision log
+        still records both calls, so the call count is not lost.
+        """
+        return self._by_id.setdefault(observation.observation_id, observation)
 
     def get(self, observation_id_: str) -> Observation | None:
         return self._by_id.get(observation_id_)
@@ -94,6 +100,22 @@ class ObservationStore:
 
     def tools_used(self) -> frozenset[str]:
         return frozenset(o.tool for o in self._by_id.values())
+
+    def facts_from(self, observation_ids: Iterable[str]) -> frozenset[str]:
+        """Which facts the named observations actually carry.
+
+        What P-007 reads. Restricted to the ids a verdict cites, not everything the case recorded:
+        an agent should not be corroborated by a call it made and then did not rely on.
+        """
+        # `carried`, not `facts`: inside the control plane `facts` names a `CaseFacts`, and the
+        # seam test scans attribute reads on that name to catch the platform reaching into a domain
+        # object. Borrowing it trips a check worth keeping strict.
+        carried: set[str] = set()
+        for oid in observation_ids:
+            observation = self._by_id.get(oid)
+            if observation is not None:
+                carried.update(observation.observed)
+        return frozenset(carried)
 
     def namespaces(self) -> frozenset[str]:
         """Which tool namespaces this case has evidence from -- what an evidence requirement reads."""
