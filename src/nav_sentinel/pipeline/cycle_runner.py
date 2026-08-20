@@ -49,6 +49,10 @@ def run(as_of: date) -> dict:
     """One cycle. Returns a summary; prints nothing."""
     composition.configure()
     telemetry.configure_tracing(console=False)
+    # One cycle is one unit of work, so it starts with an empty log. Without this a second run in
+    # the same process reported the first run's decisions as well -- 56 for a cycle that recorded
+    # 28 -- and every case's persisted trail carried the previous run's decisions too.
+    gateway.clear_decision_log()
 
     custodian_nav = bnr.nav_record("custodian", FUND, as_of)
     accounting_nav = bnr.nav_record("accounting", FUND, as_of)
@@ -69,6 +73,9 @@ def run(as_of: date) -> dict:
         materiality.score(case, custodian_nav, to_base)
         facts = case.to_facts()
 
+        # Mark the log before the case's own decisions are recorded, so persisting one case does
+        # not re-persist the previous case's.
+        gateway.mark_decisions(case.case_id)
         with audit.case_trace(facts) as (_span, trace_id):
             # The band comes from the decision the gateway recorded, not from a second call. Two
             # call sites deriving the same governance decision is how the control plane came to
@@ -80,6 +87,11 @@ def run(as_of: date) -> dict:
                 # that the path an investigator will take is already governed.
                 with identity.acting_as(agent.agent_id):
                     gateway.call_tool("registry.coverage")
+
+            # Persisted inside the trace, so the stored decisions carry the trace id that the span
+            # they were emitted under also carries. A cycle whose record only exists in the memory
+            # of the instance that ran it is not an audit trail; Cloud Run scales to zero.
+            _persist(case, facts, band, agent, trace_id)
         rows.append(
             {
                 "case_id": case.case_id,
@@ -97,6 +109,37 @@ def run(as_of: date) -> dict:
         "cases": rows,
         "decisions": len(gateway.decision_log()),
     }
+
+
+def _persist(case, facts, band: str, agent, trace_id: str | None) -> None:
+    """Write the case and its governance decisions to the repository.
+
+    Decisions are written with an explicit sequence, because the store keys them by it and refuses
+    a duplicate: that is what makes the log append-only rather than merely appended-to. The sequence
+    is the position within *this case*, so two instances working different cases never collide and
+    two working the same one do -- which is a real conflict and should surface as one.
+    """
+    from nav_sentinel import composition
+
+    store = composition.store()
+    store.save_case(
+        case.case_id,
+        {
+            "case_id": case.case_id,
+            "subject_id": facts.subject_id,
+            "as_of": facts.as_of.isoformat(),
+            "capability": facts.capability,
+            "status": facts.status,
+            "severity": facts.severity,
+            "impact": str(facts.impact) if facts.impact else None,
+            "approval_band": band,
+            "authorised_agent": agent.ref if agent else None,
+            "trace_id": trace_id,
+            "break_ids": [b.break_id for b in case.breaks],
+        },
+    )
+    for sequence, decision in enumerate(gateway.decisions_since(case.case_id)):
+        store.record_decision(case.case_id, trace_id, sequence, decision)
 
 
 def _fixture_rates(as_of: date):

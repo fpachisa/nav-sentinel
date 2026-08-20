@@ -83,6 +83,35 @@ def decision_log() -> list[PolicyDecision]:
 def clear_decision_log() -> None:
     """Start a fresh log for this context. Cannot affect a concurrent request."""
     _decision_log.set([])
+    _marks.set({})
+
+
+def decisions_since(marker: str) -> list[PolicyDecision]:
+    """Every decision recorded since `mark_decisions` was last called with this marker.
+
+    A caller persisting one case's decisions needs *that case's* decisions, and the log is
+    per-context rather than per-case -- a cycle works several cases in one context. Clearing the log
+    between cases would work but would also throw away the running trail the console reads, so the
+    boundary is marked instead.
+    """
+    return list(_log()[_markers().get(marker, 0):])
+
+
+def mark_decisions(marker: str) -> None:
+    """Record where the log stands, so `decisions_since` can report what followed."""
+    _markers()[marker] = len(_log())
+
+
+_marks: ContextVar[dict[str, int]] = ContextVar("nav_decision_marks")
+
+
+def _markers() -> dict[str, int]:
+    try:
+        return _marks.get()
+    except LookupError:
+        fresh: dict[str, int] = {}
+        _marks.set(fresh)
+        return fresh
 
 
 def restore_decision_log(decisions: list[PolicyDecision]) -> None:
