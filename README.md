@@ -330,6 +330,14 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
     function object, and a test that the cycle actually invokes it. Found by asking what state would
     make `make registry` lie.
 
+12. **`ta.redemption_unsettled` is declared and never exercised.** `register-investigator`'s
+    manifest claims two capabilities; only `ta.subscription_in_transit` has ever run. No fixture
+    produces a redemption paid but not struck off the register, and the deterministic `classify()`
+    cannot return that capability, so half the agent's declared competence is untested. Recorded
+    rather than quietly narrowed, because it is a milder form of defect 11 — the difference being
+    that this one is a plausible competence claim with no evidence behind it, not a claim that
+    could never be exercised at all. The fix is a fixture, not a code change.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).

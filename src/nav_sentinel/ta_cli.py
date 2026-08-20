@@ -60,7 +60,15 @@ def main() -> None:
         )
         return verdict
 
-    results = asyncio.run(cycle.run(args.fund, args.as_of, investigate=investigate))
+    results = asyncio.run(
+        cycle.run(
+            args.fund,
+            args.as_of,
+            investigate=investigate,
+            # The registry answers this, not the process and not this file.
+            routes=lambda capability: discover.discover_for_capability(capability) is not None,
+        )
+    )
     if not results:
         console.print("[green]register agrees with the unit ledger[/green]")
         return

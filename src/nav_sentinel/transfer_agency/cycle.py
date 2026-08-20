@@ -29,6 +29,15 @@ from nav_sentinel.transfer_agency.models import RegisterCase
 #: Typed loosely on purpose -- `Verdict` lives in the agents layer, which this package cannot see.
 Investigate = Callable[[CaseBrief], Awaitable[Any]]
 
+#: Whether the registry publishes an agent for a capability. Injected for the same reason
+#: `Investigate` is: this package cannot import `registry`, and it must not answer the question
+#: itself. The first version of this file defaulted to the literal
+#: `frozenset({"ta.subscription_in_transit"})`, which made the cycle a second source of truth for
+#: routing -- so publishing an agent for `ta.redemption_unsettled` would have left it refused here
+#: while `make registry` showed it handled. Dispatch is the registry's decision everywhere else in
+#: this codebase, and a hardcoded copy is how that becomes advisory.
+Routes = Callable[[str], bool]
+
 
 def classify(case: RegisterCase) -> RegisterCase:
     """Assign the capability from the data, without a model.
@@ -80,7 +89,7 @@ async def run(
     as_of: date,
     *,
     investigate: Investigate,
-    investigable: frozenset[str] = frozenset({"ta.subscription_in_transit"}),
+    routes: Routes,
 ) -> list[CycleResult]:
     """Reconcile the register and correct what arithmetic can explain.
 
@@ -93,7 +102,7 @@ async def run(
     for detected in tolerance.detect(fund_id, as_of):
         case = classify(detected)
 
-        if case.capability not in investigable:
+        if not routes(case.capability):
             results.append(CycleResult(case=case, refused=f"no agent handles {case.capability}"))
             continue
 

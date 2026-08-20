@@ -327,7 +327,9 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
             seen.append(brief)
             return "verdict"
 
-        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake))
+        results = asyncio.run(
+            cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: True)
+        )
         assert len(seen) == 1, "the investigator was not called"
         brief = seen[0]
         assert brief.capability == "ta.subscription_in_transit"
@@ -347,7 +349,7 @@ class TestTheInvestigatorIsReachableAndNotJustPublished:
             called.append(brief)
             return "verdict"
 
-        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake, investigable=frozenset()))
+        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake, routes=lambda _: False))
         assert called == []
         assert results and not results[0].resolved
         assert "no agent handles" in results[0].refused
