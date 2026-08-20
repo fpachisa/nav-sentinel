@@ -243,7 +243,11 @@ def screen(text: str, *, source_uri: str | None = None) -> ArmorVerdict:
     """
     from google.cloud import modelarmor_v1 as ma
 
-    client = _client(ma)
+    # Window before building the client. `_client()` resolves application default credentials, so
+    # constructing it first meant a document refused purely for its size could not be refused
+    # without credentials -- making one offline test require a gcloud login, which a fresh
+    # container (S8a's criterion) does not have. Refusing to screen something is a decision this
+    # code can reach on its own.
     parts = windows(text)
     if len(parts) > MAX_WINDOWS:
         blocked = ArmorVerdict(
@@ -258,6 +262,8 @@ def screen(text: str, *, source_uri: str | None = None) -> ArmorVerdict:
         )
         logger.error("refusing to ingest %d bytes: %s", len(text.encode()), blocked.detail)
         raise ContentBlocked(blocked, source_uri)
+
+    client = _client(ma)
 
     # Windows are independent, so they are screened concurrently. This is a latency fix, not a
     # cost one: the call count is set by the windowing, and the windowing is what keeps it bounded.

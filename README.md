@@ -186,7 +186,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 221 invariant tests, including "no agent may post"
+make test        # 230 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -251,7 +251,7 @@ such rather than as complete.
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
 | Memory Bank recurrence recall | not started | — |
 | Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
-| Cloud Run deployment | works | Revision `nav-sentinel-00006-4ps`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |
+| Cloud Run deployment | works | Revision `nav-sentinel-00008-dkh`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |
 | Evaluation harness | not started | — |
 
 ### Known defects
@@ -299,8 +299,12 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
 9. ~~`FirestoreApprovalStore` is written but never executed.~~ **Closed.** The deployed service
    runs with `NAV_APPROVALS=firestore`; the offline default remains the in-process store, chosen
    explicitly and fail-closed when Firestore is requested and unavailable.
-10. Nothing outstanding here. `make demo`, `make fixtures`, `make test` and `make verify` all
-    run with the network unreachable, from committed fixtures and a recorded ECB cassette.
+10. Nothing outstanding here, and the guarantee is now stronger than it was: `make demo`,
+    `make fixtures`, `make test` and `make verify` run with the network unreachable **and with no
+    Google credentials on disk**, from committed fixtures and a recorded ECB cassette. One test
+    previously needed application default credentials to watch an oversized document be refused,
+    because the client was built before the size was checked — a refusal this code can reach on its
+    own. That matters for the fresh-container criterion, where there is no gcloud login.
     `make fixtures-live` re-records the rates and requires network access.
 
 ## Licence

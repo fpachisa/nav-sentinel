@@ -19,7 +19,7 @@ from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     ConsoleSpanExporter,
@@ -34,6 +34,37 @@ _configured = False
 
 SERVICE_NAME = "nav-sentinel"
 OTLP_ENDPOINT = "telemetry.googleapis.com"
+
+
+class _CountingProcessor(SpanProcessor):
+    """Counts spans as they end, so drops become visible.
+
+    `_CountingExporter` counts what it is *handed*, never what was *created*, and
+    `BatchProcessor.emit` drops on a full queue with only a warning and an internal metric -- the
+    exporter is never told. So counting export failures alone left the original defect intact:
+    measured, 50 spans created, 32 reaching the sink, zero failures, `flush()` True.
+
+    This project has already had one span-queue overflow silently discard audit spans (see
+    `gateway.py`, where a single `edgar.recent_filings` call produced 15,000 of them), so "the
+    exporter reported no failures" is not the same claim as "the audit trail arrived".
+    """
+
+    def __init__(self, inner: SpanProcessor) -> None:
+        self._inner = inner
+        self.ended = 0
+
+    def on_start(self, span, parent_context=None) -> None:
+        self._inner.on_start(span, parent_context)
+
+    def on_end(self, span) -> None:
+        self.ended += 1
+        self._inner.on_end(span)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self._inner.force_flush(timeout_millis)
 
 
 class _CountingExporter(SpanExporter):
@@ -76,6 +107,7 @@ class _CountingExporter(SpanExporter):
 
 #: The wrapper around whichever exporter is live, and where it sends. `None` until configured.
 _exporter: _CountingExporter | None = None
+_processor: _CountingProcessor | None = None
 _target: str = "none"
 
 
@@ -124,8 +156,8 @@ def configure_tracing(*, console: bool = False) -> None:
     )
     provider = TracerProvider(resource=resource)
 
-    global _exporter, _target
-    _exporter, _target = None, "none"
+    global _exporter, _processor, _target
+    _exporter, _processor, _target = None, None, "none"
     if s.enable_tracing and not console:
         try:
             _exporter = _CountingExporter(_otlp_exporter())
@@ -142,7 +174,8 @@ def configure_tracing(*, console: bool = False) -> None:
         # still reporting success is how "the trace is in Cloud Trace" became unfalsifiable.
         _exporter = _CountingExporter(ConsoleSpanExporter())
         _target = "console"
-    provider.add_span_processor(BatchSpanProcessor(_exporter))
+    _processor = _CountingProcessor(BatchSpanProcessor(_exporter))
+    provider.add_span_processor(_processor)
 
     trace.set_tracer_provider(provider)
     _configured = True
@@ -184,16 +217,20 @@ def flush(timeout_millis: int = 12_000) -> bool:
     caller flushes inside the request, while CPU is still allocated.
 
     The return value deliberately does **not** come from `force_flush`, which returns True even
-    when every export raised and even when spans were dropped on queue overflow -- see
-    `_CountingExporter`. It is the conjunction of three things: the flush completed, the live
-    exporter recorded no failures, and that exporter is the Cloud Trace one rather than the
-    console fallback.
+    when every export raised and even when spans were dropped on queue overflow. It is the
+    conjunction of four things: the flush completed, no export failed, **every span that ended
+    was exported**, and the live exporter is the Cloud Trace one rather than the console fallback.
+
+    The third conjunct is the one that took two attempts. Counting export failures does not
+    detect a drop, because a dropped span is never handed to the exporter at all -- measured, 50
+    spans created, 32 delivered, zero failures. Comparing cumulative counts also removes the need
+    to snapshot failures around the flush, which was blind to a batch the background worker had
+    already lost earlier in the same request.
     """
     provider = trace.get_tracer_provider()
     force_flush = getattr(provider, "force_flush", None)
-    if force_flush is None or _exporter is None:  # tracing never configured
+    if force_flush is None or _exporter is None or _processor is None:  # never configured
         return False
-    before = _exporter.failures
     try:
         completed = bool(force_flush(timeout_millis))
     except Exception as exc:  # noqa: BLE001
@@ -201,7 +238,19 @@ def flush(timeout_millis: int = 12_000) -> bool:
         # unexported span means for its own contract.
         logger.warning("span flush failed (%s)", exc)
         return False
-    return completed and _exporter.failures == before and _target == "cloud-trace"
+
+    lost = _processor.ended - _exporter.exported
+    if lost > 0:
+        logger.error(
+            "audit spans lost: %d ended, %d exported (%d unaccounted)",
+            _processor.ended, _exporter.exported, lost,
+        )
+    return (
+        completed
+        and _exporter.failures == 0
+        and lost <= 0
+        and _target == "cloud-trace"
+    )
 
 
 def _flatten(value: Any) -> Any:

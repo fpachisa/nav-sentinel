@@ -70,8 +70,14 @@ def restore_decision_log(decisions: list[PolicyDecision]) -> None:
     For self-tests and probes, which necessarily exercise real policy paths and would otherwise
     leave fabricated ALLOW/DENY records -- attributed to a real published agent -- in the log the
     exception console renders as the governance trail.
+
+    Mutates the list in place rather than rebinding the ContextVar. Rebinding only replaced this
+    context's view: when the list object is shared with an outer context -- which is the whole
+    point of the sharing property documented above, and what S3's fan-out will rely on -- the
+    fabricated records survived in the parent while the child's own view looked clean.
     """
-    _decision_log.set(list(decisions))
+    current = _log()
+    current[:] = list(decisions)
 
 
 def _record(decision: PolicyDecision) -> PolicyDecision:

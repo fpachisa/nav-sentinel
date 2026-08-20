@@ -61,7 +61,7 @@ gcloud run deploy "$SERVICE" \
   --project "$PROJECT" \
   --service-account "$RUNTIME_SA" \
   --no-allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,NAV_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,NAV_APPROVALS=firestore,NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
+  --update-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,NAV_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,NAV_APPROVALS=firestore,NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
   --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \
@@ -69,8 +69,13 @@ URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PR
 echo "  ${URL}"
 
 say "Audience"
-# The handler checks the token audience, which is only knowable after the URL exists, so it lands
-# in a second revision. That used to mean the first revision served with audience verification
+# `--update-env-vars` above, not `--set-env-vars`: set removes every existing variable first, so
+# each *redeploy* shipped a revision with NAV_PUSH_AUDIENCE stripped while the previous deploy's
+# subscription was live and pushing. Every push in that window fails closed with 500, and with
+# --max-delivery-attempts 5 a retrying message can exhaust its attempts and dead-letter.
+#
+# The handler checks the token audience, which is only knowable after the URL exists, so on a
+# first deploy it lands in a second revision. That used to mean the first revision served with audience verification
 # silently disabled -- `audience=PUSH_AUDIENCE or None` skips the check entirely. The handler now
 # refuses with 500 when either push variable is unset, so the window between these two revisions
 # fails closed rather than accepting any Google-signed token. The subscription is created after
@@ -93,8 +98,11 @@ PUBSUB_AGENT="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
 gcloud pubsub topics describe "$DLQ_TOPIC" --project "$PROJECT" >/dev/null 2>&1 \
   || gcloud pubsub topics create "$DLQ_TOPIC" --project "$PROJECT" >/dev/null
 
-# A dead-letter policy needs the Pub/Sub service agent to publish to the DLQ and to acknowledge on
-# the source subscription. Without both grants the policy is rejected.
+# A dead-letter policy needs the Pub/Sub service agent to publish to the DLQ, and to acknowledge on
+# the source subscription so it can remove the message it forwarded. The subscriber grant is
+# applied after the subscription exists, below -- an earlier comment here claimed both were
+# required before the policy would be accepted, which cannot be true of a grant on a subscription
+# the create call is what brings into existence.
 gcloud pubsub topics add-iam-policy-binding "$DLQ_TOPIC" --project "$PROJECT" \
   --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.publisher >/dev/null
 
@@ -120,6 +128,15 @@ fi
 
 gcloud pubsub subscriptions add-iam-policy-binding nav-exceptions-push --project "$PROJECT" \
   --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.subscriber >/dev/null
+
+# A dead-letter topic with no subscription discards on arrival, which is the same outcome as
+# having no dead-letter policy while looking like diligence. This pull subscription retains
+# failed messages for inspection; nothing consumes it automatically, by design -- a message that
+# defeated five delivery attempts wants a human, not another retry.
+gcloud pubsub subscriptions describe nav-exceptions-dlq-hold --project "$PROJECT" >/dev/null 2>&1 \
+  || gcloud pubsub subscriptions create nav-exceptions-dlq-hold \
+       --topic "$DLQ_TOPIC" --project "$PROJECT" \
+       --message-retention-duration 7d --expiration-period never >/dev/null
 
 say "Done"
 echo "Service : ${URL}"

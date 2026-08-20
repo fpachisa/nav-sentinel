@@ -99,7 +99,14 @@ class CorporateActionRecord(BaseModel):
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     #: Where this came from, so a verdict can cite it. A URI, not the document, and constrained
     #: to an https URL so it cannot smuggle prose either.
-    source_uri: str | None = Field(default=None, max_length=300, pattern=r"^https://\\S+$")
+    # `r"^https://\\S+$"` -- what this was -- is `https://` followed by a literal backslash and one
+    # or more literal `S`, so it accepted no URI at all. Every fixture path happened to leave the
+    # field None, and the quarantine test asserts a pattern *exists* rather than that it matches,
+    # so 221 passing tests never once set a source_uri. `fixture` is admitted because the offline
+    # corporate-action notices are served from a cassette, not fetched.
+    source_uri: str | None = Field(
+        default=None, max_length=300, pattern=r"^(?:https|fixture)://\S+$"
+    )
 
     @property
     def net_rate(self) -> Decimal | None:

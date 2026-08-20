@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from nav_sentinel import server
-from nav_sentinel.control_plane import model_armor
+from nav_sentinel.control_plane import gateway, identity, model_armor
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = (ROOT / "infra" / "deploy.sh").read_text()
@@ -193,6 +193,29 @@ class TestUndeliverableMessagesAreNotRetriedForever:
         )
         assert response.status_code == 204
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "[1, 2]",              # valid JSON, not subscriptable
+            '"hello"',
+            "5",
+            "true",
+            "null",
+            '{"as_of": 5}',        # subscriptable, but fromisoformat needs a str
+            '{"as_of": null}',
+            '{"as_of": ["2026-08-17"]}',
+        ],
+    )
+    def test_a_malformed_payload_is_acknowledged_not_retried(self, body):
+        """Each of these returned 500 and was redelivered forever -- the same defect class the
+        204 design exists to prevent, feeding a dead-letter topic nothing reads. The parse guard
+        caught only binascii/Unicode/JSONDecodeError, and every case here raises TypeError."""
+        envelope = _envelope(raw=base64.b64encode(body.encode()).decode())
+        response = TestClient(server.app).post(
+            "/pubsub/exceptions", json=envelope, headers={"Authorization": "Bearer x"}
+        )
+        assert response.status_code == 204, body
+
     def test_a_valid_but_unknown_cycle_is_acknowledged_not_retried(self):
         """`2020-01-01` parses fine and has no NAV record, so the cycle raised, the response was a
         500, and Pub/Sub redelivered it forever -- the exact outcome the 204 design exists to
@@ -345,16 +368,22 @@ class TestTheServiceConfiguresItself:
     configures the registry, so `/readyz` passing proves nothing about the app's wiring -- these
     exercise the app's lifespan directly."""
 
-    def test_startup_registers_the_processes(self):
+    def test_startup_registers_the_processes(self, monkeypatch):
         """Runs the *real* `configure()` through the app's own lifespan after a reset.
 
-        The earlier version of this test monkeypatched `configure` to a no-op and asserted it had
-        been called, so it would still have passed in the failure mode it was written for -- a
-        manifest relocation making the real `configure()` raise, which has already shipped twice.
+        The earlier version monkeypatched `configure` to a no-op and asserted it had been called,
+        so it would still have passed in the failure mode it was written for -- a manifest
+        relocation making the real `configure()` raise, which has already shipped twice.
+
+        `NAV_APPROVALS=memory` is set deliberately. Without it the real lifespan builds a Firestore
+        client, which calls `google.auth.default()`, so this test required live credentials and
+        `make test` no longer ran with the network unreachable. The approvals backend is not what
+        this test is about; the test below covers the deployed default.
         """
         from nav_sentinel import composition
         from nav_sentinel.control_plane import packs
 
+        monkeypatch.setenv("NAV_APPROVALS", "memory")
         composition.reset()
         assert not packs.registered(), "reset left processes registered; the test proves nothing"
         try:
@@ -472,12 +501,60 @@ class TestTheSelfTestProvesReachabilityHonestly:
     def test_the_probe_does_not_leave_governance_records_behind(self, monkeypatch):
         """`admit_untrusted_content` records ALLOW/DENY against a real published agent, so an
         unguarded self-test let any caller manufacture governance-log entries reading as a genuine
-        injection attempt on SEC content. The log is snapshotted and restored."""
-        from nav_sentinel.control_plane import gateway as gw
+        injection attempt on SEC content.
 
+        The stub must therefore *record a decision*. An earlier version stubbed it with a function
+        that recorded nothing, so the log was never polluted and the test passed with
+        `restore_decision_log` replaced by a complete no-op -- it could not detect the removal of
+        the fix it is named for.
+        """
+        from nav_sentinel.control_plane import gateway as gw
+        from nav_sentinel.control_plane import model_armor
+        from nav_sentinel.control_plane.policies import Effect, PolicyDecision
+
+        def polluting_admit(text, *, source_uri=None):
+            gw._record(
+                PolicyDecision(
+                    effect=Effect.ALLOW,
+                    policy_id="P-005-UNTRUSTED-INGEST",
+                    reason="fabricated by the probe",
+                    agent_ref="corporate-actions-investigator@2.1.0",
+                    resource=source_uri or "",
+                )
+            )
+            if "IGNORE ALL PREVIOUS" in text:
+                raise model_armor.ContentBlocked(
+                    model_armor.ArmorVerdict(
+                        blocked=True,
+                        verdict="MATCH_FOUND",
+                        matched_filters=(model_armor.PRIMARY_FILTER,),
+                    ),
+                    source_uri,
+                )
+            return text
+
+        gw.clear_decision_log()
+        with identity.acting_as("triage-agent"):
+            gateway.call_tool("registry.coverage")
         before = gw.decision_log()
-        self._run(monkeypatch)
-        assert gw.decision_log() == before
+        assert before, "nothing in the log, so the test could not detect pollution"
+
+        monkeypatch.setattr(server.gateway, "admit_untrusted_content", polluting_admit)
+        monkeypatch.setattr(server.telemetry, "flush", lambda *a, **k: True)
+        from nav_sentinel import compliance
+
+        class Probe:
+            requested = returned_version = "gemini-3.7-flash"
+            location, trace_id, ok = "global", "abc", True
+
+        async def fake_probe(_m):
+            return Probe()
+
+        monkeypatch.setattr(compliance, "probe_async", fake_probe)
+
+        body = TestClient(server.app).get("/selftest").json()
+        assert body["model_armor"]["injection_denied"] is True, "the probe never ran"
+        assert gw.decision_log() == before, "the self-test left fabricated governance records"
 
     def test_the_probe_source_is_not_a_real_regulator_domain(self):
         """The probe once cited https://www.sec.gov/selftest, so a fabricated record named the SEC
@@ -497,6 +574,25 @@ class TestTheSelfTestProvesReachabilityHonestly:
         assert "without human review" in text
 
 
+class _Sink:
+    """A span exporter that succeeds and remembers what it was given."""
+
+    def __init__(self) -> None:
+        self.spans: list = []
+
+    def export(self, spans):
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        self.spans.extend(spans)
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return True
+
+
 class TestTheFlushSignalCannotLie:
     """`BatchSpanProcessor.force_flush` returns True unconditionally -- it calls `_export`, which
     catches every exporter exception, then returns True regardless; its timeout argument carries a
@@ -504,22 +600,39 @@ class TestTheFlushSignalCannotLie:
     cannot distinguish a delivered audit trail from a lost one, which is the only thing this
     project needs it to distinguish."""
 
-    @staticmethod
-    def _install(exporter, target):
+    @pytest.fixture
+    def install(self, monkeypatch):
+        """Wire a provider whose exporter we control, and put the globals back afterwards.
+
+        A fixture rather than a plain helper because the previous version assigned
+        `telemetry._exporter` / `_target` with no cleanup, so the values leaked to the end of the
+        session and later tests' flush results depended on class ordering -- the same
+        unfalsifiability shape, inside the suite.
+        """
+        from opentelemetry import trace as ot
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         from nav_sentinel.control_plane import telemetry
 
-        telemetry._exporter = telemetry._CountingExporter(exporter)
-        telemetry._target = target
-        provider = TracerProvider()
-        provider.add_span_processor(BatchSpanProcessor(telemetry._exporter))
-        # Deliberately not installed globally: OTel refuses to replace an existing provider, and
-        # the session fixture already set one. Callers point `get_tracer_provider` at this one.
-        with provider.get_tracer("t").start_as_current_span("s"):
-            pass
-        return provider
+        def _install(exporter, target, *, spans=1, **batch):
+            monkeypatch.setattr(telemetry, "_exporter", telemetry._CountingExporter(exporter))
+            monkeypatch.setattr(telemetry, "_target", target)
+            monkeypatch.setattr(
+                telemetry,
+                "_processor",
+                telemetry._CountingProcessor(BatchSpanProcessor(telemetry._exporter, **batch)),
+            )
+            provider = TracerProvider()
+            provider.add_span_processor(telemetry._processor)
+            tracer = provider.get_tracer("t")
+            for i in range(spans):
+                with tracer.start_as_current_span(f"s{i}"):
+                    pass
+            monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+            return provider
+
+        return _install
 
     def test_the_raw_sdk_signal_really_is_unconditional(self):
         """The premise, pinned. If a future SDK fixes this, the wrapper becomes redundant rather
@@ -540,8 +653,7 @@ class TestTheFlushSignalCannotLie:
             pass
         assert provider.force_flush(2000) is True
 
-    def test_a_failing_export_reports_false(self, monkeypatch):
-        from opentelemetry import trace as ot
+    def test_a_failing_export_reports_false(self, install):
         from opentelemetry.sdk.trace.export import SpanExporter
 
         from nav_sentinel.control_plane import telemetry
@@ -553,46 +665,37 @@ class TestTheFlushSignalCannotLie:
             def shutdown(self):
                 pass
 
-        provider = self._install(Boom(), "cloud-trace")
-        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        install(Boom(), "cloud-trace")
         assert telemetry.flush(2000) is False
 
-    def test_a_successful_export_to_cloud_trace_reports_true(self, monkeypatch):
-        from opentelemetry import trace as ot
-        from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
-
+    def test_a_successful_export_to_cloud_trace_reports_true(self, install):
         from nav_sentinel.control_plane import telemetry
 
-        class Fine(SpanExporter):
-            def export(self, spans):
-                return SpanExportResult.SUCCESS
-
-            def shutdown(self):
-                pass
-
-        provider = self._install(Fine(), "cloud-trace")
-        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        install(_Sink(), "cloud-trace")
         assert telemetry.flush(2000) is True
 
-    def test_the_console_fallback_is_not_reported_as_cloud_trace(self, monkeypatch):
+    def test_the_console_fallback_is_not_reported_as_cloud_trace(self, install):
         """Console export succeeds perfectly while putting nothing in Cloud Trace, and S7a exists
-        to prove spans reach Cloud Trace. Reporting success here is how that became unfalsifiable."""
-        from opentelemetry import trace as ot
-        from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
-
+        to prove spans reach Cloud Trace. Reporting success here is how that became
+        unfalsifiable."""
         from nav_sentinel.control_plane import telemetry
 
-        class Fine(SpanExporter):
-            def export(self, spans):
-                return SpanExportResult.SUCCESS
-
-            def shutdown(self):
-                pass
-
-        provider = self._install(Fine(), "console")
-        monkeypatch.setattr(ot, "get_tracer_provider", lambda: provider)
+        install(_Sink(), "console")
         assert telemetry.flush(2000) is False
         assert telemetry.export_target() == "console"
+
+    def test_spans_dropped_on_a_full_queue_are_detected(self, install):
+        """The defect the first fix missed. A dropped span is never handed to the exporter, so
+        counting export failures cannot see it: measured, 50 created, 32 delivered, zero failures,
+        flush() True. The signal now compares spans ended against spans exported."""
+        from nav_sentinel.control_plane import telemetry
+
+        sink = _Sink()
+        install(sink, "cloud-trace", spans=50, max_queue_size=8, max_export_batch_size=4)
+        result = telemetry.flush(4000)
+        assert telemetry._processor.ended == 50
+        assert telemetry._exporter.exported < 50, "no drop occurred; the test proves nothing"
+        assert result is False, "spans were lost and flush() still reported success"
 
 
 class TestTheGovernanceLogSurvivesConcurrency:

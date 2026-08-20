@@ -85,7 +85,10 @@ def _configure_logging() -> None:
     handler.setFormatter(CloudRunJson())
     handler._nav_sentinel = True  # type: ignore[attr-defined]
     root = logging.getLogger()
-    root.handlers = [handler]
+    # Added, not assigned. Replacing the list destroyed pytest's session-level log handlers
+    # mid-run, which would silently stop --log-file for the rest of the session; the guard above
+    # already prevents duplicate handlers on a second call.
+    root.addHandler(handler)
     root.setLevel(logging.INFO)
 
 
@@ -227,7 +230,16 @@ def handle_exception(envelope: PubSubEnvelope, claims: dict = Depends(verify_pus
     raw = envelope.message.data or ""
     try:
         payload = json.loads(base64.b64decode(raw)) if raw else {}
-    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        if not isinstance(payload, dict):
+            # `[1,2]`, `"hello"`, `5`, `true` and `null` are all valid JSON and none is
+            # subscriptable, so `payload["as_of"]` raised TypeError -- which was not in the caught
+            # tuple below. Eight such bodies returned 500 and were redelivered forever, the exact
+            # defect this handler's 204 design exists to prevent, now feeding a dead-letter topic
+            # nothing reads.
+            raise TypeError(f"payload is {type(payload).__name__}, not an object")
+    except (
+        binascii.Error, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError
+    ) as exc:
         # Unparseable: acknowledge and record, do not retry forever.
         logger.error(
             "outcome=undeliverable reason=unparseable message=%s: %s",
@@ -238,7 +250,9 @@ def handle_exception(envelope: PubSubEnvelope, claims: dict = Depends(verify_pus
 
     try:
         as_of = date.fromisoformat(payload["as_of"])
-    except (KeyError, ValueError):
+    except (KeyError, TypeError, ValueError):
+        # TypeError covers `{"as_of": 5}`, `{"as_of": null}` and `{"as_of": ["2026-08-17"]}`:
+        # fromisoformat requires a str, and a non-str argument is undeliverable, not transient.
         logger.error(
             "outcome=undeliverable reason=no_valid_as_of message=%s", envelope.message.messageId
         )
