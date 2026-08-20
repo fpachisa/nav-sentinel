@@ -16,7 +16,12 @@ from decimal import Decimal
 from typing import Any
 
 from nav_sentinel.control_plane import identity, packs, policies, telemetry
+from nav_sentinel.control_plane.extraction import ExtractionRejected
 from nav_sentinel.control_plane.governance import CaseFacts
+
+# The exception only. `model_armor` defers the Google SDK import into its own
+# functions, so naming it here costs nothing at import time.
+from nav_sentinel.control_plane.model_armor import ContentBlocked
 from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
 
 
@@ -171,9 +176,16 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
     ):
         try:
             result = spec.fn(*args, **kwargs)
-        except PolicyViolation:
+        except (PolicyViolation, ContentUnscreenable):
             # A denial raised from inside a tool is still a denial. Never reclassify it as a tool
             # failure: an agent's refusal path treats the two completely differently.
+            raise
+        except (ContentBlocked, ExtractionRejected):
+            # A control refusing is the control working, not a malfunction. Wrapping these made
+            # "Model Armor caught an injection in this filing" and "the extractor rejected a
+            # document whose withholding contradicts the treaty schedule" both read as "the tool
+            # crashed" -- and those two findings are the most important things the
+            # corporate-action path reports.
             raise
         except Exception as exc:
             # Translated, so an agent never needs to import a tool module to know what can go

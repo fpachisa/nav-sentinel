@@ -238,13 +238,19 @@ def build(
         def wrapper(**kwargs: Any) -> Any:
             try:
                 return _invoke(**kwargs)
-            except (ToolBudgetExhausted, ValueError) as exc:
+            except (ToolBudgetExhausted, ValueError, gateway.ToolFailed) as exc:
                 # Returned, not raised. ADK re-raises a tool exception out of `runner.run_async`
                 # unless a callback handles it, so a budget message written as an instruction to
                 # the model -- "state what you concluded, or return UNKNOWN" -- was undeliverable,
                 # and a coercion error the model was meant to fix on its next turn was a stack
                 # trace instead. `{"error": ...}` is ADK's own convention and its
                 # `_detect_error_in_response` already recognises it.
+                #
+                # `ToolFailed` is included: "no notice is recorded for that date" is something the
+                # model can act on, and letting it propagate made ADK log a full traceback for an
+                # ordinary negative result. A control *refusing* -- ContentBlocked,
+                # ExtractionRejected -- is deliberately absent, because those must reach the
+                # investigator's refusal path as themselves.
                 logger.info("%s returned an error to the model: %s", name, exc)
                 return {"error": str(exc)}
 

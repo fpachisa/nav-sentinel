@@ -1,0 +1,21 @@
+{
+  "note": "Corporate-action notices, committed so the fleet runs offline. The documents are authored fixtures standing in for the EDGAR paths named here: the poisoned variant must contain an injection we control, which no real filing does. Regenerate with `make fixtures`.",
+  "notices": {
+    "US02319V1035|2026-07-17": {
+      "document": "ca_notice_abev_july.txt",
+      "source_uri": "https://www.sec.gov/Archives/edgar/data/1565025/abev-20260717.txt"
+    },
+    "US02319V1035|2026-08-17": {
+      "document": "ca_notice_abev_clean.txt",
+      "source_uri": "https://www.sec.gov/Archives/edgar/data/1565025/abev-20260817.txt"
+    },
+    "US02319V1035|2026-08-18": {
+      "document": "ca_notice_abev_poisoned.txt",
+      "source_uri": "https://www.sec.gov/Archives/edgar/data/1565025/abev-20260818.txt"
+    },
+    "US5949181045|2026-08-17": {
+      "document": "ca_notice_msft_split.txt",
+      "source_uri": "https://www.sec.gov/Archives/edgar/data/789019/msft-20260817.txt"
+    }
+  }
+}

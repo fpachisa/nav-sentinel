@@ -55,15 +55,21 @@ PACK = ProcessPack(
     # a rate belongs to and the date it was applied on. A verdict naming the rate alone has not
     # identified the break, which is why the acceptance criterion names both.
     #
-    # `nav.corporate_action` will require the withholding and gross-rate facts, and lands with the
-    # tool that produces them rather than now: declaring it early was refused by the validator,
-    # because a rule no tool can satisfy denies every verdict for that capability while reading as
-    # a control. That refusal is the validator working, so it is recorded rather than worked around.
+    # `nav.corporate_action` -> the filing it was read from. The golden's `evidence_must_cite`
+    # names `filing` for both corporate-action scenarios, and it is the right minimum: a verdict
+    # about a dividend or a split that cannot say which document it read has not shown its working.
+    #
+    # Deliberately not also `gross_rate`. A split notice states no rate, so requiring one would
+    # deny every split verdict -- and the whole reason this requirement is declared per capability
+    # rather than per scenario is that it has to hold for every case of that capability.
     #
     # `nav.settlement` mandates nothing: a trade-date versus settlement-date break is decided
     # entirely by our own trade records, and inventing a requirement for it would make the rule
     # decorative.
-    evidence_requirements=(("nav.fx_rate", ("rate", "rate_date")),),
+    evidence_requirements=(
+        ("nav.fx_rate", ("rate", "rate_date")),
+        ("nav.corporate_action", ("filing",)),
+    ),
     thresholds=(BPS_THRESHOLDS,),
     control_total_unit="base currency",
     notes=(

@@ -2,18 +2,41 @@ agent_id: corporate-actions-investigator
 version: 2.1.0
 display_name: Corporate Actions Investigator
 owner: fund-accounting-platform
+# The description is the investigator's brief: it is assembled straight into the prompt, so
+# anything the agent needs to know about how this process's breaks present belongs here rather
+# than hardcoded in the agent module. That is what keeps one generic investigator able to serve
+# every capability.
 description: >
   Resolves breaks caused by corporate action processing: dividends (including gross-versus-net
-  withholding on depositary receipts), share splits, spin-offs and mergers. Reads issuer
-  filings from SEC EDGAR.
+  withholding on depositary receipts), share splits, spin-offs and mergers.
+
+  Cash breaks arrive as an aggregate balance difference and carry no security identifier, so your
+  first task is to work out which holding the break belongs to. List the accounting cash movements
+  for the valuation date, find the ones whose type and amount could explain the difference, then
+  match them to a holding via the positions. Only then read that security's notice.
+
+  A dividend on a depositary receipt is the common case: the accounting book often recognises the
+  gross rate as cash received while the custodian credits the net, after withholding at the
+  issuer's domicile rate. The difference is the withholding, and whether it is an expense or a
+  receivable depends on whether the treaty allows reclaim.
+
+  A share split shows as a quantity difference with market value agreeing exactly. There is no
+  cash and no value change; the stock record needs restating.
 
 handles_capabilities: [nav.corporate_action]
 model: gemini-3.7-flash
 
+# All three `edgar` tools are gone, and this is the substantive change of S1.3 rather than a
+# tidy-up. `edgar.fetch_filing_text` returns attacker-controllable prose; `recent_filings` and
+# `search_filings` return filer-authored `issuer` and `description` fields. Any of them puts text
+# an outsider wrote into the context of the one agent with `untrusted_inputs: true`, leaving Model
+# Armor as the only barrier -- and that filter was measured missing the same injection 0 of 8
+# times beside one particular filing paragraph.
+#
+# `corporate_action.notice_for` screens, parses behind the quarantine and cross-checks against the
+# books, then returns a typed record. There is no field in it wide enough to carry an instruction.
 allowed_tools:
-  - edgar.recent_filings
-  - edgar.search_filings
-  - edgar.fetch_filing_text
+  - corporate_action.notice_for
   - books_and_records.positions
   - books_and_records.security
   - books_and_records.cash_movements

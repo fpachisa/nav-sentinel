@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from nav_sentinel.control_plane.packs import ToolSpec
 from nav_sentinel.tools import books_and_records as bnr
-from nav_sentinel.tools import ecb_fx, edgar
+from nav_sentinel.tools import corporate_action, ecb_fx, edgar
 
 # --- what each tool lets a verdict cite -----------------------------------------------------
 #
@@ -74,6 +74,25 @@ def _observe_nav_record(result, _args) -> dict:
         "as_of": getattr(result, "as_of", None),
         "amount": getattr(result, "net_assets", None),
     }
+
+
+def _observe_notice(result, _args) -> dict:
+    """Which filing, and the figures it states. `filing` is a citable fact because the golden's
+    `evidence_must_cite` names it: for a corporate action, *which document you read* is the first
+    thing a reviewer asks."""
+    if not result:
+        return {}
+    return {
+        "filing": result.get("filing"),
+        "gross_rate": result.get("gross_rate"),
+        "withholding_pct": result.get("withholding_pct"),
+        "split_ratio": result.get("split_ratio"),
+        "currency": result.get("currency"),
+    }
+
+
+def _notice_uri(result) -> str | None:
+    return result.get("source_uri") if isinstance(result, dict) else None
 
 
 def _filing_uri(result) -> str | None:
@@ -175,6 +194,23 @@ NAV_TOOLS: tuple[ToolSpec, ...] = (
              uri_template=_BOOKS_URI_NO_SOURCE,
              description="Trades in one security for one fund, by ISIN. Narrower than `trades` "
                          "and the right call when investigating a single holding."),
+
+    # --- corporate actions: the only route to a filing an investigator may take -----------
+    #
+    # `untrusted_output=False` because what this returns is a typed projection of a
+    # `CorporateActionRecord`, not text: declaring it untrusted raises `ContentUnscreenable`,
+    # since a record cannot be screened as a string. The screening happens *inside* the tool,
+    # through the gateway, against the raw document -- so a P-005 decision is still recorded, and
+    # `test_the_notice_path_records_a_screening_decision` fails if that is ever dropped.
+    ToolSpec("corporate_action.notice_for", corporate_action.notice_for,
+             ("securities", "positions", "cash_movements"),
+             observe=_observe_notice,
+             facts=("filing", "gross_rate", "withholding_pct", "split_ratio", "currency"),
+             source=_EDGAR, locate=_notice_uri,
+             description="The corporate-action notice for a security on a date -- action type, "
+                         "ex-date, gross rate, withholding percentage and split ratio -- already "
+                         "screened, parsed and cross-checked against the books. This is the only "
+                         "way to read a filing: the raw document never reaches you."),
 
     # --- third-party filings: free text, authored by someone else -------------------------
     # Metadata, but still filer-authored: `issuer` comes from the filing's own name and

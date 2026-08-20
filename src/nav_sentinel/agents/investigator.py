@@ -20,10 +20,16 @@ belongs. Evidentiary failures become a verdict that asserts nothing and routes t
 denied a tool it must never call" into ordinary-looking uncertainty.
 
 **The model's schema is permissive; validation happens here.** ADK validates `output_schema` inside
-the runner, and a cross-field rule ("evidence unless UNKNOWN") raises there -- unrecoverable, and
-it would surface as a framework error rather than a bad answer. So the schema ADK sees accepts
-shapes `Verdict` rejects, and the strict version is constructed afterwards, with one bounded repair
-attempt.
+the runner, and a cross-field rule ("evidence unless UNKNOWN") raises there -- unrecoverable, and it
+would surface as a framework error rather than a bad answer. So the schema ADK sees accepts shapes
+`Verdict` rejects, and the strict version is constructed afterwards.
+
+There is **no repair retry**, and an earlier version of this docstring claimed one. A reply that
+does not parse becomes a refusal with `reason="the investigator's answer could not be parsed"` --
+distinct from an evidence refusal, because "the model returned prose" and "the filing was blocked"
+are different findings and collapsing them would hide the first. A second model call to fix a
+malformed answer costs a call for marginal gain when the fallback is already a clean, honest
+refusal; if measurement later shows malformed replies are common, that is the point to add one.
 """
 
 from __future__ import annotations
@@ -72,6 +78,10 @@ EVIDENCE_FAILURES = (
     ToolFailed,
     ValidationError,
 )
+
+
+class UnparseableAnswer(RuntimeError):
+    """The model's reply was empty or not in the requested shape."""
 
 
 class VerdictDraft(BaseModel):
@@ -202,6 +212,17 @@ async def investigate(
             try:
                 draft = await _run(agent, case)
                 verdict = _finalise(draft, case, capability, store)
+            except UnparseableAnswer as exc:
+                logger.warning("%s returned an unusable answer on %s: %s",
+                               manifest.ref, case.case_id, exc)
+                span.set_attribute("nav.verdict.unparseable", True)
+                return (
+                    refusal(
+                        case.case_id, capability,
+                        reason=f"the investigator's answer could not be parsed: {exc}",
+                    ),
+                    store,
+                )
             except EVIDENCE_FAILURES as exc:
                 # Evidence refused, not a governance denial. The distinction is the point: this is
                 # "I could not establish anything", not "this agent was stopped".
@@ -240,7 +261,15 @@ async def _run(agent, case: ExceptionCase) -> VerdictDraft:
             for part in event.content.parts:
                 if part.text:
                     reply = part.text
-    return VerdictDraft.model_validate_json(reply) if reply.strip() else VerdictDraft()
+    if not reply.strip():
+        raise UnparseableAnswer("the investigator returned nothing")
+    try:
+        return VerdictDraft.model_validate_json(reply)
+    except ValidationError as exc:
+        # Distinct from an evidence failure. Reported as what it is: the model did not answer in
+        # the shape it was asked for. Lumping it in with ContentBlocked would make "the filing was
+        # blocked" and "the model wrote prose" the same finding.
+        raise UnparseableAnswer(f"reply was not a valid verdict: {str(exc)[:200]}") from exc
 
 
 def _finalise(

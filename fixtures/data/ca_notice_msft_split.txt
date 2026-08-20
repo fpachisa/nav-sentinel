@@ -1,0 +1,16 @@
+CORPORATE ACTION NOTICE
+Issuer:            Microsoft Corporation
+Security:          Microsoft Corporation Common Stock
+ISIN:              US5949181045
+Event Type:        Stock Split
+Ex-Date:           2026-08-17
+Record Date:       2026-08-14
+Pay Date:          2026-08-17
+Split Ratio:       2 : 1
+Old Par Value:     USD 0.00000625 per share
+New Par Value:     USD 0.000003125 per share
+Depositary:        n/a
+
+Each holder of record will receive one additional common share for every share held.
+The market price will adjust proportionately on the ex-date. Holdings must be restated
+in the stock record; no cash is payable and no market value arises from this event.

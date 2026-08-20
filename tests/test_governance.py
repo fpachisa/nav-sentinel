@@ -304,12 +304,19 @@ class TestUntrustedOutputScreening:
         decision log, not only as an exception on a trace."""
         from nav_sentinel.control_plane import model_armor
 
+        # `corporate_action.notice_for` rather than an `edgar` tool: all three came off the
+        # corporate-actions manifest in S1.3, so calling one is now denied by P-001 before
+        # screening is ever reached -- and this test is about screening.
         spec = packs.ToolSpec(
-            "edgar.fetch_filing_text", lambda *a, **k: poison, (), untrusted_output=True
+            "corporate_action.notice_for", lambda *a, **k: poison, (),
+            untrusted_output=True, source="sec_edgar",
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
+        with (
+            packs.override("corporate_action.notice_for", spec),
+            identity.acting_as("corporate-actions-investigator"),
+        ):
             with pytest.raises(model_armor.ContentBlocked):
-                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+                gateway.call_tool("corporate_action.notice_for", isin="US02319V1035")
 
         denials = [d for d in gateway.decision_log()
                    if d.effect.value == "deny" and d.policy_id == "P-005-UNTRUSTED-INGEST"]
@@ -325,12 +332,15 @@ class TestUntrustedOutputScreening:
         payloads = {"dict": {"body": poison}, "list": [poison],
                     "nested": {"hits": [{"description": poison}]}}
         spec = packs.ToolSpec(
-            "edgar.fetch_filing_text", lambda *a, **k: payloads[shape], (),
-            untrusted_output=True,
+            "corporate_action.notice_for", lambda *a, **k: payloads[shape], (),
+            untrusted_output=True, source="sec_edgar",
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
+        with (
+            packs.override("corporate_action.notice_for", spec),
+            identity.acting_as("corporate-actions-investigator"),
+        ):
             with pytest.raises(model_armor.ContentBlocked):
-                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+                gateway.call_tool("corporate_action.notice_for", isin="US02319V1035")
 
     def test_unscreenable_return_type_is_refused(self, stub_armor):
         """Fail closed: a control that ignores what it cannot inspect is not a control."""
@@ -338,11 +348,15 @@ class TestUntrustedOutputScreening:
             pass
 
         spec = packs.ToolSpec(
-            "edgar.fetch_filing_text", lambda *a, **k: Opaque(), (), untrusted_output=True
+            "corporate_action.notice_for", lambda *a, **k: Opaque(), (),
+            untrusted_output=True, source="sec_edgar",
         )
-        with packs.override("edgar.fetch_filing_text", spec), identity.acting_as("corporate-actions-investigator"):
+        with (
+            packs.override("corporate_action.notice_for", spec),
+            identity.acting_as("corporate-actions-investigator"),
+        ):
             with pytest.raises(gateway.ContentUnscreenable):
-                gateway.call_tool("edgar.fetch_filing_text", "https://sec.gov/x")
+                gateway.call_tool("corporate_action.notice_for", isin="US02319V1035")
 
     def test_screening_cannot_be_opted_out_of_by_a_manifest_flag(self, stub_armor, poison):
         """admit_untrusted_content used to take the acting manifest as an argument and return

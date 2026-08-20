@@ -158,6 +158,19 @@ def observation_id(case_id: str, tool: str, args: str, digest: str) -> str:
     return f"OBS-{hashlib.sha256(material.encode()).hexdigest()[:16]}"
 
 
+def as_text(value: object) -> str:
+    """A value rendered for a *human or a model* to read, not for hashing.
+
+    Separate from `canonical` because they need opposite things for a plain string. `canonical`
+    reprs it, so `Decimal("1.1567")` and the string `"1.1567"` digest differently -- they are
+    different values, and collapsing them would let model text match a numeric fact. But a stored
+    *fact* must not carry the quotes: `filing` came back as `"'ca_notice_abev_clean.txt'"` and
+    `currency` as `"'USD'"`, so every string-valued fact was corrupted while the FX path looked
+    correct, because `Decimal` and `date` take the isinstance branch above.
+    """
+    return value if isinstance(value, str) else canonical(value)
+
+
 def stringify(projected: Mapping[str, object]) -> dict[str, str]:
     """Reduce a process's projected facts to text, dropping what it did not observe.
 
@@ -166,7 +179,7 @@ def stringify(projected: Mapping[str, object]) -> dict[str, str]:
     domain object. A plain mapping borrowing the name would have tripped a check that is worth
     keeping strict.
     """
-    return {k: canonical(v) for k, v in projected.items() if v is not None}
+    return {k: as_text(v) for k, v in projected.items() if v is not None}
 
 
 def utcnow() -> datetime:

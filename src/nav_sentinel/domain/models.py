@@ -169,6 +169,11 @@ class ObservedFacts(BaseModel):
     gross_rate: Decimal | None = None
     withholding_pct: Decimal | None = None
     split_ratio: str | None = None
+    #: Which document the evidence was read from. A citable fact rather than mere metadata because
+    #: the golden's `evidence_must_cite` names it: for a corporate action, *which filing you read*
+    #: is the first question a reviewer asks, and a verdict that cannot answer it has not shown its
+    #: working.
+    filing: str | None = None
     quantity: Decimal | None = None
     amount: Decimal | None = None
     currency: str | None = None

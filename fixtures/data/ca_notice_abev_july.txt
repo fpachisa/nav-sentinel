@@ -1,0 +1,16 @@
+CORPORATE ACTION NOTICE
+Issuer:            Ambev S.A.
+Security:          Ambev S.A. American Depositary Shares
+ISIN:              US02319V1035
+Event Type:        Cash Dividend
+Ex-Date:           2026-07-14
+Record Date:       2026-07-15
+Pay Date:          2026-07-17
+Gross Rate:        USD 0.175000 per ADS
+Withholding Tax:   15.00% (Brazilian statutory rate, ADR holders)
+Net Rate:          USD 0.148750 per ADS
+DR Ratio:          1 ADS : 1 ordinary share
+Depositary:        The Bank of New York Mellon
+
+Holders of record on the record date will receive the net rate stated above.
+Withholding tax may be recoverable subject to applicable treaty relief.
