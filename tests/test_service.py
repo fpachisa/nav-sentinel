@@ -77,7 +77,12 @@ class TestHealthEndpoints:
         body = client.get("/readyz").json()
         assert body["status"] == "ready"
         assert "nav" in body["processes"]
-        assert body["agents"] >= 7
+        # Tied to the registry rather than a magic number. This asserted `>= 7`, which silently
+        # stopped meaning anything when two manifests were unpublished -- a floor that a shrinking
+        # fleet trips and a growing one never re-checks.
+        from nav_sentinel.registry.models import load_manifests
+
+        assert body["agents"] == len(load_manifests())
 
     def test_interactive_docs_are_disabled(self, client):
         """FastAPI serves /docs by default. A service handling fund data should not."""

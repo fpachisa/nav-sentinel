@@ -186,7 +186,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 249 invariant tests, including "no agent may post"
+make test        # 250 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -203,7 +203,7 @@ src/nav_sentinel/
   domain/          Deterministic core: tolerance rules, materiality, the NAV control total
   registry/        Agent Registry: manifests, capability discovery, publication
   control_plane/   Gateway, identity, policies, Model Armor, telemetry, case audit spans
-  agents/          The fleet: detection, triage, five investigators, remediation, approval
+  agents/          The fleet: triage, three investigators, remediation (S1 — not yet built)
   tools/           Scoped tools: ECB rates, EDGAR, books and records
   pipeline/         Async orchestration over Pub/Sub
 fixtures/          Synthetic book generator and poisoned-document fixtures
@@ -247,7 +247,7 @@ such rather than as complete.
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
 | Agent Gateway policy enforcement | works, within a stated boundary | All six policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
 | Model Armor screening | works, and is **not** the boundary | Windowed, gated on all three response fields, fails closed four distinguishable ways. Detection is content-sensitive: the same injection is caught alone and missed 0/8 beside one particular filing paragraph, so screening reduces what gets through rather than stopping it. Coverage is of two kinds — the gateway-wiring tests **stub** `model_armor.screen`, and two `live` tests exercise the real service. The boundary is the quarantined extractor, `tests/test_quarantine.py` |
-| Least-privilege IAM | **overstated, and the deployment makes it more so** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM. Cloud Run gives one identity per service, so the deployed container collapses all seven per-agent accounts into `nav-runtime` — see defect 7, now active |
+| Least-privilege IAM | **overstated, and the deployment makes it more so** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM. Cloud Run gives one identity per service, so the deployed container collapses every per-agent account into `nav-runtime` — see defect 7, now active |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
 | Memory Bank recurrence recall | not started | — |
 | Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
@@ -289,8 +289,11 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    records directly — defeating P-003 at the infra layer. **This condition is now live**, and in a
    stronger form than written: approvals moved to Firestore with the S7a deployment, and Cloud Run
    gives one identity per service, so the container runs as a single `nav-runtime` account holding
-   `datastore.user` on behalf of all seven agents. In-process the gateway still denies posting, and
-   `bootstrap.sh` still mints the seven per-agent accounts for the data-plane grants — but the
+   `datastore.user` on behalf of every agent. In-process the gateway still denies posting, and
+   `bootstrap.sh` still mints one account per **published** manifest for the data-plane grants —
+   five today, and two accounts minted before `pricing` and `cash-fees` were unpublished remain in
+   the project unused rather than being deleted, since re-publishing either would need them
+   back — but the
    *cloud* identity of a call is not per-agent, and PLAN.md's "Cloud Run (per-agent SA)" overstates
    what this slice delivers. Closing it needs either token impersonation per agent or
    collection-scoped conditions, and is not done.

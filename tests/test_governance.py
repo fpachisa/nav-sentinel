@@ -41,9 +41,39 @@ def case():
 
 
 class TestRegistry:
-    def test_every_break_category_has_an_authorised_investigator(self):
-        gaps = [cat for cat, ref in discover.coverage().items() if ref is None]
-        assert gaps == [], f"no authorised investigator for: {gaps}"
+    def test_declared_capabilities_without_an_investigator_are_exactly_the_known_gaps(self):
+        """Inverted, not deleted, and the inversion is the point.
+
+        This asserted full coverage and passed -- which read as completeness and was in fact the
+        absence of a control. Two acceptance criteria require that a break can be triaged
+        correctly and then **refused for want of an authorised investigator**: the adversarial
+        pricing case is classified `nav.pricing`, the registry reports nothing authorised to handle
+        it, and the case escalates to a human. While every capability had an investigator that path
+        was unreachable.
+
+        So the gap is now asserted rather than tolerated, and pinned to an exact set: a *new*
+        uncovered capability is still a failure, and re-publishing either manifest without
+        revisiting those criteria is also a failure.
+        """
+        gaps = {cat for cat, ref in discover.coverage().items() if ref is None}
+        assert gaps == {"nav.pricing", "nav.cash_fees"}, (
+            f"coverage gaps are {sorted(gaps)}; expected exactly the two unpublished capabilities. "
+            f"See src/nav_sentinel/domain/manifests/unpublished/README.md"
+        )
+
+    def test_the_unpublished_manifests_are_retained_and_not_loaded(self):
+        """Publication must be a controlled act for identity resolution to mean anything, so the
+        two are moved rather than deleted -- and the loader must not recurse into the directory
+        holding them."""
+        from nav_sentinel.control_plane import packs
+
+        unpublished = next(iter(packs.manifest_dirs())) / "unpublished"
+        assert unpublished.is_dir()
+        retained = {p.stem for p in unpublished.glob("*.yaml")}
+        assert retained == {"pricing-investigator", "cash-fees-investigator"}, retained
+
+        loaded = {m.agent_id for m in load_manifests()}
+        assert loaded.isdisjoint(retained), f"an unpublished manifest was loaded: {loaded & retained}"
 
     def test_service_account_ids_fit_google_limit(self):
         for m in load_manifests():
@@ -152,11 +182,18 @@ class TestDataScopeEnforcement:
     roles, and consulted by no runtime check."""
 
     def test_tool_outside_declared_scope_is_denied(self):
-        """cash-fees declares cash_movements but not positions; grant the tool and the scope
-        check must still refuse it."""
-        cf = discover.get("cash-fees-investigator")
-        widened = cf.model_copy(
-            update={"allowed_tools": (*cf.allowed_tools, "books_and_records.positions")}
+        """triage declares securities and registry but not positions; grant it the tool anyway and
+        the scope check must still refuse it.
+
+        Deliberately the triage agent. This previously used cash-fees, which was unpublished to
+        create the "no authorised investigator" gap two acceptance criteria need -- and the test
+        broke with it. Triage is the fleet's entry point and cannot be unpublished, so P-006's
+        coverage no longer depends on which specialists happen to be published today.
+        """
+        triage = discover.get("triage-agent")
+        assert "positions" not in triage.data_scopes.read, "the asymmetry this test needs is gone"
+        widened = triage.model_copy(
+            update={"allowed_tools": (*triage.allowed_tools, "books_and_records.positions")}
         )
         decision = policies.tool_within_data_scope(
             widened, "books_and_records.positions", ("positions",)
@@ -165,9 +202,9 @@ class TestDataScopeEnforcement:
         assert decision.policy_id == "P-006-DATA-SCOPE"
 
     def test_declared_scope_is_permitted(self):
-        cf = discover.get("cash-fees-investigator")
+        triage = discover.get("triage-agent")
         assert policies.tool_within_data_scope(
-            cf, "books_and_records.cash_movements", ("cash_movements",)
+            triage, "books_and_records.security", ("securities",)
         ).allowed
 
     def test_external_reference_tools_need_no_internal_scope(self):
