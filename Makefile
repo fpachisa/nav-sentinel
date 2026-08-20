@@ -50,5 +50,8 @@ teardown: ## Remove the deployed service and subscription (keeps identities and 
 demo: ## Run one reconciliation cycle: detect, score, band, route, trace
 	$(PY) -m nav_sentinel.pipeline.cycle_runner
 
+investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike `demo`
+	$(PY) -m nav_sentinel.pipeline.investigate_cli
+
 clean:
 	rm -rf .pytest_cache .ruff_cache **/__pycache__ fixtures/data/*.json

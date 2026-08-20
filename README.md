@@ -187,7 +187,8 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 351 invariant tests, including "no agent may post"
+make investigate # one case, investigated by the fleet (needs a live model)
+make test        # 373 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -249,7 +250,7 @@ such rather than as complete.
 | Agent Gateway policy enforcement | works, within a stated boundary | All seven policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
 | Model Armor screening | works, and is **not** the boundary | Windowed, gated on all three response fields, fails closed four distinguishable ways. Detection is content-sensitive: the same injection is caught alone and missed 0/8 beside one particular filing paragraph, so screening reduces what gets through rather than stopping it. Coverage is of two kinds — the gateway-wiring tests **stub** `model_armor.screen`, and two `live` tests exercise the real service. The boundary is the quarantined extractor, `tests/test_quarantine.py` |
 | Least-privilege IAM | **overstated, and the deployment makes it more so** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM. Cloud Run gives one identity per service, so the deployed container collapses every per-agent account into `nav-runtime` — see defect 7, now active |
-| ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |
+| ADK investigator agents on Gemini | **works, one of three** | The FX investigator is a real ADK agent on `gemini-3.7-flash`, built from its manifest — model, tools and prompt all come from the published YAML. Measured: it diagnoses the stale-rate break as *"applied the stale 2026-08-14 rate of 1.1567 instead of the published 2026-08-17 rate of 1.1593"* in 6–7 tool calls, citing both rates with their dates against live ECB data — independently matching the golden file's stated cause. Run it with `make investigate`. Corporate actions and triage are not built. |
 | Memory Bank recurrence recall | not started | — |
 | Pub/Sub async orchestration | **deployed, one hop** | Push subscription → Cloud Run → cycle, verified end to end (204, `userAgent: APIs-Google`). Fan-out to per-capability investigators is S3 and is not built |
 | Cloud Run deployment | works | Revision `nav-sentinel-00008-dkh`, runs as `nav-runtime`, anonymous request → 403, Vertex Gemini at `global` and Model Armor regional both reachable from the container, per-case traces in Cloud Trace. Evidence: [docs/evidence/S7a-cloud-run.md](docs/evidence/S7a-cloud-run.md) |

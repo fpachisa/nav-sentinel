@@ -24,6 +24,22 @@ class ContentUnscreenable(RuntimeError):
     """An untrusted tool returned a value the screener cannot inspect. Fail closed."""
 
 
+class ToolFailed(RuntimeError):
+    """A tool raised while executing. Not a policy denial, and not a screening block.
+
+    The gateway translates whatever a tool raises into this, so an agent can distinguish "my
+    evidence could not be obtained" from "I was refused" without importing the tool modules --
+    which would give the agents layer the ungated callables the seam exists to keep away from it.
+
+    The original is kept on `cause` and chained, so the audit trail loses nothing.
+    """
+
+    def __init__(self, tool_name: str, cause: BaseException) -> None:
+        super().__init__(f"{tool_name} failed: {type(cause).__name__}: {cause}")
+        self.tool_name = tool_name
+        self.cause = cause
+
+
 # Every decision, in order, for the current unit of work. The exception console renders this as
 # the governance log and the demo reads from it directly.
 #
@@ -153,7 +169,18 @@ def call_tool(tool_name: str, *args: Any, **kwargs: Any) -> Any:
             "nav.tool.untrusted_output": spec.untrusted_output,
         },
     ):
-        result = spec.fn(*args, **kwargs)
+        try:
+            result = spec.fn(*args, **kwargs)
+        except PolicyViolation:
+            # A denial raised from inside a tool is still a denial. Never reclassify it as a tool
+            # failure: an agent's refusal path treats the two completely differently.
+            raise
+        except Exception as exc:
+            # Translated, so an agent never needs to import a tool module to know what can go
+            # wrong. Importing `nav_sentinel.tools.ecb_fx` for its `CassetteMiss` would hand the
+            # agents layer the ungated callables in that module -- which is exactly what the seam
+            # forbids, and what caught this.
+            raise ToolFailed(resolved, exc) from exc
 
     # Screening is bound to the tool that fetched the bytes, not to an agent's self-declared
     # flag. An agent cannot forget to screen, because it never had the option.
