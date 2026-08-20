@@ -1,0 +1,26 @@
+[
+  {
+    "trade_id": "TRD-LVMH-01",
+    "fund_id": "MERID-GEF",
+    "isin": "FR0000121014",
+    "trade_date": "2026-08-17",
+    "settlement_date": "2026-08-19",
+    "side": "BUY",
+    "quantity": "8500.0000",
+    "price": "612.80",
+    "currency": "EUR",
+    "status": "pending"
+  },
+  {
+    "trade_id": "TRD-PFE-01",
+    "fund_id": "MERID-GEF",
+    "isin": "US7170811035",
+    "trade_date": "2026-08-12",
+    "settlement_date": "2026-08-14",
+    "side": "BUY",
+    "quantity": "120000.0000",
+    "price": "31.04",
+    "currency": "USD",
+    "status": "failed"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "movement_id": "CASH-OPEN",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-07-17",
+    "currency": "EUR",
+    "amount": "12000000.00",
+    "movement_type": "opening",
+    "description": "Opening cash",
+    "source": "custodian"
+  },
+  {
+    "movement_id": "CASH-DIV-ABEV",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-07-17",
+    "currency": "USD",
+    "amount": "215687.50",
+    "movement_type": "dividend",
+    "description": "Ambev ADR dividend, net of 15% withholding",
+    "source": "custodian"
+  },
+  {
+    "movement_id": "CASH-DIV-ABEV",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-08-17",
+    "currency": "USD",
+    "amount": "215687.50",
+    "movement_type": "dividend",
+    "description": "Ambev ADR dividend, net of 15% withholding",
+    "source": "custodian"
+  }
+]

@@ -180,13 +180,13 @@ database. It is idempotent — re-run it freely.
 make fixtures
 ```
 
-Fetches live ECB reference rates — **network required** — and writes the synthetic books plus
+Regenerates the synthetic books from the recorded ECB cassette — no network needed — plus
 `eval/golden_breaks.yaml`.
 
 ### 4. Verify
 
 ```bash
-make test        # 159 invariant tests, including "no agent may post"
+make test        # 164 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -291,9 +291,9 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    expires, and is not bound to the drafted entry.
 9. `FirestoreApprovalStore` is written but never executed; the offline default is an in-process
    store, chosen explicitly and fail-closed when Firestore is requested and unavailable.
-10. `make demo` fails (`ModuleNotFoundError`) — the orchestrator lands in S3. `make fixtures`
-    requires live ECB access; the test suite itself does not, and `make verify` passes with the
-    network unreachable.
+10. Nothing outstanding here. `make demo`, `make fixtures`, `make test` and `make verify` all
+    run with the network unreachable, from committed fixtures and a recorded ECB cassette.
+    `make fixtures-live` re-records the rates and requires network access.
 
 ## Licence
 

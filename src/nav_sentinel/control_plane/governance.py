@@ -94,6 +94,12 @@ class CaseFacts(BaseModel):
     status: str
     severity: str | None = None
     item_count: int = 0
+    #: Set by the process when the case must not clear on monetary materiality alone. A 2:1 stock
+    #: split moves no money and still drives wrong dividend entitlement and a stock-record control
+    #: failure. The domain refused to auto-clear it; the control plane did anyway, because nothing
+    #: carried the signal across the seam -- so a floor enforced on one side of a boundary is not
+    #: enforced.
+    no_auto_clear: bool = False
     recurrence_key: str | None = None
 
     def as_span_attributes(self) -> dict[str, object]:

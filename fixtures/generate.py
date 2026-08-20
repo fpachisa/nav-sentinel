@@ -541,7 +541,7 @@ def build() -> tuple[dict, dict]:
     return closed[0], closed[1]
 
 
-def write(prior: dict, current: dict) -> None:
+def write(prior: dict, current: dict, *, check_only: bool = False) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     EVAL.mkdir(parents=True, exist_ok=True)
 
@@ -590,9 +590,63 @@ def write(prior: dict, current: dict) -> None:
             "whose two legs net to zero."
         ),
     }
-    (EVAL / "golden_breaks.yaml").write_text(
-        yaml.safe_dump(golden, sort_keys=False, width=100) + ""
-    )
+    rendered = yaml.safe_dump(golden, sort_keys=False, width=100)
+    target = EVAL / "golden_breaks.yaml"
+
+    if check_only:
+        # `--check` exists because regeneration silently overwrote the reviewed ground truth. A
+        # judge running `make fixtures` to see how it works would have replaced the file the eval
+        # scores against, with no indication anything had changed.
+        if not target.exists():
+            raise SystemExit(f"{target} does not exist; run without --check to create it.")
+        if target.read_text() != rendered:
+            raise SystemExit(
+                f"{target} differs from what this generator would produce. The ground truth the "
+                f"eval scores against has been reviewed, so it is not overwritten silently. Run "
+                f"without --check to accept the new version, and review the diff."
+            )
+        print(f"  {target.name} matches the generator output")
+        return
+
+    target.write_text(rendered)
+
+
+#: Every ECB series the generator asks for. Kept beside the dates it depends on so a cassette
+#: refresh cannot miss one -- a miss is a hard failure naming the series, not a silent gap.
+def cassette_requests() -> list[tuple[str, str, str]]:
+    from nav_sentinel.tools import ecb_fx
+
+    # EUR is short-circuited by the client (rate 1 by definition), and the ECB has no EUR/EUR
+    # series -- asking for one 404s.
+    currencies = sorted({SEC[isin][3] for isin, _, _ in HOLDINGS} - {"EUR"})
+    days = (NAV_DATE, STALE_DATE, PRIOR_CYCLE)
+    requests = []
+    for day in days:
+        # `latest_rate_on_or_before` walks back over weekends and TARGET holidays, so the recorded
+        # window has to cover the same lookback the generator will perform.
+        start = (day - timedelta(days=14)).isoformat()
+        requests.append((ecb_fx._series_key(currencies), start, day.isoformat()))
+        for ccy in currencies:
+            requests.append((ecb_fx._series_key([ccy]), start, day.isoformat()))
+            # `rate_on` uses a 10-day lookback and `latest_rate_on_or_before` a 14-day one, so
+            # both windows are recorded or one of them misses.
+            requests.append(
+                (ecb_fx._series_key([ccy]), (day - timedelta(days=10)).isoformat(),
+                 day.isoformat())
+            )
+    return sorted(set(requests))
+
+
+def refresh() -> None:
+    """Re-record the ECB responses the fixtures need. Requires network access."""
+    import os
+
+    from nav_sentinel.tools import ecb_fx
+
+    os.environ["NAV_ECB_LIVE"] = "1"
+    ecb_fx._fetch_csv.cache_clear()
+    recorded = ecb_fx.refresh_cassette(cassette_requests())
+    print(f"  recorded {len(recorded)} ECB responses to {ecb_fx.CASSETTE.name}")
 
 
 def main() -> None:
@@ -600,8 +654,9 @@ def main() -> None:
     from rich.table import Table
 
     console = Console()
+    check_only = "--check" in sys.argv
     prior, current = build()
-    write(prior, current)
+    write(prior, current, check_only=check_only)
 
     for cycle in (prior, current):
         table = Table(title=f"{FUND['fund_id']} — {cycle['day']}", header_style="bold")
@@ -631,4 +686,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if "--refresh-rates" in sys.argv:
+        refresh()
     main()

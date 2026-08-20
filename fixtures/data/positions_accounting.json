@@ -1,0 +1,123 @@
+[
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US02319V1035",
+    "as_of": "2026-07-17",
+    "quantity": "1450000.0000",
+    "local_price": "2.86",
+    "local_currency": "USD",
+    "fx_rate": "1.14350000",
+    "market_value_base": "3626585.05",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US02319V1035",
+    "as_of": "2026-08-17",
+    "quantity": "1450000.0000",
+    "local_price": "2.86",
+    "local_currency": "USD",
+    "fx_rate": "1.15930000",
+    "market_value_base": "3577158.63",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "FR0000121014",
+    "as_of": "2026-08-17",
+    "quantity": "42000.0000",
+    "local_price": "612.80",
+    "local_currency": "EUR",
+    "fx_rate": "1.00000000",
+    "market_value_base": "25737600.00",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US7170811035",
+    "as_of": "2026-08-17",
+    "quantity": "400000.0000",
+    "local_price": "31.04",
+    "local_currency": "USD",
+    "fx_rate": "1.15930000",
+    "market_value_base": "10709911.15",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "NL0011821202",
+    "as_of": "2026-08-17",
+    "quantity": "620000.0000",
+    "local_price": "18.94",
+    "local_currency": "EUR",
+    "fx_rate": "1.00000000",
+    "market_value_base": "11742800.00",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "DE0007236101",
+    "as_of": "2026-08-17",
+    "quantity": "88000.0000",
+    "local_price": "227.35",
+    "local_currency": "EUR",
+    "fx_rate": "1.00000000",
+    "market_value_base": "20006800.00",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US0378331005",
+    "as_of": "2026-08-17",
+    "quantity": "185000.0000",
+    "local_price": "241.50",
+    "local_currency": "USD",
+    "fx_rate": "1.15670000",
+    "market_value_base": "38624967.58",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "GB00BN7SWP63",
+    "as_of": "2026-08-17",
+    "quantity": "900000.0000",
+    "local_price": "16.42",
+    "local_currency": "GBP",
+    "fx_rate": "1.16959064",
+    "market_value_base": "12635190.04",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US5949181045",
+    "as_of": "2026-08-17",
+    "quantity": "96000.0000",
+    "local_price": "512.40",
+    "local_currency": "USD",
+    "fx_rate": "1.15930000",
+    "market_value_base": "42431122.23",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "FR0000121014",
+    "as_of": "2026-08-17",
+    "quantity": "8500.0000",
+    "local_price": "612.80",
+    "local_currency": "EUR",
+    "fx_rate": "1.00000000",
+    "market_value_base": "5208800.00",
+    "source": "accounting"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "isin": "US7170811035",
+    "as_of": "2026-08-17",
+    "quantity": "120000.0000",
+    "local_price": "31.04",
+    "local_currency": "USD",
+    "fx_rate": "1.15930000",
+    "market_value_base": "3212973.35",
+    "source": "accounting"
+  }
+]

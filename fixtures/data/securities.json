@@ -1,0 +1,90 @@
+[
+  {
+    "isin": "US0378331005",
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "currency": "USD",
+    "country": "US",
+    "cik": 320193,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "US5949181045",
+    "ticker": "MSFT",
+    "name": "Microsoft Corporation",
+    "currency": "USD",
+    "country": "US",
+    "cik": 789019,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "US02319V1035",
+    "ticker": "ABEV",
+    "name": "Ambev S.A. ADR",
+    "currency": "USD",
+    "country": "BR",
+    "cik": 1565025,
+    "security_type": "equity",
+    "is_depositary_receipt": true,
+    "dr_ratio": "1:1"
+  },
+  {
+    "isin": "US7170811035",
+    "ticker": "PFE",
+    "name": "Pfizer Inc.",
+    "currency": "USD",
+    "country": "US",
+    "cik": 78003,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "GB00BN7SWP63",
+    "ticker": "GSK",
+    "name": "GSK plc",
+    "currency": "GBP",
+    "country": "GB",
+    "cik": 1131399,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "FR0000121014",
+    "ticker": "MC",
+    "name": "LVMH Moet Hennessy Louis Vuitton SE",
+    "currency": "EUR",
+    "country": "FR",
+    "cik": null,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "NL0011821202",
+    "ticker": "INGA",
+    "name": "ING Groep N.V.",
+    "currency": "EUR",
+    "country": "NL",
+    "cik": null,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  },
+  {
+    "isin": "DE0007236101",
+    "ticker": "SIE",
+    "name": "Siemens AG",
+    "currency": "EUR",
+    "country": "DE",
+    "cik": null,
+    "security_type": "equity",
+    "is_depositary_receipt": false,
+    "dr_ratio": null
+  }
+]

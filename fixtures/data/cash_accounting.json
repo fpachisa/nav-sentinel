@@ -1,0 +1,62 @@
+[
+  {
+    "movement_id": "CASH-OPEN",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-07-17",
+    "currency": "EUR",
+    "amount": "12000000.00",
+    "movement_type": "opening",
+    "description": "Opening cash",
+    "source": "accounting"
+  },
+  {
+    "movement_id": "CASH-DIV-ABEV",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-07-17",
+    "currency": "USD",
+    "amount": "253750.00",
+    "movement_type": "dividend",
+    "description": "Ambev ADR dividend, gross",
+    "source": "accounting"
+  },
+  {
+    "movement_id": "CASH-ADJ-ABEV-PRIOR",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-07-18",
+    "currency": "USD",
+    "amount": "-38062.50",
+    "movement_type": "adjustment",
+    "description": "Correction of 2026-07-17 ADR withholding break, posted after NAV sign-off",
+    "source": "accounting"
+  },
+  {
+    "movement_id": "CASH-DIV-ABEV",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-08-17",
+    "currency": "USD",
+    "amount": "253750.00",
+    "movement_type": "dividend",
+    "description": "Ambev ADR dividend, gross",
+    "source": "accounting"
+  },
+  {
+    "movement_id": "CASH-TRD-LVMH-01",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-08-17",
+    "currency": "EUR",
+    "amount": "-5208800.00",
+    "movement_type": "settlement",
+    "description": "LVMH purchase, trade date 2026-08-17, settles 2026-08-19",
+    "source": "accounting"
+  },
+  {
+    "movement_id": "CASH-TRD-PFE-01",
+    "fund_id": "MERID-GEF",
+    "value_date": "2026-08-14",
+    "currency": "USD",
+    "amount": "-3724800.00",
+    "movement_type": "settlement",
+    "description": "Pfizer purchase, failed settlement 2026-08-14",
+    "source": "accounting"
+  }
+]

@@ -701,3 +701,69 @@ class TestIdentityBindingsCarryAToken:
             assert identity.current_or_none() is None
         finally:
             identity._current.set(None)
+
+
+class TestTheNoAutoClearFloorSurvivesTheSeam:
+    """MAJOR from the gate review. `approval_class_for(has_quantity_break=True)` floored a
+    quantity break at single reviewer, and `CaseFacts` carried no signal for it, so the control
+    plane -- the stated single enforcement point -- auto-cleared exactly what the domain refused
+    to. A floor enforced on one side of a boundary is not enforced."""
+
+    def _facts(self, *, flag: bool):
+        return CaseFacts(
+            case_id="C-QTY", subject_id="MERID-GEF", as_of=NAV_DATE,
+            capability="nav.corporate_action",
+            impact=Impact(value=Decimal(0), unit="bps"), status="triaged",
+            no_auto_clear=flag,
+        )
+
+    def test_a_zero_impact_case_auto_clears_by_default(self):
+        assert policies.band_for(self._facts(flag=False).impact) is (
+            policies.ApprovalClass.AUTO_CLEAR
+        )
+
+    def test_the_flag_floors_it_at_single_reviewer(self):
+        facts = self._facts(flag=True)
+        assert policies.band_for(facts.impact, no_auto_clear=True) is (
+            policies.ApprovalClass.SINGLE_REVIEWER
+        )
+
+    def test_approval_route_honours_the_flag(self):
+        """The route decision is the one thing that reaches the governance log, so it is the one
+        that has to be right."""
+        assert policies.approval_route(self._facts(flag=True)).metadata["band"] == (
+            "single_reviewer"
+        )
+        assert policies.approval_route(self._facts(flag=False)).metadata["band"] == "auto_clear"
+
+    def test_the_flag_closes_the_autonomous_posting_path(self):
+        """Without it, granting any positive ceiling let a stock-record control failure post with
+        no human."""
+        from nav_sentinel.registry.models import Authority
+
+        agent = discover.get("remediation-agent").model_copy(
+            update={"authority": Authority(
+                may_post_entries=True,
+                max_autonomous_impact=Impact(value=Decimal("0.25"), unit="bps"),
+            )}
+        )
+        assert policies.may_post_entry(agent, self._facts(flag=False), None).allowed
+        assert not policies.may_post_entry(agent, self._facts(flag=True), None).allowed
+
+    def test_the_real_split_case_carries_the_flag(self):
+        """End to end on the actual fixture, because the flag is only worth having if the domain
+        sets it where it matters."""
+        from nav_sentinel.domain import materiality, tolerance
+        from nav_sentinel.domain.cycle import group_into_cases
+        from nav_sentinel.tools import books_and_records as bnr
+
+        breaks = tolerance.detect_position_breaks(
+            bnr.positions("accounting"), bnr.positions("custodian"), NAV_DATE
+        )
+        split = [b for b in breaks if b.isin == "US5949181045"]
+        case = group_into_cases(split, "MERID-GEF", NAV_DATE)[0]
+        materiality.score(case, bnr.nav_record("custodian", "MERID-GEF", NAV_DATE))
+        facts = case.to_facts()
+        assert facts.impact.value == Decimal(0)
+        assert facts.no_auto_clear is True
+        assert policies.approval_route(facts).metadata["band"] != "auto_clear"

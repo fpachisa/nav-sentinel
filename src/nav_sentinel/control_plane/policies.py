@@ -143,7 +143,7 @@ def may_post_entry(  # noqa: PLR0911 -- one return per denial reason; the audit 
         # as AUTO_CLEAR *and* which sits inside the agent's declared ceiling. Both, not either:
         # consulting the ceiling alone let a manifest grant itself 500bps of headroom over a
         # case the control plane had banded cio_escalation, and the permissive control won.
-        band = band_for(facts.impact, thresholds)
+        band = band_for(facts.impact, thresholds, no_auto_clear=facts.no_auto_clear)
         if band is ApprovalClass.AUTO_CLEAR and manifest.authority.within_ceiling(facts.impact):
             return PolicyDecision(
                 effect=Effect.ALLOW,
@@ -197,7 +197,7 @@ def may_post_entry(  # noqa: PLR0911 -- one return per denial reason; the audit 
             resource=f"ledger:{facts.case_id}",
         )
 
-    band = band_for(facts.impact, thresholds)
+    band = band_for(facts.impact, thresholds, no_auto_clear=facts.no_auto_clear)
     satisfied, why = record.satisfies(band)
     if not satisfied:
         return PolicyDecision(
@@ -218,7 +218,12 @@ def may_post_entry(  # noqa: PLR0911 -- one return per denial reason; the audit 
     )
 
 
-def band_for(impact: Impact | None, thresholds: ThresholdSet | None = None) -> ApprovalClass:
+def band_for(
+    impact: Impact | None,
+    thresholds: ThresholdSet | None = None,
+    *,
+    no_auto_clear: bool = False,
+) -> ApprovalClass:
     """Derive who must approve, from a unit-tagged magnitude and the tenant's thresholds.
 
     The control plane derives the band; the process supplies only the magnitude and its unit.
@@ -242,7 +247,10 @@ def band_for(impact: Impact | None, thresholds: ThresholdSet | None = None) -> A
 
     magnitude = abs(impact.value)
     if magnitude < thresholds.auto_clear_below:
-        return ApprovalClass.AUTO_CLEAR
+        # A case flagged no_auto_clear floors at single reviewer however small its monetary
+        # impact. The flag comes from the process, which is the only side that knows *why* a
+        # zero-value difference still needs a human.
+        return ApprovalClass.SINGLE_REVIEWER if no_auto_clear else ApprovalClass.AUTO_CLEAR
     if magnitude < thresholds.single_reviewer_below:
         return ApprovalClass.SINGLE_REVIEWER
     if magnitude < thresholds.four_eyes_below:
@@ -257,7 +265,7 @@ def approval_route(facts: CaseFacts, thresholds: ThresholdSet | None = None) -> 
     The decision is recorded so the audit trail carries the band and the magnitude that produced
     it.
     """
-    band = band_for(facts.impact, thresholds)
+    band = band_for(facts.impact, thresholds, no_auto_clear=facts.no_auto_clear)
     return PolicyDecision(
         effect=Effect.ALLOW,
         policy_id="P-004-APPROVAL-ROUTE",

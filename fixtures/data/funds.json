@@ -1,0 +1,10 @@
+[
+  {
+    "fund_id": "MERID-GEF",
+    "name": "Meridian Global Equity Fund",
+    "base_currency": "EUR",
+    "domicile": "IE",
+    "shares_outstanding": "4250000",
+    "fee_bps_annual": "75"
+  }
+]

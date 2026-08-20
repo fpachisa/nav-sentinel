@@ -1,0 +1,18 @@
+[
+  {
+    "fund_id": "MERID-GEF",
+    "as_of": "2026-07-17",
+    "total_assets_base": "15815205.51",
+    "total_liabilities_base": "0.00",
+    "shares_outstanding": "4250000",
+    "source": "custodian"
+  },
+  {
+    "fund_id": "MERID-GEF",
+    "as_of": "2026-08-17",
+    "total_assets_base": "182400044.18",
+    "total_liabilities_base": "0.00",
+    "shares_outstanding": "4250000",
+    "source": "custodian"
+  }
+]

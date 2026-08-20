@@ -2,7 +2,7 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: help venv fixtures test lint bootstrap registry demo clean
+.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap registry demo clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -11,7 +11,10 @@ venv: ## Create the virtual environment and install dependencies
 	uv venv --python 3.12 .venv
 	uv pip install --python .venv -e ".[dev]"
 
-fixtures: ## Generate synthetic books and records with seeded breaks
+fixtures-live: ## Re-record ECB rates from the live API, then regenerate
+	$(PY) fixtures/generate.py --refresh-rates
+
+fixtures: ## Generate synthetic books and records with seeded breaks (offline, from the cassette)
 	$(PY) fixtures/generate.py
 
 test: ## Run the invariant test suite (offline)
@@ -38,8 +41,8 @@ bootstrap: ## Provision Google Cloud: APIs, per-agent identities, Model Armor, P
 registry: ## Show the published agent fleet and its coverage
 	$(PY) -m nav_sentinel.registry.cli
 
-demo: ## Run one full NAV cycle end to end with tracing
-	$(PY) -m nav_sentinel.pipeline.orchestrator
+demo: ## Run one reconciliation cycle: detect, score, band, route, trace
+	$(PY) -m nav_sentinel.pipeline.cycle_runner
 
 clean:
 	rm -rf .pytest_cache .ruff_cache **/__pycache__ fixtures/data/*.json

@@ -10,7 +10,8 @@ build/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
-fixtures/data/*.json
-fixtures/data/*.csv
+# fixtures/data is committed deliberately. Every byte of the project's ground truth derives from
+# recorded ECB rates, and a reviewer who cannot reach the network would otherwise get no books, no
+# golden file and no closure proof. `make fixtures` regenerates it byte-identically offline.
 .cache/
 out/

@@ -10,14 +10,49 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, timedelta
+import json
+import os
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
 
 import httpx
 
 ECB_DATA_API = "https://data-api.ecb.europa.eu/service/data/EXR"
 SOURCE_NAME = "ecb_fx_reference_rates"
+
+#: Recorded ECB responses, committed so the fixtures and the eval reproduce without the network.
+#:
+#: This exists because every byte of the project's ground truth traces back to these rates: a
+#: judge who clones the repository and cannot reach the ECB gets no books, no golden file and no
+#: closure proof. The cassette is a recording, not a substitute -- `refresh_cassette()` re-fetches
+#: it from the live API and a `live` test asserts the custodian book's rates match what the ECB
+#: publishes for their dates, so a stale recording is a test failure rather than a silent drift.
+CASSETTE = Path(__file__).resolve().parents[3] / "fixtures" / "data" / "ecb_cassette.json"
+
+
+class CassetteMiss(RuntimeError):
+    """The recording has no entry for a requested series, and live fetching is disabled."""
+
+
+def _use_live() -> bool:
+    """Live by default only when there is no recording.
+
+    Deliberately this way round: an offline run must be the reproducible one, and a developer
+    refreshing rates does it explicitly with `make fixtures-live`.
+    """
+    return os.environ.get("NAV_ECB_LIVE") == "1" or not CASSETTE.exists()
+
+
+def _cassette() -> dict[str, str]:
+    if not CASSETTE.exists():
+        return {}
+    return json.loads(CASSETTE.read_text())["responses"]
+
+
+def _cassette_key(series: str, start: str, end: str) -> str:
+    return f"{series}|{start}|{end}"
 
 
 def _series_key(currencies: list[str]) -> str:
@@ -26,12 +61,57 @@ def _series_key(currencies: list[str]) -> str:
 
 @lru_cache(maxsize=64)
 def _fetch_csv(series: str, start: str, end: str) -> str:
+    """The recorded response if there is one, otherwise the live API."""
+    key = _cassette_key(series, start, end)
+    if not _use_live():
+        recorded = _cassette().get(key)
+        if recorded is not None:
+            return recorded
+        raise CassetteMiss(
+            f"no recorded ECB response for {key}. Either the fixture dates moved, or this is a "
+            f"new series. Run `make fixtures-live` to re-record, which requires network access."
+        )
+    return _fetch_live(series, start, end)
+
+
+def _fetch_live(series: str, start: str, end: str) -> str:
     url = f"{ECB_DATA_API}/{series}"
     params = {"startPeriod": start, "endPeriod": end, "format": "csvdata"}
     with httpx.Client(timeout=30.0) as client:
         r = client.get(url, params=params)
         r.raise_for_status()
         return r.text
+
+
+def refresh_cassette(requests: list[tuple[str, str, str]]) -> dict[str, str]:
+    """Re-record the responses the fixtures need, from the live API.
+
+    Called by `make fixtures-live`. Records the request key verbatim so a cassette miss names the
+    exact series that changed rather than failing vaguely.
+    """
+    responses = {
+        _cassette_key(series, start, end): _fetch_live(series, start, end)
+        for series, start, end in requests
+    }
+    CASSETTE.parent.mkdir(parents=True, exist_ok=True)
+    CASSETTE.write_text(
+        json.dumps(
+            {
+                "source": ECB_DATA_API,
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "note": (
+                    "Recorded ECB responses, committed so the fixtures and the eval reproduce "
+                    "offline. Refresh with `make fixtures-live`. A live test asserts the "
+                    "custodian book's rates match the ECB's published rates for their dates, so "
+                    "a stale recording fails rather than drifting silently."
+                ),
+                "responses": responses,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    return responses
 
 
 def fetch_rates(

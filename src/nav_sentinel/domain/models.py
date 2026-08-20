@@ -308,4 +308,7 @@ class ExceptionCase(BaseModel):
             severity=self.severity.value if self.severity else None,
             item_count=len(self.breaks),
             recurrence_key=self.recurrence_key,
+            # A stock-record break does not clear on monetary materiality. The domain knows why;
+            # the control plane only needs to know that it must not.
+            no_auto_clear=bool(self.quantity_breaks),
         )
