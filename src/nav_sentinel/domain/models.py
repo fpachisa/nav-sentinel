@@ -11,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Governance vocabulary belongs to the control plane, not to fund accounting. Imported here so
 # the domain speaks it; defined there so the control plane never imports a domain type.
@@ -149,6 +149,42 @@ class NavRecord(BaseModel):
 # ---------------------------------------------------------------------- exceptions
 
 
+class ObservedFacts(BaseModel):
+    """The facts a tool actually returned, typed, in the vocabulary the golden file cites.
+
+    Field names are the golden's `evidence_must_cite` entries verbatim -- `rate`, `rate_date`,
+    `gross_rate` -- so a scenario's stated evidence requirement can be checked against a verdict
+    by name instead of through a mapping nobody maintains.
+
+    Every field here is populated by the code that made the tool call, from the value it returned.
+    **Never by a model.** That is the whole point: an investigator citing "the ECB rate for the
+    14th" proves nothing if it also supplies the rate, and a rate date expressed as free text can
+    only be checked with a regex over model prose.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rate: Decimal | None = None
+    rate_date: date | None = None
+    gross_rate: Decimal | None = None
+    withholding_pct: Decimal | None = None
+    split_ratio: str | None = None
+    quantity: Decimal | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    as_of: date | None = None
+
+    def cited(self) -> frozenset[str]:
+        """Which facts this observation actually carries.
+
+        A golden scenario's `evidence_must_cite` is satisfied when its entries are a subset of the
+        union of these across a verdict's evidence.
+        """
+        return frozenset(
+            name for name, value in self.model_dump().items() if value is not None
+        )
+
+
 class EvidenceItem(BaseModel):
     """One piece of support for a hypothesis. Every hypothesis must cite evidence, and
     every piece of external evidence records whether Model Armor cleared it."""
@@ -159,6 +195,11 @@ class EvidenceItem(BaseModel):
     summary: str
     trusted: bool = True
     armor_verdict: str | None = None  # set when source is untrusted external content
+
+    #: The tool call this item stands on, and what it returned. Both are set by the platform from
+    #: a recorded observation, never accepted from a model -- see `agents.contract`.
+    tool: str | None = None
+    observed: ObservedFacts | None = None
 
 
 class ReconciliationBreak(BaseModel):
