@@ -17,6 +17,7 @@ from datetime import date
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from nav_sentinel import composition
 from nav_sentinel.agents import investigator
@@ -50,8 +51,10 @@ def main() -> int:
     custodian_nav = bnr.nav_record("custodian", cycle_runner.FUND, as_of)
     materiality.score(case, custodian_nav, cycle_runner._fixture_rates(as_of))
 
-    # Triage is S1.5. Until then the capability is stated here rather than inferred, and saying so
-    # keeps the demo honest about what is and is not automated yet.
+    # Triage is S1.4. Until then the capability is *asserted* here, not classified -- and that is
+    # printed on screen rather than left in a source comment, because run against another ISIN this
+    # target silently mislabelled: a settlement timing difference came out as nav.fx_rate at
+    # 285bps critical and was handed to the FX investigator, whose manifest has no trades access.
     case.category = BreakCategory.FX_RATE
     facts = case.to_facts()
 
@@ -72,7 +75,8 @@ def main() -> int:
             # `facts.status` is the case's lifecycle state ("open"), not where it routed -- an
             # earlier version of this line printed it under the label "routed to", which read as
             # though the approval band were `open`. The band is derived by the control plane below.
-            + f"\n\nmateriality [bold]{facts.impact}[/bold]  ·  severity {facts.severity}",
+            + f"\n\nmateriality {facts.impact}  ·  severity {facts.severity}"
+            + "\n[dim]capability asserted, not classified — triage is S1.4[/dim]",
             title="Exception",
             border_style="yellow",
         )
@@ -85,25 +89,37 @@ def main() -> int:
             investigator.investigate(case, agent, trace_id=trace_id)
         )
 
+    # `Text`, not an f-string with markup. Model output and filing-derived text are interpolated
+    # here, rich interprets square brackets as markup, and a stray closing tag raises MarkupError
+    # mid-render -- which would end the recording. It matters most for the corporate-action path,
+    # where a denial reason derives from attacker-authored notice text.
+    summary = Text(verdict.root_cause, style="bold")
+    summary.append(
+        f"\n\nconfidence {verdict.confidence:.2f} · {len(store)} tool calls · "
+        f"{len(verdict.citations)} citations",
+        style="none",
+    )
     console.print(
         Panel(
-            f"[bold]{verdict.root_cause}[/bold]\n\n"
-            f"confidence {verdict.confidence:.2f} · {len(store)} tool calls · "
-            f"{len(verdict.citations)} citations",
+            summary,
             title=f"Verdict — {agent.ref} on {agent.model}",
             border_style="green" if verdict.asserts_a_cause else "red",
         )
     )
 
     evidence = Table(title="Evidence, as recorded — not as described", header_style="bold")
-    for column in ("tool", "observed", "source"):
+    for column in ("tool", "asked", "observed", "source"):
         evidence.add_column(column, overflow="fold")
     for citation in verdict.citations:
         observation = store.get(citation.observation_id)
         evidence.add_row(
-            observation.tool,
-            ", ".join(f"{k}={v}" for k, v in sorted(observation.observed.items())) or "—",
-            observation.source_uri or observation.source,
+            Text(observation.tool),
+            # The arguments, on screen. Without them the panel cannot show *which* rate was read,
+            # and a verdict citing a GBP lookup while asserting something about USD looked
+            # identical to a correct one.
+            Text(observation.args or "—"),
+            Text(", ".join(f"{k}={v}" for k, v in sorted(observation.observed.items())) or "—"),
+            Text(observation.source_uri or observation.source),
         )
     console.print(evidence)
 
@@ -112,9 +128,9 @@ def main() -> int:
         decisions.add_column(column, overflow="fold")
     for decision in gateway.decision_log():
         decisions.add_row(
-            decision.policy_id,
-            "[green]allow[/green]" if decision.allowed else "[red]DENY[/red]",
-            decision.reason[:110],
+            Text(decision.policy_id),
+            Text("allow", style="green") if decision.allowed else Text("DENY", style="red"),
+            Text(decision.reason[:110]),
         )
     console.print(decisions)
 

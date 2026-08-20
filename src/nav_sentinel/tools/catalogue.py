@@ -35,7 +35,12 @@ def _observe_latest_rate(result, args) -> dict:
     if not result:
         return {}
     rate_date, rate = result
-    return {"rate": rate, "rate_date": rate_date, "as_of": args.get("day")}
+    return {
+        "rate": rate,
+        "rate_date": rate_date,
+        "as_of": args.get("day"),
+        "currency": args.get("currency"),
+    }
 
 
 def _observe_rate(result, args) -> dict:
@@ -47,13 +52,25 @@ def _observe_rate(result, args) -> dict:
     """
     if result is None:
         return {}
-    return {"rate": result, "rate_date": args.get("day"), "as_of": args.get("day")}
+    return {
+        "rate": result,
+        "rate_date": args.get("day"),
+        "as_of": args.get("day"),
+        "currency": args.get("currency"),
+    }
 
 
 def _observe_cross_rate(result, args) -> dict:
+    """A cross rate belongs to a *pair*, so both legs are recorded. An inverted cross is the break
+    this tool exists to expose, and "which way round" is unanswerable without both."""
     if result is None:
         return {}
-    return {"rate": result, "rate_date": args.get("day"), "as_of": args.get("day")}
+    return {
+        "rate": result,
+        "rate_date": args.get("day"),
+        "as_of": args.get("day"),
+        "currency": f"{args.get('from_ccy')}/{args.get('to_ccy')}",
+    }
 
 
 def _observe_security(result, _args) -> dict:
@@ -122,17 +139,17 @@ _BOOKS_URI_NO_SOURCE = "books://merian/{tool}"
 NAV_TOOLS: tuple[ToolSpec, ...] = (
     # --- authoritative external reference data (structured, not free text) ----------------
     ToolSpec("ecb_fx.rate_on", ecb_fx.rate_on, (),
-             observe=_observe_rate, facts=("rate", "rate_date", "as_of"),
+             observe=_observe_rate, facts=("rate", "rate_date", "as_of", "currency"),
              source=_ECB,
              uri_template=_ECB_URI,
              description="ECB reference rate published for an exact date, or None."),
     ToolSpec("ecb_fx.latest_rate_on_or_before", ecb_fx.latest_rate_on_or_before, (),
-             observe=_observe_latest_rate, facts=("rate", "rate_date", "as_of"),
+             observe=_observe_latest_rate, facts=("rate", "rate_date", "as_of", "currency"),
              source=_ECB,
              uri_template=_ECB_URI,
              description="Most recent published rate at or before a date, with its date."),
     ToolSpec("ecb_fx.cross_rate", ecb_fx.cross_rate, (),
-             observe=_observe_cross_rate, facts=("rate", "rate_date", "as_of"),
+             observe=_observe_cross_rate, facts=("rate", "rate_date", "as_of", "currency"),
              source=_ECB,
              uri_template=_ECB_URI,
              description="Correctly-oriented cross rate via EUR."),

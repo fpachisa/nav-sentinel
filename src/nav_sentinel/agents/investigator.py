@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import re
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -43,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from nav_sentinel.agents.contract import (
     UNKNOWN,
     Citation,
+    UnknownObservation,
     Verdict,
     refusal,
     resolve_citations,
@@ -51,7 +53,8 @@ from nav_sentinel.control_plane import agent_surface, gateway, identity, telemet
 from nav_sentinel.control_plane.extraction import ExtractionFailed, ExtractionRejected
 from nav_sentinel.control_plane.gateway import ContentUnscreenable, ToolFailed
 from nav_sentinel.control_plane.model_armor import ContentBlocked
-from nav_sentinel.control_plane.observations import ObservationStore
+from nav_sentinel.control_plane.observations import Observation, ObservationStore
+from nav_sentinel.control_plane.policies import PolicyViolation
 
 if TYPE_CHECKING:  # pragma: no cover
     from nav_sentinel.domain.models import ExceptionCase
@@ -62,6 +65,11 @@ logger = logging.getLogger(__name__)
 APP_NAME = "nav-sentinel"
 
 #: Failures of *evidence*. Each becomes a verdict that asserts nothing and escalates.
+#:
+#: `ValidationError` is deliberately absent. It is raised by our own model construction as readily
+#: as by a bad model reply -- a long fact value overflowing `Citation.relevance` produced
+#: "evidence refused: ValidationError", reporting a platform bug as a finding about the document.
+#: A reply that does not parse raises `UnparseableAnswer` instead, which is handled separately.
 #:
 #: `ToolFailed` covers anything a tool raised -- a missing cassette recording, an HTTP failure --
 #: which the gateway translates so this module need not import the tool packages to name them.
@@ -76,7 +84,6 @@ EVIDENCE_FAILURES = (
     ExtractionRejected,
     ExtractionFailed,
     ToolFailed,
-    ValidationError,
 )
 
 
@@ -136,6 +143,7 @@ def _instruction(manifest: AgentManifest, case: ExceptionCase) -> str:
         + (f" ({b.note})" if b.note else "")
         for b in case.breaks
     )
+    required = ", ".join(gateway.evidence_requirement_for(case.capability)) or "no particular facts"
     return f"""You are the {manifest.display_name} for a fund administrator.
 
 {manifest.description.strip()}
@@ -150,20 +158,26 @@ The case:
 
 How to work:
   1. Use your tools to establish what the external reference data actually says.
-  2. Every tool result comes back as {{"observation_id": ..., "result": ...}}. Note the
-     observation_id of anything you rely on.
-  3. State the root cause in one sentence, naming the specific values that show it -- a date, a
-     rate, an amount. "The rate was wrong" is not a root cause; "the 14 August rate 1.1567 was
-     applied to a 17 August valuation, where the published rate was 1.1593" is.
-  4. List the observation_id of every result your explanation depends on.
+  2. Every tool result comes back as {{"observation_id": ..., "result": ...}}. Keep every
+     observation_id you receive.
+  3. State the root cause in one sentence, quoting the specific values that show it -- the dates,
+     the rates, the amounts, the currency. "The rate was wrong" is not a root cause. "The
+     2026-08-14 USD rate of 1.1567 was applied to a 2026-08-17 valuation, where the published rate
+     was 1.1593" is.
+  4. In `observation_ids`, list **every** observation_id whose result you used, not just the last
+     one. If your sentence quotes a rate, the lookup that returned that rate must be in the list.
 
-Two things will cause your answer to be rejected:
-  - Asserting a cause without citing the observations that establish it.
-  - Naming a value that does not appear in any observation you cited.
+Your answer is checked mechanically before it is accepted, and rejected if:
+  - it asserts a cause but cites no observations;
+  - the values your sentence quotes cannot be found in the observations you cited;
+  - the observations you cited do not between them carry {required}.
+
+Those checks compare your words against what your tool calls actually returned, so quote figures
+exactly as the tools gave them and cite every call you drew on.
 
 If the evidence does not support a cause, return root_cause exactly "{UNKNOWN}" with confidence 0.0
-and say in `unresolved` what you could not establish. That is a useful answer. A confident wrong
-answer is not.
+and say in `unresolved` what you could not establish. That is a useful answer, and it is the right
+one when you are unsure. A confident wrong answer is not.
 """
 
 
@@ -212,6 +226,30 @@ async def investigate(
             try:
                 draft = await _run(agent, case)
                 verdict = _finalise(draft, case, capability, store)
+            except PolicyViolation as exc:
+                # P-007 judges the agent's own *answer*, not its right to act, so its denial is a
+                # verdict rather than an escape -- while every other policy denial still propagates.
+                # `PolicyViolation` is not in EVIDENCE_FAILURES precisely so that P-001 through
+                # P-006 keep surfacing as denials; softening those would turn "this agent was
+                # denied a tool it must never call" into ordinary uncertainty.
+                if exc.decision.policy_id != "P-007-EVIDENCE-CORROBORATION":
+                    raise
+                logger.info("%s uncorroborated on %s: %s", manifest.ref, case.case_id, exc)
+                span.set_attribute("nav.verdict.refused", True)
+                span.set_attribute("nav.verdict.refused_by", exc.decision.policy_id)
+                return (
+                    refusal(
+                        case.case_id, capability,
+                        reason=f"[{exc.decision.policy_id}] {exc.decision.reason}",
+                    ),
+                    store,
+                )
+            except UnknownObservation as exc:
+                # A model paraphrasing or inventing an id is an ordinary failure mode, not a crash.
+                logger.info("%s cited an unknown observation on %s: %s",
+                            manifest.ref, case.case_id, exc)
+                span.set_attribute("nav.verdict.refused", True)
+                return refusal(case.case_id, capability, reason=str(exc)), store
             except UnparseableAnswer as exc:
                 logger.warning("%s returned an unusable answer on %s: %s",
                                manifest.ref, case.case_id, exc)
@@ -241,6 +279,7 @@ async def investigate(
 
 async def _run(agent, case: ExceptionCase) -> VerdictDraft:
     """Drive the ADK agent once and return its structured draft."""
+    from google.adk.agents.run_config import RunConfig
     from google.adk.runners import InMemoryRunner
     from google.genai import types
 
@@ -256,11 +295,27 @@ async def _run(agent, case: ExceptionCase) -> VerdictDraft:
             role="user",
             parts=[types.Part(text=f"Investigate case {case.case_id}.")],
         ),
+        # The tool budget bounds tool calls, not model turns: once it is spent the wrapper returns
+        # `{"error": ...}` indefinitely, so a stubborn model could burn ADK's default 500 turns on
+        # one case. This is the cost bound.
+        run_config=RunConfig(max_llm_calls=25),
     ):
         if event.content and event.content.parts:
             for part in event.content.parts:
                 if part.text:
                     reply = part.text
+
+    # Prefer what ADK already validated. `output_key` puts the schema-checked draft in session
+    # state, and ADK's own path strips code fences and ignores `thought` parts on the way -- neither
+    # of which the text scrape below does. Measured: a fenced reply, or a thinking summary emitted
+    # after the answer, left the correct draft sitting in state while the text parse raised and the
+    # whole investigation was reported as an evidence refusal. A formatting artefact should not read
+    # as "the filing was blocked".
+    validated = (await runner.session_service.get_session(
+        app_name=APP_NAME, user_id="fleet", session_id=session.id
+    )).state.get("verdict")
+    if validated:
+        return VerdictDraft.model_validate(validated)
     if not reply.strip():
         raise UnparseableAnswer("the investigator returned nothing")
     try:
@@ -287,7 +342,12 @@ def _finalise(
         Citation(observation_id=oid, relevance=_relevance(store, oid))
         for oid in dict.fromkeys(draft.observation_ids)      # de-duplicated, order preserved
     ]
-    asserted = draft.root_cause.strip() and draft.root_cause.strip() != UNKNOWN
+    # Normalised. `asserted = root_cause.strip() != UNKNOWN` was case- and punctuation-sensitive,
+    # so "unknown", "Unknown" and "UNKNOWN." were all confident diagnoses at whatever confidence
+    # the model returned -- rendered in the CLI's green panel and written into the domain as a
+    # hypothesis. One character defeated `Verdict`'s own "cannot be held confidently" validator.
+    stated = draft.root_cause.strip()
+    asserted = bool(stated) and stated.strip(" .;:").upper() != UNKNOWN
 
     if not asserted or not citations:
         return refusal(
@@ -312,11 +372,98 @@ def _finalise(
     )
 
     # Cited observations must exist, and belong to this case. Refused, not trusted.
-    resolve_citations(verdict, store.as_mapping())
+    cited = resolve_citations(verdict, store.as_mapping())
 
     # P-007: the facts those observations carry must satisfy what the process demands.
-    gateway.authorize_verdict(capability, store.facts_from(draft.observation_ids))
+    gateway.authorize_verdict(capability, store.facts_from([o.observation_id for o in cited]))
+
+    # And the verdict must actually *use* the evidence it cites.
+    ungrounded = unquoted_evidence(verdict, cited, gateway.evidence_requirement_for(capability))
+    if ungrounded:
+        return refusal(
+            case.case_id,
+            capability,
+            reason=(
+                f"the verdict does not state the evidence it cites: {', '.join(ungrounded)} appear "
+                f"nowhere in its stated cause. A cause must quote the values it rests on."
+            ),
+            evidence=cited[0],
+        )
     return verdict
+
+
+def unquoted_evidence(
+    verdict: Verdict, cited: list[Observation], required: tuple[str, ...]
+) -> list[str]:
+    """Required facts whose recorded values appear nowhere in the verdict's own words.
+
+    The hole this closes, measured: a real GBP lookup returning 0.855 authorised
+    *"Accounting applied the stale 2026-08-11 EUR/USD rate of 9.9999 instead of the published rate
+    7.7777 to ISIN XX9999999999"* -- every number, the pair, the dates and the ISIN invented. The
+    citation was genuine, the observation was recorded for that case by that agent, P-007 allowed
+    it because the fact *names* `rate` and `rate_date` were present, and the S1 criterion was met.
+    Only the citation was real; nothing tied it to the claim.
+
+    So the rule is the other way round from "no ungrounded numbers". A verdict must **quote what it
+    cites**: for every fact the process requires, some cited observation's recorded value for it has
+    to appear in the root cause. Numbers are compared as decimals, so `1.15670000` in the books
+    matches `1.1567` in the sentence; dates and short codes like `USD` are matched as text.
+
+    Requiring instead that *every* number in the text be traceable would reject correct arithmetic --
+    a withholding of 38,062.50 is derived from a gross of 253,750.00 and a rate of 15%, and none of
+    the derived figures is a recorded fact. Demanding the inputs be quoted is the check that
+    distinguishes reasoning from invention.
+
+    Long string facts -- a filing name -- are skipped: a verdict is not expected to recite a
+    filename, and `filing` is a citable fact so a reviewer can find the document, not so the model
+    can quote it.
+    """
+    text = verdict.root_cause
+    missing: list[str] = []
+    for fact in required:
+        values = [o.observed[fact] for o in cited if o.observed.get(fact)]
+        if not values:
+            continue  # P-007 already decided whether an absent fact is acceptable
+        if not any(_appears_in(value, text) for value in values):
+            missing.append(f"{fact}={values[0]}")
+    return missing
+
+
+#: What a verdict is expected to state: figures, the dates they belong to, and the currency they
+#: are denominated in. `USD`, `GBP/EUR`.
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_CURRENCY_CODE = re.compile(r"[A-Z]{3}(?:/[A-Z]{3})?")
+
+
+def _appears_in(value: str, text: str) -> bool:
+    """Whether a recorded value is stated in the verdict's prose.
+
+    Decimals are compared numerically because the books carry more precision than a sentence does:
+    `1.15670000` and `1.1567` are the same rate. A percentage may legitimately be written either
+    scaled or unscaled -- `0.15` recorded, "15%" written -- so both forms count.
+    """
+    try:
+        recorded = Decimal(value)
+    except (ArithmeticError, ValueError):
+        # Dates and currency codes are matched as text; anything else is an identifier rather than
+        # a figure, and a verdict is not expected to recite it.
+        #
+        # Classified by shape, not by length. A length cut-off was tried and `ca_notice_abev_clean
+        # .txt` sat one character over it, so a filename was demanded of the prose -- the rule has
+        # to say *what kind of thing* must be quoted, not how long it is.
+        if _ISO_DATE.fullmatch(value) or _CURRENCY_CODE.fullmatch(value):
+            return value in text
+        return True
+
+    candidates = {recorded, recorded * 100, recorded / 100}
+    for literal in re.findall(r"-?\d[\d,]*(?:\.\d+)?", text):
+        try:
+            written = Decimal(literal.replace(",", ""))
+        except ArithmeticError:
+            continue
+        if any(written == candidate for candidate in candidates):
+            return True
+    return False
 
 
 def _relevance(store: ObservationStore, observation_id: str) -> str:
@@ -331,4 +478,8 @@ def _relevance(store: ObservationStore, observation_id: str) -> str:
     if observation is None:
         return "cited by the investigator"
     facts = ", ".join(f"{k}={v}" for k, v in sorted(observation.observed.items()))
-    return f"{observation.tool}: {facts}" if facts else f"{observation.tool} was called"
+    # Truncated to `Citation.relevance`'s own limit. Unbounded, a long fact value raised a
+    # ValidationError from our own construction -- which `EVIDENCE_FAILURES` then reported as
+    # "evidence refused", turning a platform bug into a finding about the filing.
+    note = f"{observation.tool}: {facts}" if facts else f"{observation.tool} was called"
+    return note[:400]

@@ -14,10 +14,10 @@ from decimal import Decimal
 import pytest
 
 from nav_sentinel.agents import investigator
-from nav_sentinel.agents.contract import UNKNOWN, Verdict
+from nav_sentinel.agents.contract import UNKNOWN, Citation, Verdict
 from nav_sentinel.agents.investigator import VerdictDraft
-from nav_sentinel.control_plane import agent_surface, gateway, identity, packs
-from nav_sentinel.control_plane.observations import ObservationStore
+from nav_sentinel.control_plane import agent_surface, gateway, identity, observations, packs
+from nav_sentinel.control_plane.observations import Observation, ObservationStore
 from nav_sentinel.domain.models import (
     BreakCategory,
     BreakType,
@@ -25,6 +25,12 @@ from nav_sentinel.domain.models import (
     ReconciliationBreak,
 )
 from nav_sentinel.registry import discover
+
+#: A root cause that states the rate, date and currency its cited observation carries -- what the
+#: grounding check requires. Written once because most of these tests are about something else.
+_GROUNDED = (
+    "Accounting mis-stated the USD position: the published rate on 2026-08-17 was 1.1593"
+)
 
 FUND = "MERID-GEF"
 AS_OF = date(2026, 8, 17)
@@ -101,12 +107,23 @@ class TestTheAgentIsBuiltFromItsManifest:
         assert "US0378331005" in prompt
         assert "38624967.58" in prompt
 
-    def test_the_prompt_states_the_two_rejection_rules(self, fx_manifest):
-        """A rejection the model was never warned about is not correctable."""
+    def test_the_prompt_states_every_rejection_rule_that_exists(self, fx_manifest):
+        """A rejection the model was never warned about is not correctable -- and a rule the prompt
+        promises but nothing enforces is worse: the first version told the model that naming an
+        uncited value would be rejected, and nothing checked it for two commits."""
         prompt = investigator._instruction(fx_manifest, _case())
         assert "observation_id" in prompt
-        assert "without citing" in prompt
+        assert "cites no observations" in prompt
+        assert "cannot be found in the observations you cited" in prompt
+        assert "do not between them carry" in prompt
         assert UNKNOWN in prompt
+
+    def test_the_prompt_names_the_facts_the_process_actually_requires(self, fx_manifest):
+        """Read from the pack, so a process changing its rule changes the instruction rather than
+        leaving the model working to a stale one."""
+        prompt = investigator._instruction(fx_manifest, _case())
+        for fact in ("rate", "rate_date", "currency"):
+            assert fact in prompt
 
     def test_the_prompt_does_not_tell_the_agent_it_may_fix_anything(self, fx_manifest):
         """No investigator may draft or post, so the prompt must not imply otherwise."""
@@ -149,7 +166,9 @@ class TestWhatIsDoneWithTheModelsDraft:
         with identity.acting_as("fx-rates-investigator"):
             verdict = investigator._finalise(
                 VerdictDraft(
-                    root_cause="Accounting applied the 14 August rate to a 17 August valuation",
+                    # Quotes the rate, its date and the currency, which is what the new grounding
+                    # check requires: a verdict must state the evidence it cites.
+                    root_cause=_GROUNDED,
                     confidence=0.9,
                     observation_ids=[observation_id],
                 ),
@@ -163,7 +182,7 @@ class TestWhatIsDoneWithTheModelsDraft:
         store, observation_id = store_with_a_rate
         with identity.acting_as("fx-rates-investigator"):
             verdict = investigator._finalise(
-                VerdictDraft(root_cause="x", confidence=0.9, observation_ids=[observation_id]),
+                VerdictDraft(root_cause=_GROUNDED, confidence=0.9, observation_ids=[observation_id]),
                 _case(), "nav.fx_rate", store,
             )
         note = verdict.citations[0].relevance
@@ -224,7 +243,7 @@ class TestWhatIsDoneWithTheModelsDraft:
         with identity.acting_as("fx-rates-investigator"):
             verdict = investigator._finalise(
                 VerdictDraft(
-                    root_cause="x", confidence=0.8,
+                    root_cause=_GROUNDED, confidence=0.8,
                     observation_ids=[observation_id, observation_id, observation_id],
                 ),
                 _case(), "nav.fx_rate", store,
@@ -236,7 +255,7 @@ class TestWhatIsDoneWithTheModelsDraft:
         store, observation_id = store_with_a_rate
         with identity.acting_as("fx-rates-investigator"):
             verdict = investigator._finalise(
-                VerdictDraft(root_cause="x", confidence=1.4, observation_ids=[observation_id]),
+                VerdictDraft(root_cause=_GROUNDED, confidence=1.4, observation_ids=[observation_id]),
                 _case(), "nav.fx_rate", store,
             )
         assert verdict.confidence == 1.0
@@ -305,7 +324,7 @@ class TestTheVerdictReachesTheDomain:
         store, observation_id = store_with_a_rate
         with identity.acting_as("fx-rates-investigator"):
             verdict = investigator._finalise(
-                VerdictDraft(root_cause="Stale rate applied", confidence=0.9,
+                VerdictDraft(root_cause=_GROUNDED, confidence=0.9,
                              observation_ids=[observation_id]),
                 _case(), "nav.fx_rate", store,
             )
@@ -380,3 +399,210 @@ class TestTheFxInvestigatorAgainstTheRealModel:
         verdict, _ = _investigate_live("GB00BN7SWP63")
         assert verdict.asserts_a_cause, verdict.unresolved
         assert "0.855" in verdict.root_cause or "1.1695" in verdict.root_cause
+
+
+class TestInvestigateItselfNeverRaisesForAModelMistake:
+    """No offline test called `investigate()` at all -- every one went to `_finalise` -- which is
+    why the two most likely refusals were tracebacks out of the public entry point while a test
+    named `test_an_invented_observation_id_is_refused` passed by asserting the crash.
+
+    These stub `_run` so the model's answer is chosen by the test, and drive the real path.
+    """
+
+    @staticmethod
+    def _investigate(monkeypatch, draft: VerdictDraft):
+        async def fake_run(_agent, _case):
+            return draft
+
+        monkeypatch.setattr(investigator, "_run", fake_run)
+        case = _case()
+        return asyncio.run(
+            investigator.investigate(case, discover.get("fx-rates-investigator"))
+        )
+
+    def test_an_invented_observation_id_becomes_a_refusal(self, monkeypatch):
+        verdict, _ = self._investigate(
+            monkeypatch,
+            VerdictDraft(
+                root_cause="Stale rate of 1.1593 applied",
+                confidence=0.9,
+                observation_ids=["OBS-0000000000000000"],
+            ),
+        )
+        assert verdict.root_cause == UNKNOWN
+        assert "never recorded" in verdict.unresolved
+
+    def test_an_uncorroborated_cause_becomes_a_refusal_naming_the_policy(self, monkeypatch):
+        """P-007 judges the agent's own answer, so its denial is a verdict. It reached the caller as
+        a PolicyViolation traceback, in `make investigate`, on the path whose entire purpose is to
+        avoid exactly that."""
+        store = ObservationStore()
+
+        async def fake_run(_agent, case):
+            with identity.acting_as("fx-rates-investigator"):
+                tools = {
+                    t.nav_tool_name: t
+                    for t in agent_surface.build(
+                        discover.get("fx-rates-investigator"),
+                        case_id=case.case_id, trace_id=None, store=store,
+                    )
+                }
+                empty = tools["ecb_fx.latest_rate_on_or_before"](
+                    currency="GBP", day="2026-07-01"
+                )
+            return VerdictDraft(
+                root_cause="Stale rate of 1.1593 applied",
+                confidence=0.95,
+                observation_ids=[empty["observation_id"]],
+            )
+
+        monkeypatch.setattr(investigator, "_run", fake_run)
+        verdict, _ = asyncio.run(
+            investigator.investigate(
+                _case(), discover.get("fx-rates-investigator"), store=store
+            )
+        )
+        assert verdict.root_cause == UNKNOWN
+        assert "P-007-EVIDENCE-CORROBORATION" in verdict.unresolved
+
+    def test_a_governance_denial_still_propagates(self, monkeypatch):
+        """The distinction P-007's special case must not blur. A P-001 denial means the agent
+        reached for a tool it must never call; softening that into a low-confidence verdict is the
+        regression plan §3.5 names, and the previous test for it only asserted a property of a
+        tuple -- a mutation that softened the path passed the whole suite."""
+        from nav_sentinel.control_plane.policies import Effect, PolicyDecision, PolicyViolation
+
+        async def fake_run(_agent, _case):
+            raise PolicyViolation(
+                PolicyDecision(
+                    effect=Effect.DENY, policy_id="P-001-TOOL-ALLOWLIST",
+                    reason="reached for a tool it may not call",
+                    agent_ref="fx-rates-investigator@1.3.0", resource="edgar.fetch_filing_text",
+                )
+            )
+
+        monkeypatch.setattr(investigator, "_run", fake_run)
+        with pytest.raises(PolicyViolation, match="P-001"):
+            asyncio.run(
+                investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+            )
+
+    def test_an_unusable_answer_becomes_a_refusal_distinct_from_an_evidence_failure(
+        self, monkeypatch
+    ):
+        """"The model wrote prose" and "the filing was blocked" are different findings."""
+
+        async def fake_run(_agent, _case):
+            raise investigator.UnparseableAnswer("reply was not a valid verdict")
+
+        monkeypatch.setattr(investigator, "_run", fake_run)
+        verdict, _ = asyncio.run(
+            investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+        )
+        assert verdict.root_cause == UNKNOWN
+        assert "could not be parsed" in verdict.unresolved
+
+    def test_an_evidence_failure_becomes_a_refusal(self, monkeypatch):
+        from nav_sentinel.control_plane.model_armor import ArmorVerdict, ContentBlocked
+
+        async def fake_run(_agent, _case):
+            raise ContentBlocked(
+                ArmorVerdict(True, "MATCH_FOUND", ("pi_and_jailbreak",)), "https://x/y"
+            )
+
+        monkeypatch.setattr(investigator, "_run", fake_run)
+        verdict, _ = asyncio.run(
+            investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+        )
+        assert verdict.root_cause == UNKNOWN
+        assert "ContentBlocked" in verdict.unresolved
+
+    @pytest.mark.parametrize("token", ["unknown", "Unknown", "UNKNOWN.", "  unknown  "])
+    def test_a_lowercase_unknown_is_not_a_confident_diagnosis(self, monkeypatch, token):
+        """One character defeated `Verdict`'s "cannot be held confidently" validator, and the CLI
+        rendered "unknown" in its green panel as a diagnosis at 0.99 confidence."""
+        verdict, _ = self._investigate(
+            monkeypatch, VerdictDraft(root_cause=token, confidence=0.99, observation_ids=[])
+        )
+        assert verdict.asserts_a_cause is False
+        assert verdict.confidence == 0.0
+
+
+class TestAVerdictMustQuoteWhatItCites:
+    """The hole a review found after the previous round closed the returned-nothing variant: a real
+    GBP lookup returning 0.855 authorised *"the stale 2026-08-11 EUR/USD rate of 9.9999 instead of
+    the published 7.7777 to ISIN XX9999999999"* -- every figure invented, P-007 allowing it because
+    the fact *names* were present."""
+
+    @pytest.fixture
+    def rates(self, fx_manifest):
+        store = ObservationStore()
+        with identity.acting_as(fx_manifest.agent_id):
+            tools = {
+                t.nav_tool_name: t
+                for t in agent_surface.build(
+                    fx_manifest, case_id="CASE-1", trace_id=None, store=store
+                )
+            }
+            gbp = tools["ecb_fx.rate_on"](currency="GBP", day="2026-08-17")
+            usd = tools["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+        return store, gbp["observation_id"], usd["observation_id"]
+
+    def test_a_fabricated_cause_citing_a_real_lookup_is_refused(self, rates):
+        store, gbp, _ = rates
+        with identity.acting_as("fx-rates-investigator"):
+            verdict = investigator._finalise(
+                VerdictDraft(
+                    root_cause=(
+                        "Accounting applied the stale 2026-08-11 EUR/USD rate of 9.9999 instead "
+                        "of the published 7.7777 to ISIN XX9999999999"
+                    ),
+                    confidence=1.0,
+                    observation_ids=[gbp],
+                ),
+                _case(), "nav.fx_rate", store,
+            )
+        assert verdict.root_cause == UNKNOWN
+        assert "does not state the evidence it cites" in verdict.unresolved
+
+    def test_a_cause_stating_its_evidence_is_accepted(self, rates):
+        store, _, usd = rates
+        with identity.acting_as("fx-rates-investigator"):
+            verdict = investigator._finalise(
+                VerdictDraft(root_cause=_GROUNDED, confidence=0.9, observation_ids=[usd]),
+                _case(), "nav.fx_rate", store,
+            )
+        assert verdict.asserts_a_cause
+
+    def test_precision_in_the_books_matches_a_rounded_figure_in_prose(self, rates):
+        """`1.15670000` recorded and `1.1567` written are the same rate; a string comparison would
+        reject every true verdict."""
+        store, _, usd = rates
+        recorded = store.get(usd).observed["rate"]
+        assert investigator._appears_in(f"{Decimal(recorded):.8f}", f"the rate was {recorded}")
+
+    def test_a_percentage_may_be_written_scaled_or_unscaled(self):
+        """`0.15` recorded, "15%" written. Rejecting that would refuse every withholding verdict."""
+        assert investigator._appears_in("0.15", "withholding of 15% was omitted")
+        assert investigator._appears_in("0.15", "a rate of 0.15 applied")
+
+    def test_a_filename_is_not_something_a_verdict_must_recite(self):
+        """`filing` is citable so a reviewer can find the document, not so the model quotes it."""
+        assert investigator.unquoted_evidence(
+            Verdict(
+                case_id="CASE-1", capability="nav.corporate_action",
+                root_cause="The gross dividend was recognised without withholding",
+                confidence=0.9,
+                citations=[Citation(observation_id="OBS-x", relevance="r")],
+            ),
+            [
+                Observation(
+                    observation_id="OBS-x", case_id="CASE-1",
+                    agent_ref="corporate-actions-investigator@2.1.0",
+                    tool="corporate_action.notice_for", args="", digest="d",
+                    retrieved_at=observations.utcnow(), source="sec_edgar",
+                    observed={"filing": "ca_notice_abev_clean.txt"},
+                )
+            ],
+            ("filing",),
+        ) == []

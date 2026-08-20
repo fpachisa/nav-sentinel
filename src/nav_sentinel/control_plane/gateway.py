@@ -314,6 +314,16 @@ def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
 
 
+def evidence_requirement_for(capability: str) -> tuple[str, ...]:
+    """What the owning process demands a verdict cite for this capability.
+
+    Exposed here so the agents layer need not import `packs`: reading the catalogue means holding
+    `ToolSpec.fn`, the live ungated callable, which is exactly what the seam keeps away from
+    `agents/` -- and the seam test caught this being imported directly.
+    """
+    return packs.evidence_requirement_for(capability)
+
+
 def authorize_verdict(capability: str, cited_facts: frozenset[str]) -> PolicyDecision:
     """P-007. The acting agent comes from the bound identity; the requirement from the process.
 

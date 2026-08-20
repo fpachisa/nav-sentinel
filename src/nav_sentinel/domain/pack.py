@@ -67,7 +67,10 @@ PACK = ProcessPack(
     # entirely by our own trade records, and inventing a requirement for it would make the rule
     # decorative.
     evidence_requirements=(
-        ("nav.fx_rate", ("rate", "rate_date")),
+        # `currency` is required as well as the rate and its date. Without it a rate lookup for
+        # one pair corroborated a claim about another: measured, a GBP lookup returning 0.855
+        # satisfied a verdict asserting an invented EUR/USD rate of 9.9999.
+        ("nav.fx_rate", ("rate", "rate_date", "currency")),
         ("nav.corporate_action", ("filing",)),
     ),
     thresholds=(BPS_THRESHOLDS,),

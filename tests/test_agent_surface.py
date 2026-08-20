@@ -334,11 +334,12 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
     restated it. The rule is declared per capability by the pack and evaluated in the control
     plane, so a second process states its own and inherits the check."""
 
-    def test_the_nav_pack_requires_the_rate_and_its_date(self):
+    def test_the_nav_pack_requires_the_rate_its_date_and_its_currency(self):
         """Facts, not a tool namespace. Requiring a namespace only asked that *some* call to it had
         happened -- measured, a GBP lookup for an unrelated July date that returned nothing
-        satisfied it while every number in the verdict was invented."""
-        assert packs.evidence_requirement_for("nav.fx_rate") == ("rate", "rate_date")
+        satisfied it while every number in the verdict was invented. `currency` was added after a
+        GBP lookup that *did* return a value was found to corroborate an EUR/USD claim."""
+        assert packs.evidence_requirement_for("nav.fx_rate") == ("rate", "rate_date", "currency")
 
     def test_a_capability_with_no_declared_rule_requires_nothing(self):
         """Honest rather than absent: a settlement break is decided by our own trade records, and
@@ -350,7 +351,7 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
         gateway.clear_decision_log()
         with identity.acting_as("fx-rates-investigator"):
             decision = gateway.authorize_verdict(
-                "nav.fx_rate", frozenset({"rate", "rate_date", "as_of"})
+                "nav.fx_rate", frozenset({"rate", "rate_date", "as_of", "currency"})
             )
         assert decision.allowed
         assert decision.policy_id == "P-007-EVIDENCE-CORROBORATION"
