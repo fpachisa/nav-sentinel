@@ -564,4 +564,27 @@ Accepted with reasons, not silently dropped: `_version_key` ranks `2.0.0-rc1` ab
 | S0-R.7 windowed screening + extractor | covered by plan reviews | done | **APPROVE WITH CHANGES** — applied | **yes** |
 | **S0-R gate** | — | — | **closed** | **yes** |
 | S0c offline reproducibility | covered by plan reviews | done | pending | — |
-| S7a deployment vertical slice | done | done | done | done, 3 CRITICAL + 7 MAJOR fixed |
+| S7a deployment vertical slice | done | done | done | **closed** — 2 review rounds, 3 CRITICAL + 7 MAJOR then 2 CRITICAL + 5 MAJOR, all fixed |
+| **S7a gate** | — | — | **closed** | **yes** — `nav-sentinel-00010-9x9`, [evidence](evidence/S7a-cloud-run.md) |
+| S1 + S1.5 agent layer | **v3, 2 review rounds** | pending | — | — |
+
+**What the S7a rounds cost and bought.** Two adversarial rounds found ten then seven defects, and
+the three that mattered most in each round were the same shape: *a control that reported success in
+states where it had never run*. The self-test recorded an exception's class name, so a 503 on the
+injection call scored as a denial; `spans_exported` came from a `force_flush` that returns True even
+when every export raised **and** when spans were dropped on a full queue; the governance log was a
+process-global list cleared per request on a service running at concurrency 80. None would have
+failed a test. Round two then found that the first fix for the span signal was itself incomplete —
+counting export failures cannot see a drop, because a dropped span never reaches the exporter.
+
+The rule that produced these findings is worth keeping for S1: **ask of every green signal what
+state would make it red, and then produce that state.** Where the answer was "nothing", the signal
+was decoration.
+
+Five further defects surfaced while reviewing the S1 *plan* against committed code, each of which
+would have cost a day on 25 August: `source_uri` was patterned to accept no URI at all, both
+corporate-action notices named Abbott's ISIN while the security master named Ambev's — making the
+poisoned and clean notices indistinguishable, which is the one thing that control decides — the
+extractor asserted the caller's ISIN over the document's, an oversized document could not be
+refused without credentials, and the ECB cassette answered two days out of nine, removing the FX
+investigator's scope before it was written. All five are closed with tests.
