@@ -76,6 +76,13 @@ class ScenarioResult:
     cause_missing_facts: tuple[str, ...] = ()
     cause_missing_figures: tuple[str, ...] = ()
     refused: str | None = None
+    #: A control rejected the proposal the model drafted. Kept distinct from `refused` because the
+    #: two mean opposite things: `refused` is the fleet correctly declining (the adversarial pricing
+    #: case's expected outcome), while this is a model mistake a control caught. The distinction is
+    #: load-bearing for `posts_nothing_correctly` -- proposing nothing is the right answer for a
+    #: reconciling item, and a rejected draft also produces no legs, so without this field a
+    #: rejected draft would be *credited* as the correct answer.
+    draft_rejected: str | None = None
     note: str = ""
 
     @property
@@ -91,8 +98,11 @@ class ScenarioResult:
 
     @property
     def posts_nothing_correctly(self) -> bool:
-        """For a reconciling item: proposing nothing *is* the right answer."""
-        return not self.legs and not self.spurious
+        """For a reconciling item: proposing nothing *is* the right answer.
+
+        A draft a control rejected is not that. It produced no legs for the opposite reason.
+        """
+        return not self.legs and not self.spurious and self.draft_rejected is None
 
     @property
     def cause_correct(self) -> bool:

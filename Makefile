@@ -2,7 +2,7 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
+.PHONY: ta help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
 # `eval` collides with the eval/ directory, so without .PHONY make reports it up to date and
 # silently runs nothing -- a target that appears to succeed while doing no work.
 
@@ -54,6 +54,9 @@ demo: ## Run one reconciliation cycle: detect, score, band, route, trace
 
 investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike `demo`
 	$(PY) -m nav_sentinel.pipeline.investigate_cli
+
+ta:  ## one transfer-agency cycle: the same investigator, a different process
+	$(PY) -m nav_sentinel.ta_cli
 
 eval: ## Score the fleet against the golden, beside a heuristic baseline. NEEDS a live model
 	$(PY) -m nav_sentinel.evaluation.runner

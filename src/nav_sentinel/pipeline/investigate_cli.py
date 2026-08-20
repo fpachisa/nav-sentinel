@@ -128,7 +128,7 @@ def main() -> int:
 
     with audit.case_trace(facts) as (_span, trace_id, band):
         verdict, store = asyncio.run(
-            investigator.investigate(case, agent, trace_id=trace_id)
+            investigator.investigate(case.to_brief(), agent, trace_id=trace_id)
         )
 
     # `Text`, not an f-string with markup. Model output and filing-derived text are interpolated

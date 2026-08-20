@@ -13,6 +13,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nav_sentinel.control_plane.governance import CaseBrief, CaseFacts, Impact
+
 
 class DealType(StrEnum):
     SUBSCRIPTION = "subscription"
@@ -100,3 +102,54 @@ class RegisterCase(BaseModel):
     def recurrence_key(self) -> str:
         holders = sorted({b.holder_id for b in self.breaks if b.holder_id})
         return f"{self.fund_id}:holder:{holders[0]}" if holders else f"{self.fund_id}:fund"
+
+    def to_facts(self) -> CaseFacts:
+        """Hand the control plane exactly what it is permitted to know.
+
+        The counterpart of the fund-accounting `to_facts`, and the thing that makes the units
+        banding real rather than merely demonstrated. That the control plane can band a units
+        magnitude was proved by a test building these `CaseFacts` by hand -- which showed the
+        platform *could* do it, not that this process ever asked it to. The magnitude goes over with
+        its unit attached and the band comes back derived; nothing here computes one.
+        """
+        return CaseFacts(
+            case_id=self.case_id,
+            subject_id=self.fund_id,
+            as_of=self.as_of,
+            capability=self.capability,
+            impact=(
+                Impact(value=self.units_at_risk, unit="units")
+                if self.units_at_risk is not None
+                else None
+            ),
+            status=self.status,
+            severity=self.severity,
+            item_count=len(self.breaks),
+            recurrence_key=self.recurrence_key,
+        )
+
+    def to_brief(self) -> CaseBrief:
+        """Hand an investigator exactly what it is permitted to know.
+
+        The same flat value the fund-accounting side produces, describing a different kind of break:
+        two unit counts and a holder, where a fund case has an accounting value, a custodian value
+        and an ISIN. That difference is the whole argument for the breaks arriving as prose -- this
+        process renders its own, and the investigator it is handed to is the same code, unchanged.
+
+        Units are rendered plainly and never as money. A register break of 125,000 is 125,000
+        *units*; labelling it with a currency would be a false statement in the one place a model is
+        most likely to believe it.
+        """
+        return CaseBrief(
+            case_id=self.case_id,
+            subject_id=self.fund_id,
+            as_of=self.as_of,
+            capability=self.capability,
+            breaks="\n".join(
+                f"  - {b.break_type.value}: holder {b.holder_id}, registrar "
+                f"{b.registrar_units} units, fund ledger {b.ledger_units} units, "
+                f"difference {b.difference} units"
+                + (f" ({b.note})" if b.note else "")
+                for b in self.breaks
+            ),
+        )

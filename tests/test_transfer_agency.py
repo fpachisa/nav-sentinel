@@ -271,3 +271,147 @@ class TestThePlatformWasNotTouched:
                     "nav_sentinel.control_plane"
                 ):
                     assert node.module in allowed, f"{path.name} imports {node.module}"
+
+
+class TestTheInvestigatorIsReachableAndNotJustPublished:
+    """The defect this class exists for: `register-investigator` was published, discoverable,
+    `validate_fleet`-clean, allow-listed and **unrunnable**. `investigate()` was annotated with
+    fund accounting's `ExceptionCase`, this package may not import `domain`, so no code path could
+    hand it a case -- while `make registry` printed the agent beside `ta.subscription_in_transit`
+    as though that capability were handled. A registered agent nothing can call is worse than an
+    absent one, because the registry advertises it."""
+
+    def test_detect_alone_leaves_nothing_to_route_on(self):
+        """The precondition of the bug, kept as a test so the fix cannot be quietly undone.
+
+        `detect` is arithmetic and does not classify. If a future change makes it set a capability,
+        the deterministic `classify` step below is what should be doing it.
+        """
+        assert _case().capability == "ta.unclassified"
+
+    def test_classification_routes_a_transit_break_without_a_model(self):
+        from nav_sentinel.transfer_agency import cycle
+
+        assert cycle.classify(_case()).capability == "ta.subscription_in_transit"
+
+    def test_a_break_transit_does_not_explain_is_not_claimed(self):
+        """Half a timing difference is not a timing difference. Claiming the capability would hand
+        the case to an agent whose whole competence is explaining transit, for a break that is
+        partly something else."""
+        from nav_sentinel.transfer_agency import cycle
+
+        case = _case()
+        inflated = case.model_copy(
+            update={"breaks": [case.breaks[0].model_copy(update={"registrar_units": D(9999999)})]}
+        )
+        assert cycle.classify(inflated).capability == "ta.unclassified"
+
+    def test_a_holder_with_no_deals_in_transit_is_not_claimed(self):
+        from nav_sentinel.transfer_agency import cycle
+
+        case = _case()
+        orphan = case.model_copy(
+            update={"breaks": [case.breaks[0].model_copy(update={"holder_id": "HOLD-999"})]}
+        )
+        assert cycle.classify(orphan).capability == "ta.unclassified"
+
+    def test_the_cycle_hands_the_investigator_a_brief_it_can_read(self):
+        """End to end with the model replaced, which is the part that never ran before."""
+        import asyncio
+
+        from nav_sentinel.transfer_agency import cycle
+
+        seen = []
+
+        async def fake(brief):
+            seen.append(brief)
+            return "verdict"
+
+        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake))
+        assert len(seen) == 1, "the investigator was not called"
+        brief = seen[0]
+        assert brief.capability == "ta.subscription_in_transit"
+        assert brief.subject_id == FUND
+        assert "125000" in brief.breaks.replace(",", "")
+        assert results[0].resolved
+
+    def test_an_unrouted_capability_never_reaches_an_agent(self):
+        """`ta.transfer_mismatch` is published by nobody. The cycle must stop, not improvise."""
+        import asyncio
+
+        from nav_sentinel.transfer_agency import cycle
+
+        called = []
+
+        async def fake(brief):
+            called.append(brief)
+            return "verdict"
+
+        results = asyncio.run(cycle.run(FUND, AS_OF, investigate=fake, investigable=frozenset()))
+        assert called == []
+        assert results and not results[0].resolved
+        assert "no agent handles" in results[0].refused
+
+    def test_a_units_break_is_never_described_as_money(self):
+        """The one place a wrong label would be believed. A register break of 125,000 is units."""
+        brief = _case().to_brief()
+        assert "units" in brief.breaks
+        for symbol in ("EUR", "USD", "GBP", "$", "€"):
+            assert symbol not in brief.breaks
+
+    def test_the_band_comes_from_facts_this_process_actually_emits(self):
+        """The units banding was previously proved against a hand-built `CaseFacts`, so it showed
+        the platform *could* band units, not that this process ever asked it to."""
+        from nav_sentinel.transfer_agency import cycle
+
+        facts = cycle.classify(_case()).to_facts()
+        assert facts.impact is not None
+        assert facts.impact.unit == "units"
+        assert gateway.route_for_approval(facts).metadata["band"] == "four_eyes"
+
+    def test_it_runs_the_same_investigator_the_fund_fleet_runs(self):
+        """The extensibility claim, as an identity check rather than a paragraph. Not a copy, not a
+        subclass -- the same function object."""
+        from nav_sentinel.agents import investigator
+        from nav_sentinel.pipeline import investigate_cli
+
+        assert investigate_cli.investigator.investigate is investigator.investigate
+
+    def test_the_investigator_imports_no_process_module(self):
+        """The structural reason the coupling cannot come back. It was annotation-deep last time --
+        `TYPE_CHECKING` only -- which is exactly why nothing caught it."""
+        import ast
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "nav_sentinel"
+            / "agents"
+            / "investigator.py"
+        )
+        reached = [
+            node.module
+            for node in ast.walk(ast.parse(source.read_text()))
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").startswith(
+                ("nav_sentinel.domain", "nav_sentinel.tools", "nav_sentinel.transfer_agency")
+            )
+        ]
+        assert not reached, reached
+
+    def test_it_reads_its_own_prompt_and_not_the_fund_fleets(self):
+        from nav_sentinel.agents import investigator, prompts
+
+        chosen = prompts.first_available(("register-investigator", "investigator"))
+        assert chosen == "register-investigator"
+        instruction = investigator._instruction(
+            discover.get("register-investigator"), _case().to_brief()
+        )
+        assert "register" in instruction.lower()
+        assert "$" not in instruction, "a placeholder was left unsubstituted"
+
+    def test_an_agent_without_its_own_template_falls_back_to_the_shared_one(self):
+        from nav_sentinel.agents import prompts
+
+        assert prompts.first_available(("fx-rates-investigator", "investigator")) == "investigator"

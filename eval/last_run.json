@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-08-20T08:11:03.438532+00:00",
+  "recorded_at": "2026-08-20T09:34:15.284405+00:00",
   "sample_size": 7,
   "scored": 7,
   "skipped": [],
@@ -23,7 +23,7 @@
         7
       ],
       "causes": [
-        5,
+        4,
         8
       ],
       "cycle_legs": [
@@ -40,11 +40,14 @@
             "investments_at_market EUR -86625.48",
             "investments_at_market EUR 4649020.49",
             "missing stock_record None 0.00",
-            "missing cash_at_bank USD -38062.50",
-            "missing investments_at_market USD -3724800.00",
-            "missing cash_at_bank USD 3724800.00"
+            "expected cash_at_bank USD -38062.50, got cash_at_bank USD 3686737.5",
+            "expected investments_at_market USD -3724800.00, got investments_at_market USD -3686737.5",
+            "expected cash_at_bank USD 3724800.00, got cash_at_bank USD 3686737.5"
           ],
-          []
+          [
+            "cash_at_bank USD 3686737.5",
+            "investments_at_market USD -3686737.5"
+          ]
         ]
       ],
       "cases": [
@@ -54,10 +57,13 @@
           "actual": "nav.corporate_action",
           "routed": true,
           "classified": true,
-          "cause_correct": true,
+          "cause_correct": false,
           "missing_facts": [],
-          "missing_figures": [],
-          "refused": null
+          "missing_figures": [
+            "38062.5"
+          ],
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CASE-MERID-GEF-2026-08-17-cash-EUR",
@@ -68,7 +74,8 @@
           "cause_correct": true,
           "missing_facts": [],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET, SETTLE_FAILED_TRADE",
@@ -82,7 +89,8 @@
             "settlement_date"
           ],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE",
@@ -96,7 +104,8 @@
             "settlement_date"
           ],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "FX_INVERTED_CROSS",
@@ -107,7 +116,8 @@
           "cause_correct": true,
           "missing_facts": [],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "FX_STALE_RATE",
@@ -118,7 +128,8 @@
           "cause_correct": true,
           "missing_facts": [],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CA_STOCK_SPLIT_NOT_APPLIED",
@@ -129,7 +140,8 @@
           "cause_correct": true,
           "missing_facts": [],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "SETTLE_FAILED_TRADE",
@@ -143,7 +155,8 @@
             "settlement_date"
           ],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": "Value error, a journal entry cannot restate a quantity; propose a quantity_restatement"
         }
       ]
     },
@@ -206,7 +219,8 @@
             "2.5375E+5",
             "215687.5"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CASE-MERID-GEF-2026-08-17-cash-EUR",
@@ -217,7 +231,8 @@
           "cause_correct": true,
           "missing_facts": [],
           "missing_figures": [],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET, SETTLE_FAILED_TRADE",
@@ -234,7 +249,8 @@
             "1.2E+5",
             "2026"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE",
@@ -250,7 +266,8 @@
           "missing_figures": [
             "2026"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "FX_INVERTED_CROSS",
@@ -267,7 +284,8 @@
             "0.855",
             "1.16959064"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "FX_STALE_RATE",
@@ -285,7 +303,8 @@
             "1.1593",
             "2026"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "CA_STOCK_SPLIT_NOT_APPLIED",
@@ -300,7 +319,8 @@
           "missing_figures": [
             "2026"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         },
         {
           "covers": "SETTLE_FAILED_TRADE",
@@ -316,7 +336,8 @@
           "missing_figures": [
             "2026"
           ],
-          "refused": null
+          "refused": null,
+          "draft_rejected": null
         }
       ]
     }

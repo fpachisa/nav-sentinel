@@ -15,7 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Governance vocabulary belongs to the control plane, not to fund accounting. Imported here so
 # the domain speaks it; defined there so the control plane never imports a domain type.
-from nav_sentinel.control_plane.governance import ApprovalClass, CaseFacts, Impact
+from nav_sentinel.control_plane.governance import (
+    ApprovalClass,
+    CaseBrief,
+    CaseFacts,
+    Impact,
+)
 
 # --------------------------------------------------------------------------- enums
 
@@ -339,6 +344,12 @@ class RemediationProposal(BaseModel):
     """A *proposal*. No agent in the fleet is permitted to post one; the Agent Gateway
     rejects any attempt to commit without a recorded human approval."""
 
+    #: Extras forbidden, like every other model at a boundary here. This was the one place on the
+    #: posting path that silently discarded an unknown field, found when a test misspelled
+    #: `quantity_lines` as `quantity_restatements` and pydantic accepted the proposal without the
+    #: restatement -- which is precisely how a correction gets approved for less than it claims.
+    model_config = ConfigDict(extra="forbid")
+
     proposal_id: str
     outcome: Outcome = Outcome.JOURNAL_ENTRY
     lines: list[JournalEntryLine] = Field(default_factory=list)
@@ -512,4 +523,28 @@ class ExceptionCase(BaseModel):
             # A stock-record break does not clear on monetary materiality. The domain knows why;
             # the control plane only needs to know that it must not.
             no_auto_clear=bool(self.quantity_breaks),
+        )
+
+    def to_brief(self) -> CaseBrief:
+        """Hand an investigator exactly what it is permitted to know.
+
+        Lossy in the same way `to_facts` is, and for the same reason. The break rendering below used
+        to live inside `agents/investigator.py`, which meant a supposedly process-agnostic function
+        read `accounting_value`, `custodian_value` and `isin` -- fund accounting's vocabulary -- off
+        every case it was given. A second process could not describe its own breaks there, so it
+        could not use the investigator at all.
+        """
+        return CaseBrief(
+            case_id=self.case_id,
+            subject_id=self.fund_id,
+            as_of=self.as_of,
+            capability=self.capability,
+            breaks="\n".join(
+                f"  - {b.break_type.value}: accounting {b.accounting_value}, custodian "
+                f"{b.custodian_value}, difference {b.difference}"
+                + (f", ISIN {b.isin}" if b.isin else "")
+                + (f", local currency {b.currency}" if b.currency else "")
+                + (f" ({b.note})" if b.note else "")
+                for b in self.breaks
+            ),
         )

@@ -53,12 +53,12 @@ from nav_sentinel.agents.contract import (
 from nav_sentinel.control_plane import agent_surface, gateway, identity, telemetry
 from nav_sentinel.control_plane.extraction import ExtractionFailed, ExtractionRejected
 from nav_sentinel.control_plane.gateway import ContentUnscreenable, ToolFailed
+from nav_sentinel.control_plane.governance import CaseBrief
 from nav_sentinel.control_plane.model_armor import ContentBlocked
 from nav_sentinel.control_plane.observations import Observation, ObservationStore
 from nav_sentinel.control_plane.policies import PolicyViolation
 
 if TYPE_CHECKING:  # pragma: no cover
-    from nav_sentinel.domain.models import ExceptionCase
     from nav_sentinel.registry.models import AgentManifest
 
 logger = logging.getLogger(__name__)
@@ -133,28 +133,28 @@ def adk_name(agent_id: str) -> str:
     return re.sub(r"[^0-9a-zA-Z_]", "_", agent_id)
 
 
-def _instruction(manifest: AgentManifest, case: ExceptionCase) -> str:
+def _instruction(manifest: AgentManifest, case: CaseBrief) -> str:
     """Fill this agent's template.
 
-    The prose lives in `domain/prompts/investigator.md`. The facts the process requires are read
-    from the pack and named in the instruction, so a changed rule changes what the model is told
-    rather than leaving it working to a stale one.
+    The prose lives in a file the *process* ships -- `domain/prompts/investigator.md` for the fund
+    fleet, `transfer_agency/prompts/register-investigator.md` for the register -- resolved by the
+    agent's own id first, so an override is a new file and no code change. The facts the process
+    requires are read from the pack and named in the instruction, so a changed rule changes what the
+    model is told rather than leaving it working to a stale one.
+
+    The breaks arrive already rendered. Only the process knows what a break of its own kind looks
+    like, and this function used to know fund accounting's -- reading `accounting_value`,
+    `custodian_value` and `isin` off every case -- which is why a share-register case could not be
+    described here at all.
     """
     return prompts.render(
-        "investigator",
+        prompts.first_available((manifest.agent_id, "investigator")),
         display_name=manifest.display_name,
         description=manifest.description.strip(),
-        fund_id=case.fund_id,
+        fund_id=case.subject_id,
         as_of=case.as_of.isoformat(),
         case_id=case.case_id,
-        breaks="\n".join(
-            f"  - {b.break_type.value}: accounting {b.accounting_value}, custodian "
-            f"{b.custodian_value}, difference {b.difference}"
-            + (f", ISIN {b.isin}" if b.isin else "")
-            + (f", local currency {b.currency}" if b.currency else "")
-            + (f" ({b.note})" if b.note else "")
-            for b in case.breaks
-        ),
+        breaks=case.breaks,
         required=", ".join(gateway.evidence_requirement_for(case.capability))
         or "no particular facts",
         unknown=UNKNOWN,
@@ -162,7 +162,7 @@ def _instruction(manifest: AgentManifest, case: ExceptionCase) -> str:
 
 
 async def investigate(
-    case: ExceptionCase,
+    case: CaseBrief,
     manifest: AgentManifest,
     *,
     trace_id: str | None = None,
@@ -268,7 +268,7 @@ async def investigate(
             return verdict, store
 
 
-async def _run(agent, case: ExceptionCase) -> VerdictDraft:
+async def _run(agent, case: CaseBrief) -> VerdictDraft:
     """Drive the ADK agent once and return its structured draft."""
     from google.adk.agents.run_config import RunConfig
     from google.adk.runners import InMemoryRunner
@@ -320,7 +320,7 @@ async def _run(agent, case: ExceptionCase) -> VerdictDraft:
 
 def _finalise(
     draft: VerdictDraft,
-    case: ExceptionCase,
+    case: CaseBrief,
     capability: str,
     store: ObservationStore,
 ) -> Verdict:

@@ -231,7 +231,7 @@ class TestRoutingStaysWithTheRegistry:
             "nav_sentinel.domain.models", fromlist=["BreakCategory"]
         ).BreakCategory.FX_RATE
         with pytest.raises(investigator.NotAuthorisedForCapability, match="does not declare"):
-            asyncio.run(investigator.investigate(case, discover.get("triage-agent")))
+            asyncio.run(investigator.investigate(case.to_brief(), discover.get("triage-agent")))
 
 
 class TestRepublishingChangesRoutingWithoutARestart:

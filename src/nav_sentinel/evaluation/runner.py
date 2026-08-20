@@ -23,6 +23,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -124,7 +125,7 @@ async def _run_fleet(
         return result, ([], [])
     result.routed = True
 
-    verdict, store = await investigator.investigate(case, agent)
+    verdict, store = await investigator.investigate(case.to_brief(), agent)
     cited = store.facts_from([c.observation_id for c in verdict.citations])
     result.cause_cites = cited
     result.cause_missing_facts, result.cause_missing_figures = _score_cause_union(
@@ -134,8 +135,24 @@ async def _run_fleet(
         result.refused = verdict.unresolved[:200]
         return result, ([], [])
 
-    proposal = await remediation.draft(case, verdict, discover.get("remediation-agent"))
+    try:
+        proposal = await remediation.draft(case, verdict, discover.get("remediation-agent"))
+    except ValidationError as exc:
+        # A control refusing a malformed proposal is the control working; the harness dying on it is
+        # the harness being brittle. One model mistake on one scenario used to abort the whole run
+        # and lose the other six scores, and the traceback read as a code bug rather than as the
+        # domain catching a bad draft -- exactly the failure mode this suite exists to measure.
+        # `PolicyViolation` is deliberately not caught: a governance denial is not a scoring outcome.
+        result.draft_rejected = _first_error(exc)
+        return result, ([], [])
     return result, (proposal.nav_legs, proposal.quantity_legs)
+
+
+def _first_error(exc: ValidationError) -> str:
+    """The validator's own message, not pydantic's wrapper -- the wrapper buries it under a repr of
+    the whole rejected proposal, which is unreadable in a scorecard cell."""
+    errors = exc.errors()
+    return str(errors[0].get("msg", exc)) if errors else str(exc)
 
 
 def _score_cause_union(
@@ -192,9 +209,7 @@ def run(live: bool = True) -> dict[str, Any]:
 
         covered = scenarios_by_case(cycle.scenarios, cases)
         matched = {s.scenario for group in covered.values() for s in group}
-        uncovered.extend(
-            s.scenario for s in cycle.scenarios if s.scenario not in matched
-        )
+        uncovered.extend(s.scenario for s in cycle.scenarios if s.scenario not in matched)
 
         expected_legs = [
             correction
@@ -224,7 +239,11 @@ def run(live: bool = True) -> dict[str, Any]:
             leg_totals[name][0] += sum(1 for x in scores if x.matched)
             leg_totals[name][1] += len(scores)
             (fleet if name == "fleet" else heuristic).cycle_legs.append(
-                (as_of.isoformat(), [x.detail for x in scores], [f"{a} {c} {v}" for a, c, v in spurious])
+                (
+                    as_of.isoformat(),
+                    [x.detail for x in scores],
+                    [f"{a} {c} {v}" for a, c, v in spurious],
+                )
             )
 
     total = sum(len(c.scenarios) for c in reference.cycles)
@@ -265,6 +284,7 @@ def run(live: bool = True) -> dict[str, Any]:
                         "missing_facts": list(s.cause_missing_facts),
                         "missing_figures": list(s.cause_missing_figures),
                         "refused": s.refused,
+                        "draft_rejected": s.draft_rejected,
                     }
                     for s in score.scenarios
                 ],
@@ -309,6 +329,22 @@ def render(report: dict[str, Any], console: Console | None = None) -> None:
             f"\n  [red]{len(report['skipped'])} of {n} scenarios were not scored: "
             f"{', '.join(report['skipped'])}. The rates above are out of {scored}, not {n}.[/red]"
         )
+
+    rejected = [
+        (name, case["covers"], case["draft_rejected"])
+        for name in report["systems"]
+        for case in report["systems"][name]["cases"]
+        if case.get("draft_rejected")
+    ]
+    if rejected:
+        # Loudly, for the same reason skipped scenarios are. A control catching a bad draft is the
+        # system working, but it is still a miss, and a silent one would read as a clean sweep.
+        console.print()
+        for name, covers, why in rejected:
+            console.print(
+                f"  [yellow]{name} · a control rejected the draft for {covers}: {why}[/yellow]"
+            )
+        console.print('  [dim]Counted as a miss, never as "correctly proposed nothing".[/dim]')
 
     console.print(
         f"\n  [dim]N={scored}. One miss is {1 / scored:.1%}, so these are indicative and not a "

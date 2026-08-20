@@ -102,7 +102,7 @@ class TestTheAgentIsBuiltFromItsManifest:
             Agent(name=investigator.adk_name(manifest.agent_id), model=manifest.model)
 
     def test_the_prompt_names_the_case_and_its_breaks(self, fx_manifest):
-        prompt = investigator._instruction(fx_manifest, _case())
+        prompt = investigator._instruction(fx_manifest, _case().to_brief())
         assert "CASE-1" in prompt and "2026-08-17" in prompt
         assert "US0378331005" in prompt
         assert "38624967.58" in prompt
@@ -111,7 +111,7 @@ class TestTheAgentIsBuiltFromItsManifest:
         """A rejection the model was never warned about is not correctable -- and a rule the prompt
         promises but nothing enforces is worse: the first version told the model that naming an
         uncited value would be rejected, and nothing checked it for two commits."""
-        prompt = investigator._instruction(fx_manifest, _case())
+        prompt = investigator._instruction(fx_manifest, _case().to_brief())
         assert "observation_id" in prompt
         assert "cites no observations" in prompt
         assert "cannot be found in the observations you cited" in prompt
@@ -121,13 +121,13 @@ class TestTheAgentIsBuiltFromItsManifest:
     def test_the_prompt_names_the_facts_the_process_actually_requires(self, fx_manifest):
         """Read from the pack, so a process changing its rule changes the instruction rather than
         leaving the model working to a stale one."""
-        prompt = investigator._instruction(fx_manifest, _case())
+        prompt = investigator._instruction(fx_manifest, _case().to_brief())
         for fact in ("rate", "rate_date", "currency"):
             assert fact in prompt
 
     def test_the_prompt_does_not_tell_the_agent_it_may_fix_anything(self, fx_manifest):
         """No investigator may draft or post, so the prompt must not imply otherwise."""
-        prompt = investigator._instruction(fx_manifest, _case()).lower()
+        prompt = investigator._instruction(fx_manifest, _case().to_brief()).lower()
         assert "you do not fix anything" in prompt
         for forbidden in ("post the", "journal entry", "correct the books"):
             assert forbidden not in prompt
@@ -352,7 +352,7 @@ def _investigate_live(isin: str):
     case.category = BreakCategory.FX_RATE
     try:
         result = asyncio.run(
-            investigator.investigate(case, discover.get("fx-rates-investigator"))
+            investigator.investigate(case.to_brief(), discover.get("fx-rates-investigator"))
         )
     except Exception as exc:  # noqa: BLE001
         if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc).upper():
@@ -417,7 +417,7 @@ class TestInvestigateItselfNeverRaisesForAModelMistake:
         monkeypatch.setattr(investigator, "_run", fake_run)
         case = _case()
         return asyncio.run(
-            investigator.investigate(case, discover.get("fx-rates-investigator"))
+            investigator.investigate(case.to_brief(), discover.get("fx-rates-investigator"))
         )
 
     def test_an_invented_observation_id_becomes_a_refusal(self, monkeypatch):
@@ -459,7 +459,7 @@ class TestInvestigateItselfNeverRaisesForAModelMistake:
         monkeypatch.setattr(investigator, "_run", fake_run)
         verdict, _ = asyncio.run(
             investigator.investigate(
-                _case(), discover.get("fx-rates-investigator"), store=store
+                _case().to_brief(), discover.get("fx-rates-investigator"), store=store
             )
         )
         assert verdict.root_cause == UNKNOWN
@@ -484,7 +484,7 @@ class TestInvestigateItselfNeverRaisesForAModelMistake:
         monkeypatch.setattr(investigator, "_run", fake_run)
         with pytest.raises(PolicyViolation, match="P-001"):
             asyncio.run(
-                investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+                investigator.investigate(_case().to_brief(), discover.get("fx-rates-investigator"))
             )
 
     def test_an_unusable_answer_becomes_a_refusal_distinct_from_an_evidence_failure(
@@ -497,7 +497,7 @@ class TestInvestigateItselfNeverRaisesForAModelMistake:
 
         monkeypatch.setattr(investigator, "_run", fake_run)
         verdict, _ = asyncio.run(
-            investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+            investigator.investigate(_case().to_brief(), discover.get("fx-rates-investigator"))
         )
         assert verdict.root_cause == UNKNOWN
         assert "could not be parsed" in verdict.unresolved
@@ -512,7 +512,7 @@ class TestInvestigateItselfNeverRaisesForAModelMistake:
 
         monkeypatch.setattr(investigator, "_run", fake_run)
         verdict, _ = asyncio.run(
-            investigator.investigate(_case(), discover.get("fx-rates-investigator"))
+            investigator.investigate(_case().to_brief(), discover.get("fx-rates-investigator"))
         )
         assert verdict.root_cause == UNKNOWN
         assert "ContentBlocked" in verdict.unresolved

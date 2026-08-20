@@ -55,6 +55,23 @@ def path_for(agent_id: str) -> Path:
     )
 
 
+def first_available(candidates: tuple[str, ...]) -> str:
+    """The first candidate any registered process ships a template for.
+
+    Lets several agents share one template while any of them overrides it by filename. The three
+    fund-accounting investigators all read `investigator.md`; `register-investigator` ships its own,
+    because a share register's instructions are not a fund's. Resolution is by the agent's own id
+    first, so shipping an override is adding a file and changing no code.
+    """
+    for candidate in candidates:
+        try:
+            path_for(candidate)
+        except PromptMissing:
+            continue
+        return candidate
+    raise PromptMissing(f"no registered process ships a template for any of {list(candidates)}.")
+
+
 def load(agent_id: str) -> str:
     return path_for(agent_id).read_text()
 

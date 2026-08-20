@@ -466,7 +466,7 @@ class TestDraftingAgainstTheRealModel:
         case = _scored_case(isin)
         case.category = category
         agent = discover.discover_for_capability(case.capability)
-        verdict, _ = asyncio.run(investigator.investigate(case, agent))
+        verdict, _ = asyncio.run(investigator.investigate(case.to_brief(), agent))
         if not verdict.asserts_a_cause:
             pytest.skip(f"the investigator reached no cause: {verdict.unresolved[:120]}")
         return asyncio.run(
@@ -603,3 +603,43 @@ class TestAQuantityLegIsNotAMoneyLeg:
         for cycle in golden.load().cycles:
             check = scoring.check_closure(cycle, cycle_runner._fixture_rates(cycle.nav_date))
             assert check.closes, str(check)
+
+
+class TestOneModelMistakeDoesNotDestroyTheWholeEvaluation:
+    """`make eval` aborted on a traceback when the domain refused a malformed proposal, losing the
+    scores for every other scenario in the run. A control rejecting a bad draft is the control
+    working; the harness dying on it is the harness being brittle -- and on camera it reads as a
+    code bug rather than as the system catching a model out."""
+
+    def test_a_rejected_draft_is_never_credited_as_proposing_nothing(self):
+        """The scoring hazard the separate field exists for. `posts_nothing_correctly` is the right
+        answer for a reconciling item, and a rejected draft also yields no legs -- so sharing the
+        `refused` channel would have scored a caught mistake as a correct abstention."""
+        from nav_sentinel.evaluation import scoring
+
+        abstained = scoring.ScenarioResult(scenario="s", capability_expected="nav.fx_rate")
+        assert abstained.posts_nothing_correctly
+
+        rejected = scoring.ScenarioResult(
+            scenario="s",
+            capability_expected="nav.fx_rate",
+            draft_rejected="a journal entry cannot restate a quantity",
+        )
+        assert not rejected.posts_nothing_correctly
+
+    def test_the_validators_own_message_survives_into_the_scorecard(self):
+        """Not pydantic's wrapper, which buries it under a repr of the whole rejected proposal."""
+        from nav_sentinel.evaluation.runner import _first_error
+
+        with pytest.raises(ValidationError) as caught:
+            _proposal(
+                quantity_lines=[
+                    QuantityRestatementLine(
+                        account="stock_record",
+                        isin="US0378331005",
+                        from_quantity=D(96000),
+                        to_quantity=D(192000),
+                    )
+                ]
+            )
+        assert "cannot restate a quantity" in _first_error(caught.value)

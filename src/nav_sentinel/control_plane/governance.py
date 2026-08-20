@@ -168,3 +168,37 @@ class PolicyViolation(RuntimeError):
     def __init__(self, decision: PolicyDecision) -> None:
         super().__init__(f"[{decision.policy_id}] {decision.reason}")
         self.decision = decision
+
+
+class CaseBrief(BaseModel):
+    """Everything an investigator is permitted to know about a case.
+
+    The second seam, and the same shape as `CaseFacts` for the same reason. `investigate()` used
+    to be annotated `ExceptionCase` -- fund accounting's type -- while touching only five of its
+    members and importing no domain module at all. So the coupling was annotation-deep, and the
+    consequence was concrete: the transfer-agency pack may not import `domain`, therefore no code
+    path could hand its case to the investigator, therefore `register-investigator` was published,
+    discoverable, `validate_fleet`-clean and **unrunnable**. `make registry` printed it beside
+    `ta.subscription_in_transit` as though that capability were handled.
+
+    A Protocol was rejected here for the reason the `CaseFacts` docstring gives: the one member
+    that is genuinely process-shaped is the break list -- fund accounting has an accounting value,
+    a custodian value and an ISIN; a share register has two unit counts and a holder -- so a
+    Protocol over `.breaks` would have restated the coupling instead of removing it. The process
+    renders its own breaks into prose it owns and hands over a flat value.
+
+    `breaks` is therefore **already-rendered text**, deliberately. The investigator interpolates it
+    into a prompt, and prose is what a prompt takes; keeping it structured would force this module
+    to learn a break's shape, which is the coupling it exists to break.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    case_id: str
+    #: The process's own subject identifier -- a fund, a share class. Opaque here, and named
+    #: `subject_id` rather than `fund_id` so the type does not carry one process's vocabulary.
+    subject_id: str
+    as_of: date
+    capability: str
+    #: The breaks, rendered by the process that owns their shape. One line each.
+    breaks: str = ""

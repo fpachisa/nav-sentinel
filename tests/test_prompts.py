@@ -116,7 +116,7 @@ def _render(agent_id: str, case, verdict) -> str:
         if agent_id == "triage-agent":
             return triage._instruction(manifest, case)
         if agent_id == "investigator":
-            return investigator._instruction(manifest, case)
+            return investigator._instruction(manifest, case.to_brief())
         return remediation._instruction(manifest, case, verdict)
 
 
