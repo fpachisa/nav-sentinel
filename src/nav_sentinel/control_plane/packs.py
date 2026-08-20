@@ -68,7 +68,25 @@ class ProcessPack:
     thresholds: tuple[ThresholdSet, ...] = ()
     #: Human-readable unit for the process's control total, for reports.
     control_total_unit: str = ""
+    #: Per capability, the tool namespaces a verdict must have evidence from before it may assert a
+    #: cause. `("nav.fx_rate", ("ecb_fx",))` says: an FX verdict resting only on our own books is
+    #: not corroboration -- the investigator has to have checked external truth.
+    #:
+    #: A tuple of pairs rather than a dict because a dict on a frozen dataclass is mutable through
+    #: the reference the pack hands out, and this is a governance rule.
+    #:
+    #: Declared by the process, checked once in the control plane. A second process states its own
+    #: and inherits the check, which is the extensibility claim as a mechanism rather than a
+    #: promise.
+    evidence_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
     notes: str = ""
+
+    def evidence_requirement(self, capability: str) -> tuple[str, ...]:
+        """Namespaces required for this capability. Empty means nothing is mandated."""
+        for declared, namespaces in self.evidence_requirements:
+            if declared == capability:
+                return namespaces
+        return ()
 
     def tools_by_name(self) -> dict[str, ToolSpec]:
         return {t.name: t for t in self.tools}
@@ -80,6 +98,46 @@ class ProcessPack:
                     f"capability {cap!r} is not namespaced to process {self.key!r}. "
                     f"Unnamespaced capabilities collide between processes."
                 )
+        _validate_evidence_requirements(self)
+
+
+def _validate_evidence_requirements(pack: ProcessPack) -> None:
+    """Refuse a requirement that can never bind.
+
+    Both failure modes are typos, and both are silent without this: a capability this pack does not
+    declare means the rule is attached to nothing, and a namespace no tool of this pack uses means
+    no verdict can ever satisfy it. The first weakens a governance rule to nothing while looking
+    present -- the shape this project has already had to fix once, where a policy got weaker while
+    the commit said it got stronger.
+    """
+    declared = set(pack.capabilities)
+    namespaces = {spec.name.partition(".")[0] for spec in pack.tools}
+    seen: set[str] = set()
+    for capability, required in pack.evidence_requirements:
+        if capability in seen:
+            raise ValueError(
+                f"process {pack.key!r} declares two evidence requirements for {capability!r}; "
+                f"only the first would ever be read"
+            )
+        seen.add(capability)
+        if capability not in declared:
+            raise ValueError(
+                f"process {pack.key!r} requires evidence for {capability!r}, which it does not "
+                f"declare as a capability. The rule would bind to nothing. Declared: "
+                f"{sorted(declared)}"
+            )
+        if not required:
+            raise ValueError(
+                f"process {pack.key!r} declares an empty evidence requirement for {capability!r}. "
+                f"Omit the entry instead, so 'no requirement' is stated once."
+            )
+        unknown = sorted(set(required) - namespaces)
+        if unknown:
+            raise ValueError(
+                f"process {pack.key!r} requires evidence for {capability!r} from namespace(s) "
+                f"{unknown}, which no tool of this process provides -- no verdict could ever "
+                f"satisfy it. Available: {sorted(namespaces)}"
+            )
 
 
 class UnknownTool(KeyError):
@@ -144,6 +202,7 @@ def register(pack: ProcessPack) -> None:
             raise ValueError(f"capability {cap!r} is not namespaced to process {pack.key!r}")
     if pack.key in _packs and _packs[pack.key] is not pack:
         raise DuplicateProcess(f"process {pack.key!r} is already registered")
+    _validate_evidence_requirements(pack)
 
     for other in _packs.values():
         if other.key == pack.key:
@@ -163,6 +222,19 @@ def register(pack: ProcessPack) -> None:
 
     _packs[pack.key] = pack
     _on_change()
+
+
+def evidence_requirement_for(capability: str) -> tuple[str, ...]:
+    """The declared requirement for a capability, from whichever process owns it.
+
+    Resolved by capability rather than by process key so the caller need not know which pack owns
+    what -- the same reason `resolve()` looks tools up by name. An unowned capability requires
+    nothing, which is the honest answer: a process that declares no rule has not made one.
+    """
+    for pack in _packs.values():
+        if capability in pack.capabilities:
+            return pack.evidence_requirement(capability)
+    return ()
 
 
 def registered() -> tuple[ProcessPack, ...]:

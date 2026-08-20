@@ -312,3 +312,49 @@ def untrusted_ingest_requires_armor(manifest: AgentManifest) -> PolicyDecision:
         agent_ref=manifest.ref,
         resource="external_content",
     )
+
+
+def verdict_is_corroborated(
+    manifest: AgentManifest,
+    capability: str,
+    cited_namespaces: frozenset[str],
+    required: tuple[str, ...],
+) -> PolicyDecision:
+    """P-007: an agent may not assert a root cause without the corroboration its process demands.
+
+    An FX verdict resting only on our own books has not explained anything -- it has restated the
+    disagreement. The requirement is declared per capability by the process (`ProcessPack.
+    evidence_requirements`) and evaluated here, so a second process states its own and inherits the
+    check without touching this function.
+
+    Takes namespaces and a requirement as plain strings, never a verdict: the control plane must not
+    know what a verdict is, and this keeps the check on the platform side of the seam where the
+    governance log lives.
+
+    Deliberately a policy rather than a validation. It decides whether an agent's output may be
+    acted on, it belongs in the decision log the exception console renders, and a reviewer asking
+    "why was this verdict rejected?" should find the answer in the same place as every other denial.
+    """
+    missing = sorted(set(required) - cited_namespaces)
+    if not missing:
+        return PolicyDecision(
+            effect=Effect.ALLOW,
+            policy_id="P-007-EVIDENCE-CORROBORATION",
+            reason=(
+                f"verdict on {capability} cites {sorted(cited_namespaces) or 'no external source'}"
+                + (f", satisfying {list(required)}" if required else " and none is required")
+            ),
+            agent_ref=manifest.ref,
+            resource=capability,
+        )
+    return PolicyDecision(
+        effect=Effect.DENY,
+        policy_id="P-007-EVIDENCE-CORROBORATION",
+        reason=(
+            f"verdict on {capability} cites no evidence from {missing}. {manifest.ref} may not "
+            f"assert a cause from internal records alone; it cites "
+            f"{sorted(cited_namespaces) or 'nothing'}."
+        ),
+        agent_ref=manifest.ref,
+        resource=capability,
+    )

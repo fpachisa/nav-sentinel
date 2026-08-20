@@ -42,6 +42,23 @@ PACK = ProcessPack(
     capabilities=CAPABILITIES,
     manifest_dir=Path(__file__).parent / "manifests",
     tools=NAV_TOOLS,
+    # An internal-only verdict is not corroboration. Both rules say the same thing in this
+    # process's own terms: before an investigator may assert *why* the books disagree, it must have
+    # checked something outside them.
+    #
+    # `nav.fx_rate` -> `ecb_fx`: the published reference rate is the external truth for a currency
+    # break, and the date it was published for is what makes a stale rate stale.
+    #
+    # `nav.corporate_action` will require the `corporate_action` namespace, and is added by the
+    # commit that builds that tool rather than now. Declaring it early was tried and the validator
+    # refused it -- no tool of this process provides that namespace yet, so no verdict could have
+    # satisfied the rule and it would have sat here looking like a control while denying every
+    # corporate-action verdict. That refusal is the validator working, so it is left as written.
+    #
+    # `nav.settlement` mandates nothing: a trade-date versus settlement-date break is decided
+    # entirely by our own trade records, and inventing an external requirement for it would make
+    # the rule decorative.
+    evidence_requirements=(("nav.fx_rate", ("ecb_fx",)),),
     thresholds=(BPS_THRESHOLDS,),
     control_total_unit="base currency",
     notes=(

@@ -77,6 +77,28 @@ def acting_as(agent_ref: str) -> Iterator[AgentManifest]:
         _current.reset(token)
 
 
+@contextmanager
+def unbound() -> Iterator[None]:
+    """Run with no agent identity bound, then restore whatever was bound before.
+
+    For the quarantined extractor, which refuses to parse an untrusted document while an identity
+    is bound -- so a process tool that fetches, screens and extracts has to drop the binding around
+    the extraction step.
+
+    The obvious alternative, `contextvars.Context().run(...)`, also satisfies the quarantine and was
+    measured to be wrong for two other reasons: a span opened inside a fresh context gets a **new
+    trace id with no parent**, breaking "one trace per exception case" for the one case that is the
+    demo, and a policy decision recorded inside never reaches the caller's decision log. Both put
+    the screening decision in an audit black hole. Resetting one ContextVar keeps span parentage and
+    the governance log intact.
+    """
+    token = _current.set(None)
+    try:
+        yield
+    finally:
+        _current.reset(token)
+
+
 def current() -> AgentManifest:
     binding = _current.get()
     if binding is not None:

@@ -65,7 +65,7 @@ proof — are in [docs/diagrams/](docs/diagrams/), with the full write-up in
 | Agent Runtime | Agent Runtime / Cloud Run | Long-running investigations dispatched asynchronously over Pub/Sub. |
 | Memory Bank | Memory Bank | Per-fund, per-security recurrence memory across NAV cycles, so a break seen last month is recognised rather than re-investigated. |
 | Agent Identity | Agent Identity + IAM | One service account per agent, minted from its manifest. No shared fleet identity, no ambient authority. |
-| Agent Gateway | Agent Gateway | Single enforcement point for the six policies below. Subject resolved from the bound identity; tools resolved from a frozen catalogue. |
+| Agent Gateway | Agent Gateway | Single enforcement point for the seven policies below. Subject resolved from the bound identity; tools resolved from a frozen catalogue. |
 | Model Armor | Model Armor | Screens external content in overlapping windows, gated on all three response fields. Reduces what gets through; **not** the boundary — see below. |
 | Observability | Cloud Trace via OTLP | One trace per exception case. The reasoning chain *is* the audit artefact. |
 
@@ -87,6 +87,7 @@ where token spend would otherwise run away.
 | `P-004-APPROVAL-ROUTE` | A unit-tagged magnitude and the tenant's thresholds determine who signs off; the control plane derives the band, the process never declares it: auto-clear, single reviewer, four eyes, or CIO escalation. Computed, never inferred. |
 | `P-005-UNTRUSTED-INGEST` | An agent that reads the public internet cannot opt out of Model Armor screening. |
 | `P-006-DATA-SCOPE` | A tool may only read the data domains its caller's manifest declares. |
+| `P-007-EVIDENCE-CORROBORATION` | An agent may not assert a root cause without the external corroboration its process demands. An FX verdict resting only on our own books has restated the disagreement, not explained it. The requirement is declared per capability by the process pack and evaluated once in the control plane, so a second process states its own and inherits the check. |
 
 ### Why the governance is load-bearing, not decorative
 
@@ -186,7 +187,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 320 invariant tests, including "no agent may post"
+make test        # 334 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -245,7 +246,7 @@ such rather than as complete.
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
-| Agent Gateway policy enforcement | works, within a stated boundary | All six policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
+| Agent Gateway policy enforcement | works, within a stated boundary | All seven policies resolve from frozen registry models and the bound identity; approval minting sits behind an object the agent runtime never holds. Bypass tests: `TestCatalogueIntegrity`, `TestDataScopeEnforcement`, `TestIdentityCannotBeForged`, `TestApprovalReferencesAreResolved`. **In-process memory is not a trust boundary** — code executing inside the runtime can read module internals. What is closed is everything reachable by an agent emitting tool-call data. |
 | Model Armor screening | works, and is **not** the boundary | Windowed, gated on all three response fields, fails closed four distinguishable ways. Detection is content-sensitive: the same injection is caught alone and missed 0/8 beside one particular filing paragraph, so screening reduces what gets through rather than stopping it. Coverage is of two kinds — the gateway-wiring tests **stub** `model_armor.screen`, and two `live` tests exercise the real service. The boundary is the quarantined extractor, `tests/test_quarantine.py` |
 | Least-privilege IAM | **overstated, and the deployment makes it more so** | `bootstrap.sh` grants *project-level* `roles/datastore.user`; scope enforcement lives in the gateway, not IAM. Cloud Run gives one identity per service, so the deployed container collapses every per-agent account into `nav-runtime` — see defect 7, now active |
 | ADK investigator agents on Gemini | not started | no `google.adk` reference exists in `src/` yet |

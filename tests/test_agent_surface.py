@@ -324,3 +324,145 @@ class TestTheSurfaceIsUsableByAdk:
             assert fn.__name__ == name.replace(".", "__")
             assert fn.nav_tool_name == name
             assert name in packs.catalogue()
+
+
+class TestEvidenceRequirementsAreDeclaredByTheProcess:
+    """P-007. An FX verdict resting only on our own books has not explained the break, it has
+    restated it. The rule is declared per capability by the pack and evaluated in the control
+    plane, so a second process states its own and inherits the check."""
+
+    def test_the_nav_pack_requires_external_corroboration_for_fx(self):
+        assert packs.evidence_requirement_for("nav.fx_rate") == ("ecb_fx",)
+
+    def test_a_capability_with_no_declared_rule_requires_nothing(self):
+        """Honest rather than absent: a settlement break is decided by our own trade records, and
+        inventing an external requirement for it would make the rule decorative."""
+        assert packs.evidence_requirement_for("nav.settlement") == ()
+        assert packs.evidence_requirement_for("ta.nothing_here") == ()
+
+    def test_a_verdict_citing_external_evidence_is_allowed(self):
+        gateway.clear_decision_log()
+        with identity.acting_as("fx-rates-investigator"):
+            decision = gateway.authorize_verdict(
+                "nav.fx_rate", frozenset({"ecb_fx", "books_and_records"})
+            )
+        assert decision.allowed
+        assert decision.policy_id == "P-007-EVIDENCE-CORROBORATION"
+
+    def test_a_verdict_citing_only_internal_records_is_refused(self):
+        from nav_sentinel.control_plane.policies import PolicyViolation
+
+        with identity.acting_as("fx-rates-investigator"):
+            with pytest.raises(PolicyViolation, match="P-007"):
+                gateway.authorize_verdict("nav.fx_rate", frozenset({"books_and_records"}))
+
+    def test_the_refusal_is_recorded_in_the_governance_log(self):
+        """A reviewer asking why a verdict was rejected should find it where every other denial is."""
+        from nav_sentinel.control_plane.policies import PolicyViolation
+
+        gateway.clear_decision_log()
+        with identity.acting_as("fx-rates-investigator"):
+            with pytest.raises(PolicyViolation):
+                gateway.authorize_verdict("nav.fx_rate", frozenset())
+        denials = [d for d in gateway.decision_log() if not d.allowed]
+        assert [d.policy_id for d in denials] == ["P-007-EVIDENCE-CORROBORATION"]
+
+    def test_the_namespaces_a_case_has_evidence_from_come_from_its_observations(self, fx, store):
+        """The two halves must meet: what the surface records is what the check reads."""
+        with identity.acting_as("fx-rates-investigator"):
+            fx["ecb_fx.latest_rate_on_or_before"](currency="USD", day="2026-08-17")
+            gateway.authorize_verdict("nav.fx_rate", store.namespaces())
+
+    def test_a_requirement_naming_an_undeclared_capability_is_refused(self):
+        """The rule would bind to nothing while looking present -- a governance rule weakened to
+        decoration, which is a shape this project has already had to fix once."""
+        from nav_sentinel.control_plane.packs import ProcessPack
+
+        with pytest.raises(ValueError, match="does not\\s+declare as a capability"):
+            ProcessPack(
+                key="nav2", name="n", capabilities=("nav2.a",),
+                manifest_dir=packs.registered()[0].manifest_dir,
+                tools=(), evidence_requirements=(("nav2.b", ("ecb_fx",)),),
+            )
+
+    def test_a_requirement_naming_a_namespace_no_tool_provides_is_refused(self):
+        """No verdict could ever satisfy it, so every verdict for that capability would be denied
+        by a rule that reads as a typo."""
+        from nav_sentinel.control_plane.packs import ProcessPack
+
+        with pytest.raises(ValueError, match="no tool of this process provides"):
+            ProcessPack(
+                key="nav3", name="n", capabilities=("nav3.a",),
+                manifest_dir=packs.registered()[0].manifest_dir,
+                tools=(packs.catalogue()["ecb_fx.rate_on"],),
+                evidence_requirements=(("nav3.a", ("ecb",)),),   # note the truncated namespace
+            )
+
+    def test_an_empty_requirement_is_refused(self):
+        from nav_sentinel.control_plane.packs import ProcessPack
+
+        with pytest.raises(ValueError, match="Omit the entry instead"):
+            ProcessPack(
+                key="nav4", name="n", capabilities=("nav4.a",),
+                manifest_dir=packs.registered()[0].manifest_dir,
+                tools=(), evidence_requirements=(("nav4.a", ()),),
+            )
+
+    def test_the_requirement_table_cannot_be_mutated_through_the_pack(self):
+        """A tuple of pairs, not a dict: a dict would be mutable through the reference the pack
+        hands out, and this is a governance rule."""
+        pack = packs.registered()[0]
+        assert isinstance(pack.evidence_requirements, tuple)
+        with pytest.raises((AttributeError, TypeError)):
+            pack.evidence_requirements = ()
+
+
+class TestRunningWithNoIdentityBound:
+    """`identity.unbound()` exists for the quarantined extractor, which refuses to parse an
+    untrusted document while an identity is bound."""
+
+    def test_the_quarantine_holds_inside_it(self):
+        from nav_sentinel.control_plane import extraction
+
+        with identity.acting_as("corporate-actions-investigator"):
+            with pytest.raises(extraction.QuarantineViolation):
+                extraction._require_quarantine()
+            with identity.unbound():
+                extraction._require_quarantine()      # must not raise
+
+    def test_the_binding_is_restored_afterwards(self):
+        with identity.acting_as("corporate-actions-investigator"):
+            with identity.unbound():
+                pass
+            assert identity.current().agent_id == "corporate-actions-investigator"
+
+    def test_the_trace_survives_unlike_a_fresh_context(self):
+        """A fresh `contextvars.Context()` also satisfies the quarantine, and was measured to give
+        a span inside it a new trace id with no parent -- breaking "one trace per exception case"
+        for the one case that is the demo, and putting the screening decision in an audit black
+        hole."""
+        import contextvars
+
+        from nav_sentinel.control_plane import telemetry
+
+        def trace_id_inside() -> str:
+            with telemetry.span("child") as span:
+                return format(span.get_span_context().trace_id, "032x")
+
+        with telemetry.span("parent") as parent_span:
+            parent = format(parent_span.get_span_context().trace_id, "032x")
+            with identity.acting_as("corporate-actions-investigator"):
+                with identity.unbound():
+                    assert trace_id_inside() == parent
+                assert contextvars.Context().run(trace_id_inside) != parent
+
+    def test_a_decision_recorded_while_unbound_reaches_the_callers_log(self):
+        """The other half of the same finding: a policy decision recorded inside a fresh context
+        never reaches the caller's log."""
+        gateway.clear_decision_log()
+        with identity.acting_as("triage-agent"):
+            gateway.call_tool("registry.coverage")
+            before = len(gateway.decision_log())
+            with identity.unbound():
+                pass
+        assert len(gateway.decision_log()) >= before
