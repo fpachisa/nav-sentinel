@@ -67,11 +67,49 @@ def _fetch_csv(series: str, start: str, end: str) -> str:
         recorded = _cassette().get(key)
         if recorded is not None:
             return recorded
+        # Fall back to any recorded window for this series that *contains* the requested one.
+        #
+        # Exact key matching meant the cassette answered only the three windows the fixture
+        # generator happened to request: measured, of 2026-08-10..18 only the 14th and 17th
+        # resolved and the other seven raised. An FX investigator explaining a stale rate has to
+        # probe the days around it -- the 15th and 16th are the weekend that *makes* the rate
+        # stale -- so its stated scope was unreachable offline, and under the refusal path a
+        # fixture gap would have become an "evidence refused" verdict: a control reporting a state
+        # it never reached.
+        #
+        # Serving a wider window is sound because every caller filters by date --
+        # `latest_rate_on_or_before` takes the latest published date <= the one asked for -- so a
+        # superset of rows yields the same answer.
+        wider = _containing_response(series, end)
+        if wider is not None:
+            return wider
         raise CassetteMiss(
-            f"no recorded ECB response for {key}. Either the fixture dates moved, or this is a "
-            f"new series. Run `make fixtures-live` to re-record, which requires network access."
+            f"no recorded ECB response for {key}, and no recorded window reaches {end}. Either the "
+            f"fixture dates moved, or this is a new series. Run `make fixtures-live` to "
+            f"re-record, which requires network access."
         )
     return _fetch_live(series, start, end)
+
+
+def _containing_response(series: str, end: str) -> str | None:
+    """A recorded response for the same series that can answer a query ending at `end`.
+
+    The test is `recorded_end >= end`, not full containment of `[start, end]`. Callers ask for a
+    trailing window and then take the latest published date at or before the day they care about,
+    so rows older than the recorded start cannot change the answer -- but a recording that stops
+    before `end` can, because the row it would have returned may lie in the gap.
+
+    Prefers the earliest recorded start, i.e. the most history, so the caller has the best chance
+    of finding a published date at or before its day inside the window.
+    """
+    matches = [
+        (parts[1], parts[2], body)
+        for key, body in _cassette().items()
+        if len(parts := key.split("|")) == 3 and parts[0] == series and parts[2] >= end
+    ]
+    if not matches:
+        return None
+    return min(matches)[2]
 
 
 def _fetch_live(series: str, start: str, end: str) -> str:

@@ -18,6 +18,7 @@ from nav_sentinel.domain.models import (
     Severity,
 )
 from nav_sentinel.tools import books_and_records as bnr
+from nav_sentinel.tools import ecb_fx
 from nav_sentinel.tools.fx_convert import make_to_base
 
 NAV_DATE = date(2026, 8, 17)
@@ -288,3 +289,40 @@ class TestControlTotalIsNotWork:
         assert nav_breaks, "expected a NAV per share break"
         cases = group_into_cases(nav_breaks, "MERID-GEF", NAV_DATE)
         assert cases == [], "NAV-per-share differences are the control total, not investigable work"
+
+
+class TestTheCassetteAnswersTheDaysAnInvestigatorAsksAbout:
+    """Exact key matching meant the cassette answered only the three windows the fixture generator
+    happened to request: of 2026-08-10..18, only the 14th and 17th resolved and the other seven
+    raised CassetteMiss. An FX investigator explaining a stale rate has to probe the days around
+    it -- and the 15th and 16th are the weekend that *makes* the rate stale -- so the FX
+    investigator's stated scope was unreachable offline. Worse, under the planned refusal path a
+    fixture gap would have become an "evidence refused" verdict: a control reporting a state it
+    never actually reached."""
+
+    def test_the_weekend_resolves_to_the_friday_rate(self):
+        """The stale-rate signal itself: a Saturday or Sunday carries Friday's published rate."""
+        friday = ecb_fx.latest_rate_on_or_before("USD", date(2026, 8, 14))
+        assert friday is not None
+        for weekend_day in (date(2026, 8, 15), date(2026, 8, 16)):
+            observed = ecb_fx.latest_rate_on_or_before("USD", weekend_day)
+            assert observed == friday, f"{weekend_day} did not fall back to the Friday rate"
+
+    @pytest.mark.parametrize("day", [10, 11, 12, 13, 14, 15, 16, 17])
+    def test_every_day_around_the_cycle_resolves_offline(self, day):
+        assert ecb_fx.latest_rate_on_or_before("USD", date(2026, 8, day)) is not None
+
+    def test_a_day_beyond_every_recording_still_refuses(self):
+        """The relaxation is bounded: a recording that stops before the requested day cannot answer
+        it, because the row it would have returned may lie in the gap. Silently serving the last
+        known rate would invent a publication that may not exist."""
+        with pytest.raises(ecb_fx.CassetteMiss):
+            ecb_fx.latest_rate_on_or_before("USD", date(2026, 12, 31))
+
+    def test_a_wider_window_yields_the_same_answer_as_an_exact_one(self):
+        """Why serving a superset of rows is sound: the caller takes the latest published date at
+        or before the day it asked about, so extra older rows cannot change the result."""
+        exact = ecb_fx.fetch_rates(["USD"], date(2026, 8, 3), date(2026, 8, 17))
+        chosen = ecb_fx.latest_rate_on_or_before("USD", date(2026, 8, 17))
+        assert chosen is not None
+        assert exact[("USD", chosen[0])] == chosen[1]

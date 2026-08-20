@@ -186,7 +186,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 238 invariant tests, including "no agent may post"
+make test        # 249 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 
@@ -241,7 +241,7 @@ such rather than as complete.
 
 | Component | State | Evidence |
 | :--- | :--- | :--- |
-| Deterministic reconciliation core | works | `tests/test_reconciliation.py` (21 tests). Posting the declared corrections reconciles both cycles; withholding any one leaves exactly its own impact; every stored market value is derivable from its stored rate |
+| Deterministic reconciliation core | works | `tests/test_reconciliation.py` (32 tests). Posting the declared corrections reconciles both cycles; withholding any one leaves exactly its own impact; every stored market value is derivable from its stored rate |
 | Agent Registry, capability discovery | works | `tests/test_governance.py::TestRegistry` |
 | Per-agent identity from manifests | works | `infra/bootstrap.sh`, `tests/test_governance.py` |
 | OpenTelemetry case traces → Cloud Trace | works | trace `7de855f4…` read back from Cloud Trace |
