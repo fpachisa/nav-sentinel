@@ -174,6 +174,18 @@ class ObservedFacts(BaseModel):
     currency: str | None = None
     as_of: date | None = None
 
+    @classmethod
+    def from_recorded(cls, observed: dict[str, str]) -> ObservedFacts:
+        """Rebuild the typed facts from what the platform stored as text.
+
+        The platform records observations as opaque strings so it need not know this vocabulary --
+        see `control_plane.observations`. Rebuilding them is therefore the process's job, and keys
+        this process does not recognise are ignored rather than raising: a pack may project extra
+        facts for its own audit trail without every consumer knowing them.
+        """
+        known = {k: v for k, v in observed.items() if k in cls.model_fields}
+        return cls.model_validate(known)
+
     def cited(self) -> frozenset[str]:
         """Which facts this observation actually carries.
 

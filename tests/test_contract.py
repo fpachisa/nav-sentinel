@@ -8,7 +8,7 @@ Both exist because a model will happily produce well-shaped citations for a rate
 from __future__ import annotations
 
 import inspect
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -19,11 +19,11 @@ from nav_sentinel.agents.contract import (
     UNKNOWN,
     Citation,
     Observation,
-    ObservedFacts,
     UnknownObservation,
     Verdict,
 )
-from nav_sentinel.domain.models import BreakCategory
+from nav_sentinel.control_plane import observations
+from nav_sentinel.domain.models import BreakCategory, ObservedFacts
 
 CASE = "CASE-MERID-GEF-2026-08-17-0001"
 
@@ -37,10 +37,14 @@ def _observation(case_id: str = CASE, obs_id: str = "OBS-aaaa000000000000") -> O
         tool="ecb_fx.latest_rate_on_or_before",
         args="currency=USD,day=2026-08-17",
         digest="0123456789abcdef",
-        retrieved_at=datetime(2026, 8, 20, 9, 0, tzinfo=contract.UTC),
+        retrieved_at=datetime(2026, 8, 20, 9, 0, tzinfo=UTC),
         source="ecb_fx_reference_rates",
         source_uri="https://data-api.ecb.europa.eu/service/data/EXR",
-        observed=ObservedFacts(rate=Decimal("1.1567"), rate_date=date(2026, 8, 14)),
+        # Stored as text, because the platform records observations without knowing what a
+        # `rate_date` is -- the process projects and rebuilds them. See `control_plane.observations`.
+        observed=observations.stringify(
+            {"rate": Decimal("1.1567"), "rate_date": date(2026, 8, 14)}
+        ),
         summary="USD reference rate 1.1567 published 2026-08-14",
     )
 
@@ -133,7 +137,7 @@ class TestACitationIsBoundToAnObservedFact:
                                                    relevance="why it matters"))
         assert item.source_uri == obs.source_uri
         assert item.retrieved_at == obs.retrieved_at
-        assert item.observed == obs.observed
+        assert item.observed == ObservedFacts.from_recorded(obs.observed)
         assert item.summary == "why it matters"   # the only thing the model contributed
 
 
@@ -199,16 +203,16 @@ class TestIdsAreDerivedNotCounted:
 
     def test_the_same_call_yields_the_same_id(self):
         args = ("CASE-1", "ecb_fx.rate_on", "currency=USD", "abc123")
-        assert contract.observation_id(*args) == contract.observation_id(*args)
+        assert observations.observation_id(*args) == observations.observation_id(*args)
 
     def test_different_calls_yield_different_ids(self):
-        a = contract.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "abc")
-        b = contract.observation_id("CASE-1", "ecb_fx.rate_on", "currency=GBP", "abc")
+        a = observations.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "abc")
+        b = observations.observation_id("CASE-1", "ecb_fx.rate_on", "currency=GBP", "abc")
         assert a != b
 
     def test_the_same_case_and_tool_with_a_different_result_is_a_different_observation(self):
-        a = contract.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "digest-one")
-        b = contract.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "digest-two")
+        a = observations.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "digest-one")
+        b = observations.observation_id("CASE-1", "ecb_fx.rate_on", "currency=USD", "digest-two")
         assert a != b
 
     @pytest.mark.parametrize(
@@ -217,7 +221,7 @@ class TestIdsAreDerivedNotCounted:
          {"rate": Decimal("1.1567")}, [1, 2, 3], "text", None],
     )
     def test_digests_are_stable_for_the_types_tools_return(self, value):
-        assert contract.digest_of(value) == contract.digest_of(value)
+        assert observations.digest_of(value) == observations.digest_of(value)
 
     def test_a_decimal_is_digested_by_value_not_by_repr(self):
         """`repr(Decimal("1.1567"))` is `Decimal('1.1567')` -- a form that carries the class name
@@ -227,11 +231,11 @@ class TestIdsAreDerivedNotCounted:
         A `Decimal` and the *string* "1.1567" still digest differently, and should: they are
         different values, and collapsing them would let a model's text match a numeric fact.
         """
-        assert contract.digest_of(Decimal("1.1567")) != contract.digest_of(
+        assert observations.digest_of(Decimal("1.1567")) != observations.digest_of(
             repr(Decimal("1.1567"))
         )
-        assert contract.digest_of(Decimal("1.1567")) != contract.digest_of("1.1567")
-        assert contract.digest_of(Decimal("1.1567")) == contract.digest_of(Decimal("1.1567"))
+        assert observations.digest_of(Decimal("1.1567")) != observations.digest_of("1.1567")
+        assert observations.digest_of(Decimal("1.1567")) == observations.digest_of(Decimal("1.1567"))
 
 
 class TestTheRefusalHelper:

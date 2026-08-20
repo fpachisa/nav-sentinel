@@ -17,12 +17,11 @@ cites an ECB rate it never fetched has nothing to cite with.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from nav_sentinel.control_plane.observations import Observation, utcnow
 from nav_sentinel.domain.models import (
     BreakCategory,
     EvidenceItem,
@@ -30,39 +29,25 @@ from nav_sentinel.domain.models import (
     RootCauseHypothesis,
 )
 
+__all__ = [
+    "UNKNOWN",
+    "Citation",
+    "Observation",
+    "UnknownObservation",
+    "Verdict",
+    "category_for",
+    "evidence_from",
+    "refusal",
+    "resolve_citations",
+    "utcnow",
+]
+
 if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Mapping
 
 #: What a verdict says when it could not reach one. Distinct from a low-confidence answer: this
 #: asserts nothing, so §1's "every verdict cites evidence" is scoped to the ones that do.
 UNKNOWN = "UNKNOWN"
-
-
-class Observation(BaseModel):
-    """One tool call, as it happened: who asked, on whose behalf, and what came back.
-
-    Emitted by the generated tool surface, which is the only place holding the tool name, the
-    arguments, the result and the case at the same moment. The `digest` is retained for the audit
-    trail rather than as a lookup key -- citations resolve by `observation_id`, because a digest
-    handed to a model can be quoted without the data behind it ever having been read.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    observation_id: str
-    case_id: str
-    trace_id: str | None = None
-    agent_ref: str
-    tool: str
-    args: str                      # canonicalised, for the audit record
-    digest: str                    # over the returned value
-    retrieved_at: datetime
-    source: str
-    source_uri: str | None = None
-    observed: ObservedFacts = Field(default_factory=ObservedFacts)
-    trusted: bool = True
-    armor_verdict: str | None = None
-    summary: str = ""
 
 
 class Citation(BaseModel):
@@ -153,7 +138,7 @@ def evidence_from(observation: Observation, citation: Citation) -> EvidenceItem:
         trusted=observation.trusted,
         armor_verdict=observation.armor_verdict,
         tool=observation.tool,
-        observed=observation.observed,
+        observed=ObservedFacts.from_recorded(observation.observed),
     )
 
 
@@ -226,40 +211,3 @@ def refusal(
         else [],
         unresolved=reason,
     )
-
-
-def observation_id(case_id: str, tool: str, args: str, digest: str) -> str:
-    """A stable id for one call, derived rather than counted.
-
-    Content-derived so a re-run produces the same ids, which is what S8a's byte-identical
-    reproducibility needs; `itertools.count` was called out for exactly this reason.
-    """
-    import hashlib
-
-    material = "|".join((case_id, tool, args, digest))
-    return f"OBS-{hashlib.sha256(material.encode()).hexdigest()[:16]}"
-
-
-def digest_of(value: object) -> str:
-    """A digest over a returned value, stable across runs.
-
-    `Decimal` and `date` are rendered as text rather than repr'd, so the digest does not change
-    with a library version. This is for the audit record; it is deliberately not a lookup key.
-    """
-    import hashlib
-
-    def canonical(v: object) -> str:
-        if isinstance(v, Decimal | date | datetime):
-            return str(v)
-        if isinstance(v, dict):
-            return "{" + ",".join(f"{k}:{canonical(v[k])}" for k in sorted(map(str, v))) + "}"
-        if isinstance(v, list | tuple):
-            return "[" + ",".join(canonical(x) for x in v) + "]"
-        return repr(v)
-
-    return hashlib.sha256(canonical(value).encode()).hexdigest()[:16]
-
-
-def utcnow() -> datetime:
-    """One place, so a recorded time is always timezone-aware."""
-    return datetime.now(UTC)

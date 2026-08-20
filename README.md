@@ -186,7 +186,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 ### 4. Verify
 
 ```bash
-make test        # 287 invariant tests, including "no agent may post"
+make test        # 316 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 

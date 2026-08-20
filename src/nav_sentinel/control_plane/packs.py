@@ -13,11 +13,12 @@ port and each process supplies specs through it.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 from nav_sentinel.control_plane.governance import ThresholdSet
 
@@ -39,6 +40,15 @@ class ToolSpec:
     #: constrained by the SEC and cannot carry an instruction; an issuer name can.
     untrusted_fields: tuple[str, ...] = ()
     description: str = ""
+    #: Projects this tool's return value onto the facts a verdict may cite, in the process's own
+    #: vocabulary. The platform calls it, stringifies the result and stores it opaquely -- it never
+    #: interprets the keys, the same way `CaseFacts` reduces domain enums to plain strings.
+    #:
+    #: Per tool rather than generic because a generic projection would have to guess which
+    #: attribute of a holding is "the rate", and guessing wrong means a verdict cites a number that
+    #: is not the one the tool returned. A tool without one contributes no facts, which is honest:
+    #: it can still be cited as having been called.
+    observe: Callable[[Any], Mapping[str, object]] | None = None
 
 
 @dataclass(frozen=True)
