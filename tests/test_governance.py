@@ -182,18 +182,17 @@ class TestDataScopeEnforcement:
     roles, and consulted by no runtime check."""
 
     def test_tool_outside_declared_scope_is_denied(self):
-        """triage declares securities and registry but not positions; grant it the tool anyway and
-        the scope check must still refuse it.
-
-        Deliberately the triage agent. This previously used cash-fees, which was unpublished to
-        create the "no authorised investigator" gap two acceptance criteria need -- and the test
-        broke with it. Triage is the fleet's entry point and cannot be unpublished, so P-006's
-        coverage no longer depends on which specialists happen to be published today.
-        """
-        triage = discover.get("triage-agent")
-        assert "positions" not in triage.data_scopes.read, "the asymmetry this test needs is gone"
-        widened = triage.model_copy(
-            update={"allowed_tools": (*triage.allowed_tools, "books_and_records.positions")}
+        """Grant an agent a tool reading a domain its manifest does not declare, and the scope
+        check must still refuse it."""
+        # The remediation agent, which reads nav_records, funds, securities and exception_cases but
+        # not positions. This used cash-fees, which was unpublished, then triage -- which then
+        # legitimately gained the position scope when its deterministic signals started reading the
+        # books through the gateway. The asymmetry has to belong to whichever agent actually lacks
+        # the scope, so the test asserts that rather than assuming it.
+        subject = discover.get("remediation-agent")
+        assert "positions" not in subject.data_scopes.read, "the asymmetry this test needs is gone"
+        widened = subject.model_copy(
+            update={"allowed_tools": (*subject.allowed_tools, "books_and_records.positions")}
         )
         decision = policies.tool_within_data_scope(
             widened, "books_and_records.positions", ("positions",)
@@ -202,9 +201,9 @@ class TestDataScopeEnforcement:
         assert decision.policy_id == "P-006-DATA-SCOPE"
 
     def test_declared_scope_is_permitted(self):
-        triage = discover.get("triage-agent")
+        subject = discover.get("remediation-agent")
         assert policies.tool_within_data_scope(
-            triage, "books_and_records.security", ("securities",)
+            subject, "books_and_records.security", ("securities",)
         ).allowed
 
     def test_external_reference_tools_need_no_internal_scope(self):

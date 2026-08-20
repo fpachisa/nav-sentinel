@@ -292,6 +292,48 @@ class TestTheSignalsHandedToTriageAreTrue:
         lines = signals.for_case(cash)
         assert any("dividend" in line for line in lines), lines
 
+    def test_reading_the_books_for_a_signal_is_policed(self):
+        """The reads went straight to `books_and_records`, so an agent scoped to securities and the
+        registry was handed position data with **no policy decision recorded anywhere** -- and those
+        facts go into a model's prompt. Computing something on an agent's behalf is still reading it
+        on the agent's behalf."""
+        from nav_sentinel.control_plane import identity
+
+        gateway.clear_decision_log()
+        with identity.acting_as("triage-agent"):
+            signals.for_case(_named_case("US0378331005"))
+        recorded = {d.policy_id for d in gateway.decision_log()}
+        assert "P-001-TOOL-ALLOWLIST" in recorded
+        assert "P-006-DATA-SCOPE" in recorded
+        assert all(d.allowed for d in gateway.decision_log())
+
+    def test_an_agent_without_the_scope_cannot_obtain_signals(self):
+        from nav_sentinel.control_plane import identity
+        from nav_sentinel.control_plane.policies import PolicyViolation
+
+        with identity.acting_as("remediation-agent"):
+            with pytest.raises(PolicyViolation, match="P-001|P-006"):
+                signals.for_case(_named_case("US0378331005"))
+
+    def test_signals_cannot_be_obtained_with_no_identity_bound(self):
+        """`unbound()` rather than skipping the class fixture: the point is that dropping the
+        binding is enough to lose access, not that the test happened to start without one."""
+        from nav_sentinel.control_plane import identity
+        from nav_sentinel.control_plane.identity import IdentityError
+
+        case = _named_case("US0378331005")
+        with identity.unbound(), pytest.raises(IdentityError):
+            signals.for_case(case)
+
+    def test_the_triage_manifest_declares_what_it_actually_reads(self):
+        """A manifest that under-declares is a lie the gateway then enforces against the agent's own
+        work: triage would have been denied its own signals."""
+        manifest = discover.get("triage-agent")
+        for tool in ("books_and_records.positions", "books_and_records.cash_movements"):
+            assert tool in manifest.allowed_tools, tool
+        for scope in ("positions", "cash_movements"):
+            assert scope in manifest.data_scopes.read, scope
+
     def test_the_signals_are_stable_across_runs(self):
         """The prompt is part of a reproducible run: two identical cycles must produce identical
         instructions, or `make eval` cannot be compared against itself."""
@@ -303,6 +345,16 @@ def _named_case(isin: str) -> ExceptionCase:
     from nav_sentinel.pipeline import cycle_runner
 
     return next(c for c in cycle_runner.detect(AS_OF) if any(b.isin == isin for b in c.breaks))
+
+
+@pytest.fixture(autouse=True)
+def _as_triage():
+    """Most of these read the books for signals, which is now policed -- so a bound identity is
+    part of the setup rather than something the tests can do without."""
+    from nav_sentinel.control_plane import identity
+
+    with identity.acting_as("triage-agent"):
+        yield
 
 
 @pytest.mark.live

@@ -188,7 +188,7 @@ Regenerates the synthetic books from the recorded ECB cassette — no network ne
 
 ```bash
 make investigate # one case, investigated by the fleet (needs a live model)
-make test        # 447 invariant tests, including "no agent may post"
+make test        # 451 invariant tests, including "no agent may post"
 make registry    # the published fleet and its coverage
 ```
 

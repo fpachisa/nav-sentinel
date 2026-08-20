@@ -12,6 +12,13 @@ the model's job narrows to naming the category the evidence points at.
 
 This is the same division the deterministic spine already uses: arithmetic where arithmetic works,
 a model only where judgement is genuinely required.
+
+**The reads go through the gateway**, under whichever identity is bound. They did not, at first, and
+that was a P-006 bypass of exactly the kind this project exists to prevent: these facts end up in a
+model's prompt, so an agent whose manifest declares no position scope was being handed position data
+with no policy decision recorded anywhere. Computing something on an agent's behalf is still reading
+it on the agent's behalf. Triage's manifest now declares the two tools and the two scopes, and the
+governance log shows the reads.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from nav_sentinel.tools import books_and_records as bnr
+from nav_sentinel.control_plane import gateway
 
 if TYPE_CHECKING:  # pragma: no cover
     from nav_sentinel.domain.models import ExceptionCase, ReconciliationBreak
@@ -40,7 +47,8 @@ def _lots(source: str, isin: str, as_of) -> list:
     no signal: triage was handed facts that denied the problem existed, and correctly refused to
     classify anything.
     """
-    return [p for p in bnr.positions(source) if p.isin == isin and p.as_of == as_of]
+    rows = gateway.call_tool("books_and_records.positions", source)
+    return [p for p in rows if p.isin == isin and p.as_of == as_of]
 
 
 def for_break(item: ReconciliationBreak) -> list[str]:
@@ -107,7 +115,7 @@ def _cash_signals(item: ReconciliationBreak) -> list[str]:
     for source in ("accounting", "custodian"):
         movements = [
             m
-            for m in bnr.cash_movements(source)
+            for m in gateway.call_tool("books_and_records.cash_movements", source)
             if m.value_date == item.as_of and (item.currency is None or m.currency == item.currency)
         ]
         if not movements:

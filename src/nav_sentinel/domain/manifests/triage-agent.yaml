@@ -11,14 +11,21 @@ handles_capabilities: [nav.unclassified]
 model: gemini-3.5-flash-lite   # every break passes through here, so cost per call matters
 
 allowed_tools:
+  - books_and_records.positions
+  - books_and_records.cash_movements
   - registry.discover_for_capability
   - registry.coverage
   - books_and_records.security
   # memory.recall_recurrence is added in S2, together with the tool itself. A manifest must
   # not declare a capability the catalogue cannot resolve.
 
+# Positions and cash movements are declared because triage genuinely reads them: the deterministic
+# signals that let it tell an FX error from a pricing error come from comparing the two books, and
+# those facts go into its prompt. They were read directly at first, bypassing the gateway -- so an
+# agent scoped to securities and the registry was handed position data with no policy decision
+# recorded. Computing something on an agent's behalf is still reading it on the agent's behalf.
 data_scopes:
-  read: [securities, registry]
+  read: [securities, registry, positions, cash_movements]
   write: [exception_cases]
 
 authority:
