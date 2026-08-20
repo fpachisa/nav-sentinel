@@ -76,11 +76,10 @@ def run(as_of: date) -> dict:
         # Mark the log before the case's own decisions are recorded, so persisting one case does
         # not re-persist the previous case's.
         gateway.mark_decisions(case.case_id)
-        with audit.case_trace(facts) as (_span, trace_id):
-            # The band comes from the decision the gateway recorded, not from a second call. Two
-            # call sites deriving the same governance decision is how the control plane came to
-            # auto-clear a case the domain had floored.
-            band = gateway.route_for_approval(facts).metadata["band"]
+        # The band comes from the decision `case_trace` already recorded, not from a second call.
+        # Two call sites deriving the same governance decision is how the control plane came to
+        # auto-clear a case the domain had floored -- and it also recorded P-004 twice per case.
+        with audit.case_trace(facts) as (_span, trace_id, band):
             agent = discover.discover_for_capability(facts.capability)
             if agent is not None:
                 # The tool call is policed even though nothing is investigated yet: the point is
@@ -182,8 +181,11 @@ def main() -> int:
         f"{len(result['cases'])} cases · {result['decisions']} policy decisions recorded"
     )
     console.print(
-        "\n  [dim]No model was called. Investigators land in S1, asynchronous dispatch in S3; "
-        "both extend this loop.[/dim]"
+        "\n  [dim]No model was called, which is why every capability reads nav.unclassified and no "
+        "investigator is authorised: classifying a break is triage's job and triage is a model.\n"
+        "  Detection, materiality, the approval band and the governance log are all arithmetic and "
+        "all reproducible.\n"
+        "  Run `make investigate` for the same case with the fleet on it.[/dim]"
     )
     return 0
 

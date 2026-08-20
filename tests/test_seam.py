@@ -388,7 +388,7 @@ class TestTheAuditRecordHasTheSameShape:
 
     def _root_keys(self, spans, facts) -> set[str]:
         spans.clear()
-        with audit.case_trace(facts) as (_span, _trace_id):
+        with audit.case_trace(facts) as (_span, _trace_id, _band):
             pass
         roots = [s for s in spans.get_finished_spans() if s.name == "nav_sentinel.exception_case"]
         assert roots, "no case span emitted"

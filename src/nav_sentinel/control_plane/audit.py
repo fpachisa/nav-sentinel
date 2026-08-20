@@ -49,9 +49,14 @@ def case_trace(facts: CaseFacts) -> Iterator[tuple[trace.Span, str | None]]:
         # decision lands in the governance log. Calling policies.approval_route here recorded
         # the band on the span but left it out of the log the demo reads from.
         route = gateway.route_for_approval(facts)
-        sp.set_attribute("nav.case.approval_class", route.metadata["band"])
+        band = route.metadata["band"]
+        sp.set_attribute("nav.case.approval_class", band)
 
-        yield sp, trace_id
+        # The band is yielded, not just stamped. Both callers were calling `route_for_approval`
+        # again to obtain it, so every case recorded two identical P-004 decisions -- visible twice
+        # in the governance panel, and about to be persisted twice by the append-only store. One
+        # derivation, one record.
+        yield sp, trace_id, band
 
 
 def close_case(span: trace.Span, facts: CaseFacts) -> None:

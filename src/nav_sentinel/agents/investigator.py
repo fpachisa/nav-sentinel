@@ -87,6 +87,10 @@ EVIDENCE_FAILURES = (
 )
 
 
+class NotAuthorisedForCapability(RuntimeError):
+    """An investigator was handed a case whose capability its manifest does not declare."""
+
+
 class UnparseableAnswer(RuntimeError):
     """The model's reply was empty or not in the requested shape."""
 
@@ -201,6 +205,17 @@ async def investigate(
     configure_sdk_environment()
     store = store if store is not None else ObservationStore()
     capability = case.capability
+
+    # The structural half of the same problem: nothing bound a case to an agent's declared
+    # competence, so any manifest could be handed any case. The registry is supposed to decide who
+    # may handle what, and an investigator that accepts work outside its own manifest makes that
+    # decision advisory.
+    if capability not in manifest.handles_capabilities:
+        raise NotAuthorisedForCapability(
+            f"{manifest.ref} does not declare {capability!r}. It handles "
+            f"{list(manifest.handles_capabilities) or 'nothing'}. Dispatch is the registry's "
+            f"decision, and an agent accepting work it never claimed would make that advisory."
+        )
 
     with identity.acting_as(manifest.agent_id):
         tools = agent_surface.build(

@@ -37,7 +37,7 @@ if TYPE_CHECKING:  # pragma: no cover
 WHOLE_RATIOS = (Decimal(2), Decimal(3), Decimal(4), Decimal(5), Decimal("0.5"), Decimal("0.25"))
 
 
-def _lots(source: str, isin: str, as_of) -> list:
+def _lots(source: str, isin: str, as_of, fund_id: str | None = None) -> list:
     """Every position row for this security on this date, not the first one.
 
     A book can hold more than one lot -- and a book holding a lot the other does not *is* the
@@ -47,7 +47,7 @@ def _lots(source: str, isin: str, as_of) -> list:
     no signal: triage was handed facts that denied the problem existed, and correctly refused to
     classify anything.
     """
-    rows = gateway.call_tool("books_and_records.positions", source)
+    rows = gateway.call_tool("books_and_records.positions", source, fund_id)
     return [p for p in rows if p.isin == isin and p.as_of == as_of]
 
 
@@ -59,7 +59,10 @@ def for_break(item: ReconciliationBreak) -> list[str]:
 
 
 def _position_signals(item: ReconciliationBreak) -> list[str]:
-    books = {source: _lots(source, item.isin, item.as_of) for source in ("accounting", "custodian")}
+    books = {
+        source: _lots(source, item.isin, item.as_of, item.fund_id)
+        for source in ("accounting", "custodian")
+    }
     if not any(books.values()):
         return ["neither book holds this security on this date"]
     for source, lots in books.items():
@@ -106,25 +109,48 @@ def _position_signals(item: ReconciliationBreak) -> list[str]:
 
 
 def _cash_signals(item: ReconciliationBreak) -> list[str]:
-    """For a cash break, which movement types each book recorded on the date.
+    """For a cash break, the movements that make up each book's balance as at the date.
 
     A cash balance difference carries no security identifier, so the informative fact is *what kind
     of cash entry* the two books disagree about -- a dividend, a fee accrual, a settlement.
+
+    **As at, not on.** `detect_cash_breaks` strikes the break as a balance of every movement up to
+    and including the valuation date, so filtering the signals to that one date described a
+    different quantity from the one that disagreed. Measured on the USD cash case: the signals
+    showed two dividends implying a difference of 38,062.50 -- 1.03% of a 3,686,737.50 break -- and
+    omitted the 3,724,800.00 failed settlement that is 99% of it. The model then confidently routed
+    it to corporate actions, whose manifest holds no trades tool and could never have resolved it.
+
+    Each movement's date is shown because two dividends across two cycles are otherwise
+    indistinguishable, and the totals are stated so the signal reconciles to the break by
+    construction rather than by the reader's arithmetic.
     """
     signals: list[str] = []
+    balances: dict[str, Decimal] = {}
     for source in ("accounting", "custodian"):
         movements = [
             m
-            for m in gateway.call_tool("books_and_records.cash_movements", source)
-            if m.value_date == item.as_of and (item.currency is None or m.currency == item.currency)
+            for m in gateway.call_tool(
+                "books_and_records.cash_movements", source, item.fund_id
+            )
+            if m.value_date <= item.as_of
+            and (item.currency is None or m.currency == item.currency)
         ]
+        balances[source] = sum((m.amount for m in movements), Decimal(0))
         if not movements:
-            signals.append(f"{source} recorded no cash movement on this date")
+            signals.append(f"{source} has no cash movements at all as at this date")
             continue
-        described = ", ".join(
-            f"{m.movement_type} {m.amount}" for m in sorted(movements, key=lambda m: m.movement_id)
+        described = "; ".join(
+            f"{m.value_date.isoformat()} {m.movement_type} {m.amount}"
+            for m in sorted(movements, key=lambda m: (m.value_date, m.movement_id))
         )
-        signals.append(f"{source} cash entries on this date: {described}")
+        signals.append(f"{source} cash movements as at this date: {described}")
+
+    signals.append(
+        f"balances as at this date: accounting {balances['accounting']}, "
+        f"custodian {balances['custodian']} "
+        f"(difference {balances['accounting'] - balances['custodian']})"
+    )
     return signals
 
 

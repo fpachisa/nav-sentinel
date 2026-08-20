@@ -53,35 +53,90 @@ def validate_fleet(manifests: tuple[AgentManifest, ...]) -> None:
     So the same checks run here, on the way in. `republish()` is a runtime authority-mutation
     surface, and one that only tests guard is not guarded.
     """
-    catalogue = packs.catalogue()
     for manifest in manifests:
-        if manifest.authority.may_post_entries:
+        _validate_manifest(manifest)
+    _validate_no_collisions(manifests)
+
+
+def _validate_manifest(manifest: AgentManifest) -> None:
+    """What must be true of one published agent."""
+    catalogue = packs.catalogue()
+    if manifest.authority.may_post_entries:
+        raise PublicationRefused(
+            f"{manifest.ref} claims posting authority. No agent may post: corrections are drafted "
+            f"for a human to approve. P-003 would deny it at runtime, but a manifest asserting it "
+            f"must not enter the registry at all."
+        )
+    if manifest.authority.max_autonomous_impact is not None:
+        raise PublicationRefused(
+            f"{manifest.ref} declares an autonomous ceiling of "
+            f"{manifest.authority.max_autonomous_impact}. A manifest may narrow its own autonomy, "
+            f"never widen it."
+        )
+    if manifest.authority.may_propose_remediation and manifest.agent_id != "remediation-agent":
+        raise PublicationRefused(
+            f"{manifest.ref} claims drafting authority. Only the remediation agent drafts; "
+            f"investigators report causes."
+        )
+    if not manifest.allowed_tools:
+        raise PublicationRefused(
+            f"{manifest.ref} declares no tools and could never do any work."
+        )
+
+    phantom = [t for t in manifest.allowed_tools if t not in catalogue]
+    if phantom:
+        raise PublicationRefused(
+            f"{manifest.ref} declares tool(s) {phantom} that no registered process provides. "
+            f"A manifest naming a nonexistent tool is a deployment defect."
+        )
+
+    # A tool reading a domain the manifest does not scope is adopted, wins routing on a higher
+    # version, then fails P-006 at runtime -- so a republish could silently disable an investigator.
+    # The suite asserted this against the committed YAML only, which is no protection for a manifest
+    # arriving at runtime.
+    for name in manifest.allowed_tools:
+        undeclared = [
+            domain for domain in catalogue[name].reads if domain not in manifest.data_scopes.read
+        ]
+        if undeclared:
             raise PublicationRefused(
-                f"{manifest.ref} claims posting authority. No agent may post: corrections are "
-                f"drafted for a human to approve. P-003 would deny it at runtime, but a manifest "
-                f"asserting it must not enter the registry at all."
+                f"{manifest.ref} is allowed {name!r}, which reads {undeclared}, but its "
+                f"data_scopes.read does not declare them. P-006 would deny every call."
             )
-        if manifest.authority.max_autonomous_impact is not None:
+
+    if manifest.untrusted_inputs and not manifest.requires_model_armor:
+        raise PublicationRefused(
+            f"{manifest.ref} declares untrusted_inputs without requires_model_armor. An agent that "
+            f"reads the public internet cannot opt out of screening."
+        )
+
+
+def _validate_no_collisions(manifests: tuple[AgentManifest, ...]) -> None:
+    """What must be true of the fleet taken together.
+
+    Service-account ids are derived by truncating to Google's 30-character limit, so two long agent
+    ids can land on one cloud identity -- and an agent silently sharing another's identity holds its
+    IAM grants. `corporate-actions-investigator` is already truncated to
+    `nav-corporate-actions-investig`, so refusing truncation outright would refuse the shipped
+    fleet: the hazard is the collision, not the length. The suite asserted the *derived* id is at
+    most 30 characters, which truncation guarantees, so that test could never have failed.
+    """
+    accounts: dict[str, str] = {}
+    claimed: dict[str, str] = {}
+    for manifest in manifests:
+        account = manifest.service_account_id
+        if accounts.setdefault(account, manifest.agent_id) != manifest.agent_id:
             raise PublicationRefused(
-                f"{manifest.ref} declares an autonomous ceiling of "
-                f"{manifest.authority.max_autonomous_impact}. A manifest may narrow its own "
-                f"autonomy, never widen it."
+                f"{manifest.agent_id!r} and {accounts[account]!r} both derive the service account "
+                f"{account!r}. One would hold the other's IAM grants."
             )
-        if manifest.authority.may_propose_remediation and manifest.agent_id != "remediation-agent":
-            raise PublicationRefused(
-                f"{manifest.ref} claims drafting authority. Only the remediation agent drafts; "
-                f"investigators report causes."
-            )
-        if not manifest.allowed_tools:
-            raise PublicationRefused(
-                f"{manifest.ref} declares no tools and could never do any work."
-            )
-        phantom = [t for t in manifest.allowed_tools if t not in catalogue]
-        if phantom:
-            raise PublicationRefused(
-                f"{manifest.ref} declares tool(s) {phantom} that no registered process provides. "
-                f"A manifest naming a nonexistent tool is a deployment defect."
-            )
+        for capability in manifest.handles_capabilities:
+            if claimed.setdefault(capability, manifest.ref) != manifest.ref:
+                raise PublicationRefused(
+                    f"{manifest.ref} and {claimed[capability]} both claim {capability!r}. Routing "
+                    f"is by highest version, so a republish could take over another agent's "
+                    f"capability."
+                )
 
 
 def republish() -> tuple[AgentManifest, ...]:

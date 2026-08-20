@@ -22,12 +22,20 @@ from nav_sentinel.registry import discover
 from nav_sentinel.registry.models import load_manifests
 
 AS_OF = date(2026, 8, 17)
+#: Ground truth for **every** case in the cycle, keyed by what identifies it. The two cash cases
+#: had no entry, so two of seven were unscored -- and one of them was a confident wrong answer,
+#: structurally invisible to an assertion that filtered to the keys it knew. "7 of 7" was really
+#: "5 of 5, and two we did not look at".
 EXPECTED = {
     "US0378331005": "nav.fx_rate",
     "GB00BN7SWP63": "nav.fx_rate",
     "US5949181045": "nav.corporate_action",
     "FR0000121014": "nav.settlement",
     "US7170811035": "nav.settlement",
+    # The EUR cash balance: accounting carries a settlement entry the custodian does not.
+    "cash:EUR": "nav.settlement",
+    # The USD cash balance: a gross dividend against a net one, plus a failed settlement.
+    "cash:USD": "nav.settlement",
 }
 
 
@@ -47,30 +55,41 @@ def _case(case_id: str = "CASE-1") -> ExceptionCase:
 
 
 class TestTriageCannotInventACategory:
-    def test_the_vocabulary_is_the_registered_capabilities(self):
-        """Not a literal list. A capability no process declares has nowhere to land, so an
-        out-of-vocabulary answer becomes unclassified structurally rather than by prompt."""
-        schema = triage.draft_model()
-        allowed = schema.model_fields["capability"].annotation.__args__
-        assert set(allowed) == set(gateway.capabilities())
+    def test_the_vocabulary_is_the_owning_processs_capabilities(self):
+        """Not a literal list, and not the whole fleet. Offering every registered capability let a
+        NAV break be classified as another process's -- verified with a second pack registered, the
+        schema accepted it, the floor kept it, and the NAV enum then raised."""
+        allowed = triage.draft_model("nav").model_fields["capability"].annotation.__args__
+        assert set(allowed) == {c for c in gateway.capabilities() if c.startswith("nav.")}
+
+    def test_another_processs_capability_is_not_offered(self, monkeypatch):
+        monkeypatch.setattr(
+            gateway, "capabilities", lambda: ("nav.fx_rate", "nav.unclassified", "ta.subscription")
+        )
+        allowed = triage.draft_model("nav").model_fields["capability"].annotation.__args__
+        assert "ta.subscription" not in allowed
 
     def test_an_out_of_vocabulary_answer_is_rejected_by_the_schema(self):
         from pydantic import ValidationError
 
-        schema = triage.draft_model()
+        schema = triage.draft_model("nav")
         with pytest.raises(ValidationError):
             schema.model_validate({"capability": "nav.invented", "confidence": 0.9})
 
     def test_the_schema_is_built_per_call_so_a_new_process_changes_it(self, monkeypatch):
         """Frozen at import it would describe a fleet that no longer exists."""
         monkeypatch.setattr(gateway, "capabilities", lambda: ("nav.fx_rate", UNCLASSIFIED))
-        allowed = triage.draft_model().model_fields["capability"].annotation.__args__
+        allowed = triage.draft_model("nav").model_fields["capability"].annotation.__args__
         assert set(allowed) == {"nav.fx_rate", UNCLASSIFIED}
+
+    def test_an_unknown_namespace_is_a_loud_failure(self):
+        with pytest.raises(RuntimeError, match="under 'kyc'"):
+            triage.draft_model("kyc")
 
     def test_no_capabilities_at_all_is_a_loud_failure(self, monkeypatch):
         monkeypatch.setattr(gateway, "capabilities", tuple)
         with pytest.raises(RuntimeError, match="nothing to classify into"):
-            triage.draft_model()
+            triage.draft_model("nav")
 
     def test_every_capability_triage_can_return_maps_to_a_break_category(self):
         """`ExceptionCase.category` is a closed enum, so an unmappable answer would crash the
@@ -84,7 +103,7 @@ class TestTriageCannotInventACategory:
 class TestAWrongAnswerMustBeAdmitted:
     @staticmethod
     def _draft(capability: str, confidence: float):
-        return triage.draft_model().model_validate(
+        return triage.draft_model("nav").model_validate(
             {"capability": capability, "confidence": confidence, "reasoning": "because"}
         )
 
@@ -127,31 +146,40 @@ class TestAWrongAnswerMustBeAdmitted:
 
 
 class TestTriageDoesNotInvestigate:
+    """Asserted against the agent that gets built, not against this module's source text. Both
+    source-grep versions were defeated by mutation: `model=settings().model_classify` kept the
+    model test green while the agent stopped reading its manifest, and building the full
+    investigative surface under an aliased import kept the tools test green while triage held four
+    tools."""
+
+    @staticmethod
+    def _agent():
+        manifest = discover.get("triage-agent")
+        return manifest, triage.build_agent(manifest, _case(), triage.draft_model("nav"))
+
     def test_it_is_given_no_tools(self):
         """A triage agent holding investigative tools would begin the work its own routing decision
         is supposed to delegate."""
-        import inspect
+        _, agent = self._agent()
+        assert asyncio.run(agent.canonical_tools()) == []
+        assert agent.code_executor is None
 
-        source = inspect.getsource(triage)
-        assert "tools=[]," in source
-        assert "agent_surface.build" not in source
+    def test_its_model_comes_from_its_manifest(self):
+        manifest, agent = self._agent()
+        assert agent.model == manifest.model
 
-    def test_it_runs_on_the_cheap_model_its_manifest_declares(self):
+    def test_a_manifest_declaring_another_model_is_honoured(self):
+        """The property is provenance, not the literal string: a hardcoded model would satisfy an
+        equality check against the manifest that happens to name the same one."""
         manifest = discover.get("triage-agent")
-        assert manifest.model == "gemini-3.5-flash-lite"
-        assert "gemini-3.5-flash-lite" not in inspect_source()
+        renamed = manifest.model_copy(update={"model": "gemini-3.5-flash-lite-sentinel"})
+        agent = triage.build_agent(renamed, _case(), triage.draft_model("nav"))
+        assert agent.model == "gemini-3.5-flash-lite-sentinel"
 
-    def test_its_turn_budget_is_one_exchange(self):
-        """Classification is one turn; more means the model is arguing with itself."""
-        import inspect
-
-        assert "max_llm_calls=3" in inspect.getsource(triage)
-
-
-def inspect_source() -> str:
-    import inspect
-
-    return inspect.getsource(triage).split('"""', 2)[2]
+    def test_its_output_is_schema_constrained_and_reaches_state(self):
+        _, agent = self._agent()
+        assert agent.output_schema is not None
+        assert agent.output_key == "classification"
 
 
 class TestRoutingStaysWithTheRegistry:
@@ -168,12 +196,29 @@ class TestRoutingStaysWithTheRegistry:
             for capability in gateway.capabilities()
         }
         unrouted = sorted(c for c, agent in routed.items() if agent is None)
-        assert unrouted == ["nav.cash_fees", "nav.pricing"], unrouted
+        assert unrouted == ["nav.cash_fees", "nav.pricing", "nav.unclassified"], unrouted
 
-    def test_triage_itself_holds_the_unclassified_capability(self):
-        """An unclassified break has somewhere to go rather than vanishing."""
-        agent = discover.discover_for_capability(UNCLASSIFIED)
-        assert agent is not None and agent.agent_id == "triage-agent"
+    def test_an_unclassified_break_reaches_no_investigator(self):
+        """Triage claimed `nav.unclassified`, so the confidence floor -- whose whole purpose is to
+        send an uncertain break to a human -- routed it straight back to the classifier. Measured: a
+        429 inside classify produced unclassified at 0.00, which was routed to triage-agent, which
+        returned a verdict about the FX rate at confidence 1.00 in a green panel."""
+        assert discover.discover_for_capability(UNCLASSIFIED) is None
+        assert discover.get("triage-agent").handles_capabilities == ()
+
+    def test_an_investigator_refuses_a_case_outside_its_declared_competence(self):
+        """The structural half. Nothing bound a case to an agent's declared competence, so any
+        manifest could be handed any case and the registry's decision was advisory."""
+        import asyncio
+
+        from nav_sentinel.agents import investigator
+
+        case = _case()
+        case.category = __import__(
+            "nav_sentinel.domain.models", fromlist=["BreakCategory"]
+        ).BreakCategory.FX_RATE
+        with pytest.raises(investigator.NotAuthorisedForCapability, match="does not declare"):
+            asyncio.run(investigator.investigate(case, discover.get("triage-agent")))
 
 
 class TestRepublishingChangesRoutingWithoutARestart:
@@ -341,6 +386,15 @@ class TestTheSignalsHandedToTriageAreTrue:
         assert signals.for_case(case) == signals.for_case(case)
 
 
+def _key(case: ExceptionCase) -> str:
+    """How a case is identified for scoring: its securities, or the currency of its cash break."""
+    isins = sorted({b.isin for b in case.breaks if b.isin})
+    if isins:
+        return ",".join(isins)
+    currencies = sorted({b.currency for b in case.breaks if b.currency})
+    return f"cash:{','.join(currencies)}" if currencies else "cash"
+
+
 def _named_case(isin: str) -> ExceptionCase:
     from nav_sentinel.pipeline import cycle_runner
 
@@ -363,8 +417,18 @@ class TestTriageAgainstTheRealModel:
     no confident wrong answers. Before the deterministic signals were added it scored 2 of 6 with
     two confident wrong answers, which is what the signals exist for."""
 
-    @staticmethod
-    def _classify_all() -> list[tuple[str, Classification]]:
+    _cached: list[tuple[str, Classification]] = []
+
+    @classmethod
+    def _classify_all(cls) -> list[tuple[str, Classification]]:
+        """One pass per session, and skip on quota rather than fail.
+
+        Three tests each driving their own pass made 21 model calls; and being rate limited is not
+        the classifier being wrong, so it must not read as it.
+        """
+        if cls._cached:
+            return cls._cached
+
         from nav_sentinel.pipeline import cycle_runner
 
         manifest = discover.get("triage-agent")
@@ -372,30 +436,44 @@ class TestTriageAgainstTheRealModel:
         async def run():
             out = []
             for case in cycle_runner.detect(AS_OF):
-                isins = ",".join(sorted({b.isin for b in case.breaks if b.isin})) or "cash"
-                out.append((isins, await triage.classify(case, manifest)))
+                out.append((_key(case), await triage.classify(case, manifest)))
             return out
 
-        return asyncio.run(run())
+        try:
+            cls._cached = asyncio.run(run())
+        except Exception as exc:  # noqa: BLE001
+            if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc).upper():
+                pytest.skip(f"model quota exhausted, not a wrong answer: {str(exc)[:120]}")
+            raise
+        return cls._cached
 
-    def test_it_classifies_at_least_five_of_the_six_identified_securities(self):
+    def test_every_case_in_the_cycle_has_ground_truth(self):
+        """Otherwise an assertion that filters to known keys cannot see a wrong answer on the rest."""
+        unscored = [k for k, _ in self._classify_all() if k not in EXPECTED]
+        assert unscored == [], unscored
+
+    def test_it_classifies_at_least_five_of_the_seven_cases(self):
         results = self._classify_all()
-        scored = [(k, c) for k, c in results if k in EXPECTED]
-        correct = [k for k, c in scored if c.capability == EXPECTED[k]]
-        assert len(correct) >= 5, [(k, c.capability, EXPECTED[k]) for k, c in scored]
+        correct = [k for k, c in results if c.capability == EXPECTED[k]]
+        assert len(correct) >= 5, [
+            (k, c.capability, EXPECTED[k]) for k, c in results if c.capability != EXPECTED[k]
+        ]
 
     def test_it_never_returns_a_confident_wrong_category(self):
         """The criterion that matters more than accuracy."""
         wrong = [
             (k, c.capability, EXPECTED[k])
             for k, c in self._classify_all()
-            if k in EXPECTED and c.classified and c.capability != EXPECTED[k]
+            if c.classified and c.capability != EXPECTED[k]
         ]
         assert wrong == [], wrong
 
-    def test_every_classification_routes_or_escalates(self):
-        for _, classification in self._classify_all():
+    def test_every_classification_either_routes_or_escalates(self):
+        for key, classification in self._classify_all():
             agent = discover.discover_for_capability(classification.capability)
-            assert agent is not None or classification.capability in (
-                "nav.pricing", "nav.cash_fees",
-            )
+            if agent is None:
+                assert classification.capability in (
+                    "nav.pricing", "nav.cash_fees", UNCLASSIFIED,
+                ), key
+            else:
+                assert classification.capability in agent.handles_capabilities, key

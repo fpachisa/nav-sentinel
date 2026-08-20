@@ -34,6 +34,10 @@ DEFAULT_ISIN = "US0378331005"
 def main() -> int:
     composition.configure()
     console = Console()
+    # Cleared before anything is recorded, not after triage has run. It was cleared after, so the
+    # governance panel showed none of triage's own four decisions -- the log a commit had just
+    # claimed would show them.
+    gateway.clear_decision_log()
     as_of = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else date(2026, 8, 17)
     isin = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ISIN
 
@@ -58,7 +62,9 @@ def main() -> int:
     case.category = contract.category_for(classification.capability)
     facts = case.to_facts()
 
-    agent = discover.discover_for_capability(facts.capability)
+    agent = None if not classification.classified else discover.discover_for_capability(
+        facts.capability
+    )
     if agent is None:
         # Not an error. `nav.pricing` and `nav.cash_fees` are declared capabilities of this process
         # with no published investigator, so the registry refuses the route and the break goes to a
@@ -66,15 +72,23 @@ def main() -> int:
         console.print(
             Panel(
                 Text(
-                    f"The registry authorises no investigator for {facts.capability}.\n"
-                    f"The break is correctly classified and escalated to a human rather than "
-                    f"routed to an agent that is not permitted to handle it."
+                    (
+                        f"Triage was not confident enough to route this break "
+                        f"({classification.confidence:.2f}, floor "
+                        f"{triage.CONFIDENCE_FLOOR}).\n"
+                        if not classification.classified
+                        else f"The registry authorises no investigator for {facts.capability}.\n"
+                    )
+                    + "It is escalated to a human rather than handed to an agent that is not "
+                    "authorised to handle it."
                 ),
-                title="No authorised investigator",
+                title="Escalated — no authorised investigator",
                 border_style="red",
             )
         )
-        return 0
+        # A distinct exit code, so a script or a CI step can tell "investigated" from "escalated".
+        # Both were 0, which made the two indistinguishable to anything but a human reading it.
+        return 2
 
     console.print(
         Panel(
@@ -112,9 +126,7 @@ def main() -> int:
     )
 
 
-    gateway.clear_decision_log()
-    with audit.case_trace(facts) as (_span, trace_id):
-        band = gateway.route_for_approval(facts).metadata["band"]
+    with audit.case_trace(facts) as (_span, trace_id, band):
         verdict, store = asyncio.run(
             investigator.investigate(case, agent, trace_id=trace_id)
         )

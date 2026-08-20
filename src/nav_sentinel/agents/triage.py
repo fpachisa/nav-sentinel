@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nav_sentinel.agents.investigator import UnparseableAnswer, adk_name
 from nav_sentinel.control_plane import gateway, identity, telemetry
+from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain import signals
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -70,18 +71,25 @@ class Classification(BaseModel):
         return self.capability != UNCLASSIFIED
 
 
-def draft_model() -> type[BaseModel]:
-    """Build the output schema from the registered capabilities, at call time.
+def draft_model(namespace: str) -> type[BaseModel]:
+    """Build the output schema from the capabilities of one process, at call time.
 
     Constructed per call rather than at import so a process registering later, or a pack being
     swapped in a test, changes the vocabulary. A schema frozen at import would quietly describe a
     fleet that no longer exists.
+
+    Scoped to `namespace`, not the whole fleet. Offering every registered capability let a NAV break
+    be classified as a transfer-agency one -- verified with a second pack registered: the schema
+    accepted `kyc.document_expired` for a NAV case, the floor kept it at 0.95, and
+    `contract.category_for` then raised, because that enum belongs to one process. The prompt never
+    described those categories either, so the model was handed choices it had no guidance for. A
+    break belongs to the process that detected it.
     """
-    vocabulary = tuple(gateway.capabilities())
+    vocabulary = tuple(c for c in gateway.capabilities() if c.startswith(f"{namespace}."))
     if not vocabulary:
         raise RuntimeError(
-            "no process declares any capability, so triage has nothing to classify into. "
-            "Call nav_sentinel.composition.configure() first."
+            f"no registered process declares any capability under {namespace!r}, so triage has "
+            f"nothing to classify into. Call nav_sentinel.composition.configure() first."
         )
 
     class TriageDraft(BaseModel):
@@ -89,8 +97,8 @@ def draft_model() -> type[BaseModel]:
 
         capability: Literal[vocabulary] = Field(  # type: ignore[valid-type]
             description=(
-                "Which capability this break belongs to. Use "
-                f"{UNCLASSIFIED!r} if none of the others fits."
+                "Which capability this break belongs to. Use the unclassified value if none of "
+                "the others fits."
             ),
         )
         confidence: float = Field(
@@ -154,6 +162,29 @@ to a human anyway, so there is nothing to gain by overstating it.
 """
 
 
+def build_agent(manifest: AgentManifest, case: ExceptionCase, schema: type[BaseModel]):
+    """Construct the ADK agent.
+
+    A separate function so a test can assert on the agent it returns rather than grepping this
+    module's source. Both source-grep tests were defeated by mutation: `model=settings()
+    .model_classify` kept `test_it_runs_on_the_cheap_model_its_manifest_declares` green while the
+    agent stopped reading its manifest, and building the full investigative surface under an
+    aliased import kept `test_it_is_given_no_tools` green while triage held four tools.
+    """
+    from google.adk.agents import Agent
+
+    return Agent(
+        name=adk_name(manifest.agent_id),
+        model=manifest.model,
+        instruction=_instruction(manifest, case),
+        # No tools, deliberately: classifying is not investigating, and a triage agent holding
+        # investigative tools would begin the work its own routing decision delegates.
+        tools=[],
+        output_schema=schema,
+        output_key="classification",
+    )
+
+
 async def classify(
     case: ExceptionCase,
     manifest: AgentManifest,
@@ -161,24 +192,18 @@ async def classify(
     trace_id: str | None = None,
 ) -> Classification:
     """Classify one case. Never raises for a model mistake."""
-    from google.adk.agents import Agent
 
     from nav_sentinel.config import configure_sdk_environment
 
     configure_sdk_environment()
-    schema = draft_model()
+    # The case's own namespace. A break belongs to the process that detected it, and triage has no
+    # business classifying it into another process's vocabulary.
+    namespace = case.capability.partition(".")[0]
+    schema = draft_model(namespace)
+    unclassified = f"{namespace}.unclassified"
 
     with identity.acting_as(manifest.agent_id):
-        agent = Agent(
-            name=adk_name(manifest.agent_id),
-            model=manifest.model,
-            instruction=_instruction(manifest, case),
-            # No tools, deliberately: classifying is not investigating, and a triage agent holding
-            # investigative tools would begin the work its own routing decision delegates.
-            tools=[],
-            output_schema=schema,
-            output_key="classification",
-        )
+        agent = build_agent(manifest, case, schema)
         with telemetry.span(
             "nav_sentinel.triage",
             **{
@@ -191,19 +216,26 @@ async def classify(
         ) as span:
             try:
                 draft = await _run(agent, case, schema)
-            except (UnparseableAnswer, Exception) as exc:  # noqa: BLE001
+            except PolicyViolation:
+                # A governance denial is not uncertainty. `except (UnparseableAnswer, Exception)`
+                # -- which is just `except Exception` -- rendered a P-001 denial as
+                # "triage could not classify this break", exactly the softening the investigator
+                # module refuses by name. Latent only while triage holds no tools; its manifest
+                # already anticipates `memory.recall_recurrence` in S2.
+                raise
+            except Exception as exc:  # noqa: BLE001
                 # A classifier that raises stops the whole cycle over one unusable answer. An
                 # unclassified case is a supported outcome; a crashed one is not.
                 logger.warning("triage failed on %s: %s", case.case_id, exc)
                 span.set_attribute("nav.triage.failed", True)
                 return Classification(
                     case_id=case.case_id,
-                    capability=UNCLASSIFIED,
+                    capability=unclassified,
                     confidence=0.0,
                     reasoning=f"triage could not classify this break: {exc}",
                 )
 
-            result = _apply_floor(case.case_id, draft)
+            result = _apply_floor(case.case_id, draft, unclassified)
             span.set_attribute("nav.triage.capability", result.capability)
             span.set_attribute("nav.triage.confidence", result.confidence)
             if result.overridden_from:
@@ -211,7 +243,7 @@ async def classify(
             return result
 
 
-def _apply_floor(case_id: str, draft: BaseModel) -> Classification:
+def _apply_floor(case_id: str, draft: BaseModel, unclassified: str = UNCLASSIFIED) -> Classification:
     """Discard a classification the model is not confident enough to stand behind.
 
     The override is recorded in `overridden_from` rather than silently applied, because the eval has
@@ -220,10 +252,10 @@ def _apply_floor(case_id: str, draft: BaseModel) -> Classification:
     """
     capability = draft.capability
     confidence = min(max(draft.confidence, 0.0), 1.0)
-    if capability != UNCLASSIFIED and confidence < CONFIDENCE_FLOOR:
+    if capability != unclassified and confidence < CONFIDENCE_FLOOR:
         return Classification(
             case_id=case_id,
-            capability=UNCLASSIFIED,
+            capability=unclassified,
             confidence=confidence,
             reasoning=draft.reasoning,
             overridden_from=capability,

@@ -56,8 +56,10 @@ class TestRegistry:
         revisiting those criteria is also a failure.
         """
         gaps = {cat for cat, ref in discover.coverage().items() if ref is None}
-        assert gaps == {"nav.pricing", "nav.cash_fees"}, (
-            f"coverage gaps are {sorted(gaps)}; expected exactly the two unpublished capabilities. "
+        assert gaps == {"nav.pricing", "nav.cash_fees", "nav.unclassified"}, (
+            f"coverage gaps are {sorted(gaps)}; expected the two unpublished capabilities plus "
+            f"nav.unclassified, which reaches no investigator by design -- an uncertain break "
+            f"escalates to a human rather than returning to the classifier. "
             f"See src/nav_sentinel/domain/manifests/unpublished/README.md"
         )
 
