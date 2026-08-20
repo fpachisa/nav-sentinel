@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nav_sentinel.agents import prompts
 from nav_sentinel.agents.investigator import UnparseableAnswer, adk_name
 from nav_sentinel.control_plane import gateway, identity, telemetry
 from nav_sentinel.control_plane.policies import PolicyViolation
@@ -114,52 +115,38 @@ def draft_model(namespace: str) -> type[BaseModel]:
 
 
 def _instruction(manifest: AgentManifest, case: ExceptionCase) -> str:
-    """The prompt. Describes the shapes rather than naming securities, so it does not encode the
-    fixtures -- a classifier that recognises ISINs has learned the test, not the job.
+    """Fill this agent's template.
 
-    The `signals` block is the substance. Given only the two disagreeing totals the model scored 2
-    of 6 with two confident wrong answers, and could not have done better: a market value that
-    differs while quantity agrees is an FX error or a pricing error, and the totals cannot tell them
-    apart. The books can, deterministically, so those facts are computed rather than guessed.
+    The prose lives in `domain/prompts/triage-agent.md`, found through the process pack. What stays
+    here is the assembly: the break lines, and the deterministic signals -- which are the whole
+    reason a static instruction string would not do. Given only the two disagreeing totals the model
+    scored 2 of 6 with two confident wrong answers, and could not have done better: a market value
+    that differs while quantity agrees is an FX error or a pricing error, and the totals cannot tell
+    them apart. The books can.
     """
-    breaks = "\n".join(
+    namespace = case.capability.partition(".")[0]
+    return prompts.render(
+        manifest.agent_id,
+        display_name=manifest.display_name,
+        fund_id=case.fund_id,
+        as_of=case.as_of.isoformat(),
+        case_id=case.case_id,
+        breaks=_break_lines(case),
+        signals="\n".join(f"  - {line}" for line in signals.for_case(case)),
+        unclassified=f"{namespace}.unclassified",
+        floor=CONFIDENCE_FLOOR,
+    )
+
+
+def _break_lines(case: ExceptionCase) -> str:
+    return "\n".join(
         f"  - {b.break_type.value}: accounting {b.accounting_value}, custodian "
         f"{b.custodian_value}, difference {b.difference}"
         + (f", ISIN {b.isin}" if b.isin else "")
-        + (f", currency {b.currency}" if b.currency else "")
+        + (f", local currency {b.currency}" if b.currency else "")
         + (f" ({b.note})" if b.note else "")
         for b in case.breaks
     )
-    evidence = "\n".join(f"  - {line}" for line in signals.for_case(case))
-    return f"""You are {manifest.display_name} for a fund administrator.
-
-Decide which kind of problem this reconciliation break is, so it can be routed to the right
-specialist. You are not solving it.
-
-  fund {case.fund_id}, valuation date {case.as_of.isoformat()}
-  case {case.case_id}
-{breaks}
-
-What the books say about it:
-{evidence}
-
-What the categories look like:
-  - nav.fx_rate: a market value differs while quantity agrees, and the difference is consistent
-    with a currency conversion -- a rate from the wrong date, or a cross applied upside down.
-  - nav.corporate_action: a dividend, split, merger or spin-off. A cash difference matching a
-    withholding rate, or a quantity differing by a whole ratio while market value agrees exactly.
-  - nav.settlement: the two books recognise the same trade on different dates, or one has a
-    position the other does not. Trade date versus settlement date, or a failed delivery.
-  - nav.pricing: the price itself differs -- a stale, wrong or manually overridden security price
-    in the same currency. Not a conversion problem.
-  - nav.cash_fees: management fees, performance fees or expense accruals.
-  - {UNCLASSIFIED}: none of the above fits, or the evidence is genuinely ambiguous.
-
-Answer {UNCLASSIFIED} when you are unsure. A break you send to the wrong specialist is investigated
-with the wrong tools and comes back with a confident answer about the wrong mechanism, which is
-worse than saying you do not know. Below 0.5 confidence your answer is discarded and the break goes
-to a human anyway, so there is nothing to gain by overstating it.
-"""
 
 
 def build_agent(manifest: AgentManifest, case: ExceptionCase, schema: type[BaseModel]):
@@ -167,9 +154,9 @@ def build_agent(manifest: AgentManifest, case: ExceptionCase, schema: type[BaseM
 
     A separate function so a test can assert on the agent it returns rather than grepping this
     module's source. Both source-grep tests were defeated by mutation: `model=settings()
-    .model_classify` kept `test_it_runs_on_the_cheap_model_its_manifest_declares` green while the
-    agent stopped reading its manifest, and building the full investigative surface under an
-    aliased import kept `test_it_is_given_no_tools` green while triage held four tools.
+    .model_classify` kept the model test green while the agent stopped reading its manifest, and
+    building the full investigative surface under an aliased import kept the tools test green while
+    triage held four tools.
     """
     from google.adk.agents import Agent
 

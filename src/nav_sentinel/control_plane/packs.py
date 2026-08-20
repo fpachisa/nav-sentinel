@@ -95,6 +95,10 @@ class ProcessPack:
     #: Where this process keeps its agent manifests. Sourced from the pack rather than from
     #: inside the registry, so adding a process adds no file under registry/.
     manifest_dir: Path
+    #: Where this process keeps its prompt templates, one per agent id. Declared by the pack for the
+    #: same reason as the manifests: a second process ships its own instructions without any change
+    #: here. Defaults to a `prompts` directory beside the manifests.
+    prompt_dir: Path | None = None
     tools: tuple[ToolSpec, ...] = ()
     #: One threshold set per unit this process measures impact in.
     thresholds: tuple[ThresholdSet, ...] = ()
@@ -323,6 +327,15 @@ def capabilities() -> tuple[str, ...]:
 
 def manifest_dirs() -> tuple[Path, ...]:
     return tuple(p.manifest_dir for p in registered() if p.manifest_dir.is_dir())
+
+
+def prompt_dirs() -> tuple[Path, ...]:
+    """Every registered process's prompt directory, in registration order."""
+    return tuple(
+        directory
+        for p in registered()
+        if (directory := p.prompt_dir or p.manifest_dir.parent / "prompts").is_dir()
+    )
 
 
 def thresholds_for(unit: str) -> ThresholdSet | None:

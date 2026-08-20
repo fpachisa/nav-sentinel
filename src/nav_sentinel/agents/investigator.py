@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from nav_sentinel.agents import prompts
 from nav_sentinel.agents.contract import (
     UNKNOWN,
     Citation,
@@ -133,56 +134,31 @@ def adk_name(agent_id: str) -> str:
 
 
 def _instruction(manifest: AgentManifest, case: ExceptionCase) -> str:
-    """The prompt, assembled from the manifest and the case.
+    """Fill this agent's template.
 
-    Written to be specific about the two things a model gets wrong here: asserting a cause it
-    cannot evidence, and citing a tool result it did not actually rely on. Both are refused
-    downstream, so saying so up front turns a rejection into a corrigible instruction.
+    The prose lives in `domain/prompts/investigator.md`. The facts the process requires are read
+    from the pack and named in the instruction, so a changed rule changes what the model is told
+    rather than leaving it working to a stale one.
     """
-    breaks = "\n".join(
-        f"  - {b.break_type.value}: accounting {b.accounting_value}, custodian "
-        f"{b.custodian_value}, difference {b.difference}"
-        + (f", ISIN {b.isin}" if b.isin else "")
-        + (f", currency {b.currency}" if b.currency else "")
-        + (f" ({b.note})" if b.note else "")
-        for b in case.breaks
+    return prompts.render(
+        "investigator",
+        display_name=manifest.display_name,
+        description=manifest.description.strip(),
+        fund_id=case.fund_id,
+        as_of=case.as_of.isoformat(),
+        case_id=case.case_id,
+        breaks="\n".join(
+            f"  - {b.break_type.value}: accounting {b.accounting_value}, custodian "
+            f"{b.custodian_value}, difference {b.difference}"
+            + (f", ISIN {b.isin}" if b.isin else "")
+            + (f", local currency {b.currency}" if b.currency else "")
+            + (f" ({b.note})" if b.note else "")
+            for b in case.breaks
+        ),
+        required=", ".join(gateway.evidence_requirement_for(case.capability))
+        or "no particular facts",
+        unknown=UNKNOWN,
     )
-    required = ", ".join(gateway.evidence_requirement_for(case.capability)) or "no particular facts"
-    return f"""You are the {manifest.display_name} for a fund administrator.
-
-{manifest.description.strip()}
-
-Explain WHY the books disagree. You do not fix anything: a separate agent drafts corrections and a
-human approves them. Your output is an explanation supported by evidence.
-
-The case:
-  fund {case.fund_id}, valuation date {case.as_of.isoformat()}
-  case {case.case_id}
-{breaks}
-
-How to work:
-  1. Use your tools to establish what the external reference data actually says.
-  2. Every tool result comes back as {{"observation_id": ..., "result": ...}}. Keep every
-     observation_id you receive.
-  3. State the root cause in one sentence, quoting the specific values that show it -- the dates,
-     the rates, the amounts, the currency. "The rate was wrong" is not a root cause. "The
-     2026-08-14 USD rate of 1.1567 was applied to a 2026-08-17 valuation, where the published rate
-     was 1.1593" is.
-  4. In `observation_ids`, list **every** observation_id whose result you used, not just the last
-     one. If your sentence quotes a rate, the lookup that returned that rate must be in the list.
-
-Your answer is checked mechanically before it is accepted, and rejected if:
-  - it asserts a cause but cites no observations;
-  - the values your sentence quotes cannot be found in the observations you cited;
-  - the observations you cited do not between them carry {required}.
-
-Those checks compare your words against what your tool calls actually returned, so quote figures
-exactly as the tools gave them and cite every call you drew on.
-
-If the evidence does not support a cause, return root_cause exactly "{UNKNOWN}" with confidence 0.0
-and say in `unresolved` what you could not establish. That is a useful answer, and it is the right
-one when you are unsure. A confident wrong answer is not.
-"""
 
 
 async def investigate(

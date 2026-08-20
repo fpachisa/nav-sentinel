@@ -13,6 +13,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from nav_sentinel.control_plane import identity, packs, policies, telemetry
@@ -341,6 +342,16 @@ def authorize_posting(
 
 def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
+
+
+def prompt_dirs() -> tuple[Path, ...]:
+    """Every registered process's prompt directory.
+
+    Exposed here for the same reason as `capabilities()`: the agents layer must not import `packs`,
+    because reading the catalogue means holding the ungated tool callables -- and the seam test
+    caught exactly that when the prompt loader reached for it directly.
+    """
+    return packs.prompt_dirs()
 
 
 def capabilities() -> tuple[str, ...]:
