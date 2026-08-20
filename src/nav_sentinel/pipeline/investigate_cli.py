@@ -20,10 +20,9 @@ from rich.table import Table
 from rich.text import Text
 
 from nav_sentinel import composition
-from nav_sentinel.agents import investigator
+from nav_sentinel.agents import contract, investigator, triage
 from nav_sentinel.control_plane import audit, gateway
 from nav_sentinel.domain import materiality
-from nav_sentinel.domain.models import BreakCategory
 from nav_sentinel.pipeline import cycle_runner
 from nav_sentinel.registry import discover
 from nav_sentinel.tools import books_and_records as bnr
@@ -51,17 +50,31 @@ def main() -> int:
     custodian_nav = bnr.nav_record("custodian", cycle_runner.FUND, as_of)
     materiality.score(case, custodian_nav, cycle_runner._fixture_rates(as_of))
 
-    # Triage is S1.4. Until then the capability is *asserted* here, not classified -- and that is
-    # printed on screen rather than left in a source comment, because run against another ISIN this
-    # target silently mislabelled: a settlement timing difference came out as nav.fx_rate at
-    # 285bps critical and was handed to the FX investigator, whose manifest has no trades access.
-    case.category = BreakCategory.FX_RATE
+    # Classified, not asserted. This hardcoded `BreakCategory.FX_RATE`, so run against another ISIN
+    # it silently mislabelled -- a settlement timing difference came out as nav.fx_rate at 285bps
+    # critical and went to the FX investigator, whose manifest has no trades access.
+    triage_agent = discover.get("triage-agent")
+    classification = asyncio.run(triage.classify(case, triage_agent))
+    case.category = contract.category_for(classification.capability)
     facts = case.to_facts()
 
     agent = discover.discover_for_capability(facts.capability)
     if agent is None:
-        console.print(f"[red]no authorised investigator for {facts.capability}[/red]")
-        return 1
+        # Not an error. `nav.pricing` and `nav.cash_fees` are declared capabilities of this process
+        # with no published investigator, so the registry refuses the route and the break goes to a
+        # human. A silently missing category would have looked like coverage.
+        console.print(
+            Panel(
+                Text(
+                    f"The registry authorises no investigator for {facts.capability}.\n"
+                    f"The break is correctly classified and escalated to a human rather than "
+                    f"routed to an agent that is not permitted to handle it."
+                ),
+                title="No authorised investigator",
+                border_style="red",
+            )
+        )
+        return 0
 
     console.print(
         Panel(
@@ -75,12 +88,29 @@ def main() -> int:
             # `facts.status` is the case's lifecycle state ("open"), not where it routed -- an
             # earlier version of this line printed it under the label "routed to", which read as
             # though the approval band were `open`. The band is derived by the control plane below.
-            + f"\n\nmateriality {facts.impact}  ·  severity {facts.severity}"
-            + "\n[dim]capability asserted, not classified — triage is S1.4[/dim]",
+            + f"\n\nmateriality {facts.impact}  ·  severity {facts.severity}",
             title="Exception",
             border_style="yellow",
         )
     )
+
+    console.print(
+        Panel(
+            Text(
+                f"{classification.capability}  (confidence {classification.confidence:.2f})\n"
+                f"{classification.reasoning}"
+                + (
+                    f"\n\nthe model answered {classification.overridden_from}, below the "
+                    f"{triage.CONFIDENCE_FLOOR} floor, so it was escalated instead of routed"
+                    if classification.overridden_from
+                    else ""
+                )
+            ),
+            title=f"Triage — {triage_agent.ref} on {triage_agent.model}",
+            border_style="cyan" if classification.classified else "yellow",
+        )
+    )
+
 
     gateway.clear_decision_log()
     with audit.case_trace(facts) as (_span, trace_id):

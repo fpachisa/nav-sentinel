@@ -37,6 +37,71 @@ def _catalogue() -> tuple[AgentManifest, ...]:
     return _cache
 
 
+class PublicationRefused(RuntimeError):
+    """A manifest on disk violates a fleet invariant, so the registry will not adopt it."""
+
+
+def validate_fleet(manifests: tuple[AgentManifest, ...]) -> None:
+    """Re-assert what must be true of every published agent, whoever published it.
+
+    These invariants lived only in tests, which meant they were asserted against the manifests
+    *committed to the repository* and nowhere else. `acting_as` resolves from this catalogue, so a
+    manifest adopted at runtime changes what every `authorize_*` believes -- and a test reading YAML
+    files off disk cannot see that. Freezing the registry models closed mutation; it did nothing
+    about publication.
+
+    So the same checks run here, on the way in. `republish()` is a runtime authority-mutation
+    surface, and one that only tests guard is not guarded.
+    """
+    catalogue = packs.catalogue()
+    for manifest in manifests:
+        if manifest.authority.may_post_entries:
+            raise PublicationRefused(
+                f"{manifest.ref} claims posting authority. No agent may post: corrections are "
+                f"drafted for a human to approve. P-003 would deny it at runtime, but a manifest "
+                f"asserting it must not enter the registry at all."
+            )
+        if manifest.authority.max_autonomous_impact is not None:
+            raise PublicationRefused(
+                f"{manifest.ref} declares an autonomous ceiling of "
+                f"{manifest.authority.max_autonomous_impact}. A manifest may narrow its own "
+                f"autonomy, never widen it."
+            )
+        if manifest.authority.may_propose_remediation and manifest.agent_id != "remediation-agent":
+            raise PublicationRefused(
+                f"{manifest.ref} claims drafting authority. Only the remediation agent drafts; "
+                f"investigators report causes."
+            )
+        if not manifest.allowed_tools:
+            raise PublicationRefused(
+                f"{manifest.ref} declares no tools and could never do any work."
+            )
+        phantom = [t for t in manifest.allowed_tools if t not in catalogue]
+        if phantom:
+            raise PublicationRefused(
+                f"{manifest.ref} declares tool(s) {phantom} that no registered process provides. "
+                f"A manifest naming a nonexistent tool is a deployment defect."
+            )
+
+
+def republish() -> tuple[AgentManifest, ...]:
+    """Re-read the manifests from disk and adopt them, without a process restart.
+
+    The registry cached for the lifetime of the process, and nothing triggered a reload:
+    `packs.on_change` fires on pack registration, not on a manifest appearing. So "republishing a
+    manifest changes routing without a restart" had no mechanism at all.
+
+    Validation runs before adoption, and a refusal leaves the previous catalogue in place -- a
+    half-adopted fleet is worse than a stale one. In-process republish is the demonstrated scope;
+    a Firestore-backed publication path is later work, and this is the seam it would use.
+    """
+    global _cache
+    candidate = tuple(load_manifests())
+    validate_fleet(candidate)
+    _cache = candidate
+    return candidate
+
+
 def invalidate() -> None:
     """Drop the cached catalogue. Called after a publish, and by tests."""
     global _cache

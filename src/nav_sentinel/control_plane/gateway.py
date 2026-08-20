@@ -314,6 +314,15 @@ def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
 
 
+def capabilities() -> tuple[str, ...]:
+    """Every capability any registered process declares.
+
+    Exposed here for the same reason as `evidence_requirement_for`: the agents layer must not
+    import `packs`, because reading the catalogue means holding the ungated tool callables.
+    """
+    return packs.capabilities()
+
+
 def evidence_requirement_for(capability: str) -> tuple[str, ...]:
     """What the owning process demands a verdict cite for this capability.
 
