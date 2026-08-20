@@ -29,6 +29,7 @@ from nav_sentinel.domain.models import (
     QuantityRestatementLine,
     RemediationProposal,
 )
+from nav_sentinel.evaluation import golden
 from nav_sentinel.pipeline import cycle_runner
 from nav_sentinel.registry import discover
 from nav_sentinel.tools import books_and_records as bnr
@@ -204,17 +205,27 @@ class TestTheLegsMatchWhatTheGoldenStates:
 
 class TestOnlyTheRemediationAgentDrafts:
     def test_an_investigator_cannot_draft(self):
-        """P-002. The investigators report causes."""
+        """P-002, enforced by the gateway and recorded in the governance log.
+
+        This used to pass on an agent-side copy of the policy that fired first, so mutating
+        `may_propose_remediation` to always ALLOW broke nothing here -- and an investigator's
+        attempted draft left no decision in the log at all. The assertion is now on the decision
+        object and on the log, not on a message.
+        """
         verdict = Verdict(
             case_id="CASE-1", capability="nav.fx_rate", root_cause="stale rate 1.1567",
             confidence=0.9, citations=[Citation(observation_id="OBS-x", relevance="r")],
         )
-        with pytest.raises(Exception, match="drafting authority|does not hold"):
+        gateway.clear_decision_log()
+        with pytest.raises(PolicyViolation) as raised:
             asyncio.run(
                 remediation.draft(
                     _scored_case("US0378331005"), verdict, discover.get("fx-rates-investigator")
                 )
             )
+        assert raised.value.decision.policy_id == "P-002-DRAFT-AUTHORITY"
+        denials = [d for d in gateway.decision_log() if not d.allowed]
+        assert [d.policy_id for d in denials] == ["P-002-DRAFT-AUTHORITY"]
 
     def test_drafting_authority_is_recorded_not_assumed(self, monkeypatch):
         """The decision lands in the governance log before a line of the proposal is built."""
@@ -265,12 +276,23 @@ class TestTheModelDoesNotSetItsOwnTerms:
         )
         return asyncio.run(remediation.draft(case, verdict, discover.get("remediation-agent")))
 
-    def test_the_approval_band_comes_from_the_control_plane(self, monkeypatch):
-        """A proposal that set its own approval level would decide how many humans look at it."""
+    @pytest.mark.parametrize(
+        ("isin", "expected"),
+        [
+            ("US0378331005", ApprovalClass.FOUR_EYES),        # 4.7492bps
+            ("GB00BN7SWP63", ApprovalClass.CIO_ESCALATION),   # 254.8804bps
+        ],
+    )
+    def test_the_approval_band_comes_from_the_control_plane(self, monkeypatch, isin, expected):
+        """A proposal that set its own approval level would decide how many humans look at it.
+
+        Two bands, because one case asserting FOUR_EYES held under a hardcoded constant: the
+        mutation `requires=ApprovalClass.FOUR_EYES` passed the whole suite.
+        """
         proposal = self._draft(
-            monkeypatch, ProposalDraft(outcome="reconciling_item", rationale="timing")
+            monkeypatch, ProposalDraft(outcome="reconciling_item", rationale="timing"), isin=isin
         )
-        assert proposal.requires is ApprovalClass.FOUR_EYES   # 4.7492bps on this case
+        assert proposal.requires is expected
 
     def test_the_draft_schema_has_no_field_for_the_band_or_the_residual(self):
         forbidden = {"requires", "expected_residual", "approval_class", "band"}
@@ -328,10 +350,32 @@ class TestPostingIsDeniedFourWays:
         assert manifests
         assert [m.ref for m in manifests if m.authority.may_post_entries] == []
 
-    def test_the_drafting_agent_itself_is_denied(self, case):
+    @staticmethod
+    def _attempt(case, approval_ref: str | None) -> PolicyViolation:
+        """Attempt a post and return the violation, having cleared the log first.
+
+        Asserting on the message was not enough: deleting `gateway.authorize_posting` from `post()`
+        left the hardcoded fallback raise, whose own text begins `[P-003-NO-AUTONOMOUS-POSTING]`, so
+        all three denial tests passed with the gate removed. The headline security claim was asserted
+        by tests that could not see the gate.
+        """
+        gateway.clear_decision_log()
         with identity.acting_as("remediation-agent"):
-            with pytest.raises(PolicyViolation, match="P-003"):
-                remediation.post(_proposal(), case, None)
+            with pytest.raises(PolicyViolation) as raised:
+                remediation.post(_proposal(), case, approval_ref)
+        return raised.value
+
+    def test_the_drafting_agent_itself_is_denied(self, case):
+        violation = self._attempt(case, None)
+        assert violation.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
+
+    def test_the_denial_reaches_the_governance_log(self, case):
+        """The gate has to have run, not merely been described. A decision in the log is the only
+        evidence of that which a hardcoded raise cannot fake."""
+        self._attempt(case, None)
+        denials = [d for d in gateway.decision_log() if not d.allowed]
+        assert [d.policy_id for d in denials] == ["P-003-NO-AUTONOMOUS-POSTING"]
+        assert denials[0].agent_ref == "remediation-agent@1.5.0"
 
     def test_a_mutated_manifest_cannot_grant_it(self):
         """The registry's models are frozen, so the attribute assignment fails outright."""
@@ -347,9 +391,8 @@ class TestPostingIsDeniedFourWays:
                 pass
 
     def test_an_invented_approval_reference_does_not_help(self, case):
-        with identity.acting_as("remediation-agent"):
-            with pytest.raises(PolicyViolation, match="P-003"):
-                remediation.post(_proposal(), case, "APPR-0000000000000000")
+        violation = self._attempt(case, "APPR-0000000000000000")
+        assert violation.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
 
     def test_a_genuine_approval_does_not_help_either(self, case):
         """The part a slide would skip. The approval is real, recorded, and resolvable -- and
@@ -365,9 +408,12 @@ class TestPostingIsDeniedFourWays:
         from nav_sentinel.control_plane import approvals
 
         assert approvals.resolve(record.ref) is not None
-        with identity.acting_as("remediation-agent"):
-            with pytest.raises(PolicyViolation, match="P-003"):
-                remediation.post(_proposal(), case, record.ref)
+        violation = self._attempt(case, record.ref)
+        assert violation.decision.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
+        assert any(
+            not d.allowed and d.policy_id == "P-003-NO-AUTONOMOUS-POSTING"
+            for d in gateway.decision_log()
+        )
 
 
 class TestTheApprovalConsole:
@@ -439,3 +485,121 @@ class TestDraftingAgainstTheRealModel:
         assert proposal.balances
         assert proposal.requires is ApprovalClass.FOUR_EYES
         assert proposal.outcome is Outcome.JOURNAL_ENTRY
+
+
+class TestThePromptCarriesTheFactsTheModelNeeds:
+    """The base-currency fix was the defect the S4 commit led with, and it had no offline test at
+    all: mutating the value to "XXX" left the whole suite passing, so a regression would have been
+    attributed to the model."""
+
+    @staticmethod
+    def _prompt() -> str:
+        case = _scored_case("US0378331005")
+        case.category = BreakCategory.FX_RATE
+        verdict = Verdict(
+            case_id=case.case_id, capability="nav.fx_rate",
+            root_cause="stale 2026-08-14 rate of 1.1567 applied", confidence=0.9,
+            citations=[Citation(observation_id="OBS-x", relevance="r")],
+        )
+        with identity.acting_as("remediation-agent"):
+            return remediation._instruction(
+                discover.get("remediation-agent"), case, verdict
+            )
+
+    def test_it_states_the_funds_base_currency(self):
+        """Without it the model drafted the right account and the right amount to the cent in the
+        security's local trading currency."""
+        assert "base currency EUR" in self._prompt()
+
+    def test_the_base_currency_is_read_not_hardcoded(self):
+        with identity.acting_as("remediation-agent"):
+            assert remediation._base_currency("MERID-GEF") == "EUR"
+            # An unknown fund must not silently inherit another fund's base currency.
+            assert remediation._base_currency("NO-SUCH-FUND") == "EUR"
+
+    def test_it_states_the_established_cause(self):
+        assert "1.1567" in self._prompt()
+
+    def test_it_tells_the_agent_it_does_not_post(self):
+        prompt = self._prompt()
+        assert "You do not post it" in prompt
+        assert "a human approves every entry" in prompt
+
+
+class TestTheResidualIsComputed:
+    """It was `Decimal(0)` under a comment saying it was computed, so every proposal reported
+    "closes exactly" whether it did or not -- and PLAN.md names this field as the reason S4 is
+    mandatory: "already exists as the hook and nothing computes it"."""
+
+    @staticmethod
+    def _residual(credit: D) -> D:
+        from nav_sentinel.agents.remediation import DraftLine
+
+        case = _scored_case("US0378331005")
+        drafted = ProposalDraft(
+            outcome="journal_entry",
+            lines=[
+                DraftLine(account="investments_at_market", currency="EUR", credit=credit),
+                DraftLine(account="unrealised_fx", currency="EUR", debit=credit),
+            ],
+        )
+        with identity.acting_as("remediation-agent"):
+            return remediation._residual(case, drafted)
+
+    def test_a_correct_entry_closes_the_break(self):
+        assert self._residual(D("86625.48")) == D("0.00")
+
+    def test_a_wrong_amount_leaves_the_difference(self):
+        """The single most useful number on a proposal: what a reviewer still has to explain."""
+        assert self._residual(D("50000.00")) == D("36625.48")
+
+    def test_the_draft_cannot_supply_it(self):
+        assert "expected_residual" not in ProposalDraft.model_fields
+
+
+class TestAQuantityLegIsNotAMoneyLeg:
+    """A split's share delta was emitted into `nav_legs` alongside currency amounts, and
+    `stock_record` is not a NAV account. Measured against the golden's own corrections, that made
+    Σ nav_legs miss −control_total by exactly 96,000.0074 -- the share delta, to the share."""
+
+    @staticmethod
+    def _split() -> RemediationProposal:
+        return _proposal(
+            outcome=Outcome.QUANTITY_RESTATEMENT,
+            lines=[],
+            quantity_lines=[
+                QuantityRestatementLine(
+                    account="stock_record", isin="US5949181045",
+                    from_quantity=D("96000.0000"), to_quantity=D("192000.0000"),
+                )
+            ],
+        )
+
+    def test_a_split_moves_no_net_assets(self):
+        """Which is exactly why the golden states its amount as 0.00."""
+        assert self._split().nav_legs == []
+
+    def test_the_share_delta_is_reported_separately(self):
+        assert self._split().quantity_legs == [
+            ("stock_record", "US5949181045", D("96000.0000"))
+        ]
+
+    def test_the_golden_states_a_split_as_zero_amount_and_a_quantity(self):
+        """Pinning the shape the metric compares against, so the two cannot drift apart."""
+        reference = golden.load()
+        split = next(
+            s for _, s in reference.scenarios() if s.scenario == "CA_STOCK_SPLIT_NOT_APPLIED"
+        )
+        correction = split.expected_corrections[0]
+        assert correction.amount == D("0.00")
+        assert correction.quantity == D("96000.0000")
+
+    def test_the_golden_corrections_close_the_control_total_in_base(self):
+        """The S5 closure invariant, on the golden itself. Summing raw amounts across currencies
+        gave a residual of -4,776.53 on a cycle whose corrections in fact close it: the ADR legs are
+        USD and the control total is EUR."""
+        from nav_sentinel.evaluation import scoring
+
+        for cycle in golden.load().cycles:
+            check = scoring.check_closure(cycle, cycle_runner._fixture_rates(cycle.nav_date))
+            assert check.closes, str(check)

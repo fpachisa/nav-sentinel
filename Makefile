@@ -2,7 +2,9 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo clean
+.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
+# `eval` collides with the eval/ directory, so without .PHONY make reports it up to date and
+# silently runs nothing -- a target that appears to succeed while doing no work.
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -52,6 +54,12 @@ demo: ## Run one reconciliation cycle: detect, score, band, route, trace
 
 investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike `demo`
 	$(PY) -m nav_sentinel.pipeline.investigate_cli
+
+eval: ## Score the fleet against the golden, beside a heuristic baseline. NEEDS a live model
+	$(PY) -m nav_sentinel.evaluation.runner
+
+eval-score: ## Re-render the last recorded run without spending a model call
+	$(PY) -m nav_sentinel.evaluation.runner --score
 
 approve: ## The human step: list persisted cases, or approve one and watch posting still be denied
 	$(PY) -m nav_sentinel.pipeline.approve_cli $(CASE) $(SIGNERS)

@@ -33,7 +33,14 @@ def _catalogue() -> tuple[AgentManifest, ...]:
     """
     global _cache
     if _cache is None:
-        _cache = tuple(load_manifests())
+        candidate = tuple(load_manifests())
+        # Validated on first load too, not only on republish. The invariants were enforced on the
+        # harder path and not the easier one: dropping a YAML claiming `may_post_entries: true` into
+        # the manifest directory was adopted unvalidated, won routing on a higher version, and
+        # `authorize_posting` returned ALLOW. `republish()` refused the identical file. This
+        # module's own argument -- an invariant only tests guard is not guarded -- applies to load.
+        validate_fleet(candidate)
+        _cache = candidate
     return _cache
 
 

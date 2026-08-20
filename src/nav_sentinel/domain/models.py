@@ -384,10 +384,25 @@ class RemediationProposal(BaseModel):
             (line.account, line.currency, line.signed)
             for line in self.lines
             if line.account in NAV_ACCOUNTS
-        ] + [
-            (line.account, None, line.delta)
-            for line in self.quantity_lines
         ]
+
+    @property
+    def quantity_legs(self) -> list[tuple[str, str, Decimal]]:
+        """Share counts restated, as `(account, isin, delta)`. Separate from `nav_legs` on purpose.
+
+        The quantity branch used to be appended to `nav_legs` in the same tuple shape as money, and
+        `stock_record` is not a NAV account -- so a 2:1 split emitted a *share count* of 96,000 into
+        a sum of currency amounts. Measured against the golden's own corrections, that made
+        `Σ nav_legs` miss `−control_total` by exactly 96,000.0074: the share delta, to the share.
+        The closure invariant is the headline number, and it was wrong by a whole leg.
+
+        It also scored a correct restatement as wrong the other way round. The golden states a split
+        as `amount: 0.00` **and** `quantity: 96000.0000` in separate fields, so a comparison over
+        `(account, currency, amount)` triples saw 96,000 where 0.00 was expected.
+
+        A split moves no net assets -- which is exactly why the golden says `0.00`.
+        """
+        return [(line.account, line.isin, line.delta) for line in self.quantity_lines]
 
     @model_validator(mode="after")
     def _the_outcome_matches_what_is_attached(self) -> RemediationProposal:

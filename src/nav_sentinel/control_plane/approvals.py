@@ -79,7 +79,8 @@ class ApprovalStore(ABC):
     def get(self, ref: str) -> ApprovalRecord | None: ...
 
     @abstractmethod
-    def put(self, record: ApprovalRecord) -> None: ...
+    def put(self, record: ApprovalRecord) -> ApprovalRecord:
+        """Store a record and return the authoritative one -- which is the stored one on a repeat."""
 
 
 class InMemoryApprovalStore(ApprovalStore):
@@ -89,10 +90,15 @@ class InMemoryApprovalStore(ApprovalStore):
     def get(self, ref: str) -> ApprovalRecord | None:
         return self._records.get(ref)
 
-    def put(self, record: ApprovalRecord) -> None:
-        if record.ref in self._records:
-            raise ValueError(f"approval {record.ref} already exists and records are immutable")
-        self._records[record.ref] = record
+    def put(self, record: ApprovalRecord) -> ApprovalRecord:
+        """First write wins, and a repeat returns what is stored.
+
+        The ref is derived from the case, the band and the signers and *not* from the timestamp, so
+        a matching ref means the same grant by construction -- and the first grant's time is the
+        truth. Comparing whole records would refuse a legitimate repeat purely because the second
+        call happened later.
+        """
+        return self._records.setdefault(record.ref, record)
 
     def clear(self) -> None:
         self._records.clear()
@@ -116,11 +122,14 @@ class FirestoreApprovalStore(ApprovalStore):
         doc = self._collection.document(ref).get()
         return ApprovalRecord.model_validate(doc.to_dict()) if doc.exists else None
 
-    def put(self, record: ApprovalRecord) -> None:
+    def put(self, record: ApprovalRecord) -> ApprovalRecord:
         doc = self._collection.document(record.ref)
-        if doc.get().exists:
-            raise ValueError(f"approval {record.ref} already exists and records are immutable")
+        snapshot = doc.get()
+        if snapshot.exists:
+            # The stored record, not the one just built: the first grant's timestamp is the truth.
+            return ApprovalRecord.model_validate(snapshot.to_dict())
         doc.set(record.model_dump(mode="json"))
+        return record
 
 
 class Principal(BaseModel):
@@ -178,6 +187,12 @@ class ApprovalAuthority:
         counter. It deliberately excludes the timestamp: including it meant two identical grants
         produced two distinct refs and both persisted, which is not what "records are immutable"
         should mean.
+
+        And a repeat of the *same* grant returns the same record rather than raising. The intent was
+        always idempotence -- that is what excluding the timestamp is for -- but `put` raised on an
+        existing ref, so running the approval console twice on one case died with an unhandled
+        ValueError. The demonstration command crashed on its second run, which is the run a
+        recording is most likely to be.
         """
         allowed_roles, required = BAND_REQUIREMENTS[band]
         if not principals:
@@ -209,8 +224,7 @@ class ApprovalAuthority:
             granted_at=datetime.now(UTC),
             note=note,
         )
-        self._store.put(record)
-        return record
+        return self._store.put(record)
 
 
 _REF = re.compile(r"^APPR-[0-9a-f]{16}$")

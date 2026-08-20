@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 from datetime import date
+from decimal import Decimal
 
 from rich.console import Console
 from rich.panel import Panel
@@ -29,6 +30,7 @@ from rich.text import Text
 from nav_sentinel import composition
 from nav_sentinel.control_plane import approvals, identity
 from nav_sentinel.control_plane.approvals import ApprovalDenied, Principal
+from nav_sentinel.control_plane.governance import CaseFacts, Impact
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import ApprovalClass
 
@@ -63,8 +65,13 @@ def _list_open(console: Console) -> int:
     cases = store.cases_for("MERID-GEF", date(2026, 8, 17).isoformat())
     if not cases:
         console.print(
-            "[yellow]no persisted cases. Run `make demo` first -- this console reads the "
-            "repository, not a process that happens to still be running.[/yellow]"
+            "[yellow]no persisted cases for "
+            f"{date(2026, 8, 17).isoformat()}.\n"
+            "  This console reads the repository, not a process that happens to still be running --\n"
+            "  so the cycle has to have been persisted somewhere both processes can see:\n"
+            "    NAV_REPOSITORY=firestore make demo && NAV_REPOSITORY=firestore make approve\n"
+            "  With the default in-memory store, `make demo` writes to a dict that dies with it."
+            "[/yellow]"
         )
         return 1
 
@@ -85,6 +92,31 @@ def _list_open(console: Console) -> int:
         "<case-id> alice:reviewer bob:senior_reviewer[/dim]"
     )
     return 0
+
+
+def _facts_from(case_id: str, document: dict) -> CaseFacts:
+    """Rebuild the governance facts from what was persisted.
+
+    An `ExceptionCase` built with only an id, a fund and a date carries no impact, no severity and no
+    capability, so `to_facts()` produced `impact=None, severity=None, capability='nav.unclassified'`
+    -- and the band derived from *those* facts was `cio_escalation` while the human was shown
+    `four_eyes` from the store. Two different cases: the one on screen and the one the policy
+    evaluated. Harmless only because P-003's authority check short-circuits first, which means the
+    protection came from an unrelated control.
+    """
+    impact = document.get("impact")
+    return CaseFacts(
+        case_id=case_id,
+        subject_id=document["subject_id"],
+        as_of=date.fromisoformat(document["as_of"]),
+        capability=document.get("capability") or "nav.unclassified",
+        impact=Impact(value=Decimal(str(impact).removesuffix("bps")), unit="bps")
+        if impact
+        else None,
+        status=document.get("status") or "open",
+        severity=document.get("severity"),
+        item_count=len(document.get("break_ids") or ()),
+    )
 
 
 def _approve(console: Console, case_id: str, signers: list[Principal]) -> int:
@@ -129,20 +161,17 @@ def _approve(console: Console, case_id: str, signers: list[Principal]) -> int:
     # And now the part that matters. An approval is necessary, not sufficient: posting is attempted
     # under the drafting agent's own identity and P-003 still denies it, because no published
     # manifest holds posting authority. A demo that stopped at "approved" would imply otherwise.
-    from nav_sentinel.domain.models import ExceptionCase
-
-    facts = ExceptionCase(
-        case_id=case_id,
-        fund_id=case["subject_id"],
-        as_of=date.fromisoformat(case["as_of"]),
-    ).to_facts()
+    facts = _facts_from(case_id, case)
     with identity.acting_as("remediation-agent"):
         try:
             from nav_sentinel.control_plane import gateway
 
             gateway.authorize_posting(facts, record.ref)
+            # Its own exit code. Every other failure here returns 1 -- no cases, no signer, no such
+            # case -- so the one outcome that must be unmistakable, a control failing open, was
+            # indistinguishable from an empty database.
             console.print("[red]POSTED — no agent should be able to do this[/red]")
-            return 1
+            return 3
         except PolicyViolation as exc:
             console.print(
                 Panel(

@@ -677,12 +677,31 @@ class TestApprovalReferencesAreResolved:
         assert d.allowed, d.reason
         assert d.metadata["approvers"] == "ada"
 
-    def test_an_identical_grant_collides_rather_than_duplicating(self):
-        """The reference excludes the timestamp. Including it meant two identical grants produced
-        two distinct refs and both persisted, which is not what an immutable ledger means."""
-        self.authority.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS)
-        with pytest.raises(ValueError, match="already exists"):
-            self.authority.grant("C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS)
+    def test_an_identical_grant_returns_the_first_record_rather_than_duplicating(self):
+        """The reference excludes the timestamp, so two identical grants are one approval.
+
+        This asserted that the second grant *raised*, which is the opposite of what excluding the
+        timestamp is for -- and it meant running the approval console twice on one case died with an
+        unhandled ValueError, on the second run, which is the run a recording is most likely to be.
+        The ref is the identity; a matching ref means the same grant, and the first grant's time is
+        the truth.
+        """
+        first = self.authority.grant(
+            "C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS
+        )
+        second = self.authority.grant(
+            "C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS
+        )
+        assert first.ref == second.ref
+        assert first.granted_at == second.granted_at, "the repeat overwrote the original's time"
+
+    def test_a_different_band_or_signer_is_a_different_approval(self):
+        """Idempotence must not collapse two genuinely different grants onto one record."""
+        four_eyes = self.authority.grant(
+            "C-APPR", policies.ApprovalClass.FOUR_EYES, self.TWO_CONTROLLERS
+        )
+        cio = self.authority.grant("C-APPR", policies.ApprovalClass.CIO_ESCALATION, self.CIO)
+        assert four_eyes.ref != cio.ref
 
     def test_the_published_fleet_still_cannot_post_with_a_valid_approval(self):
         """Authority is checked before the approval, so a correct signature does not confer

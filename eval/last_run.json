@@ -1,0 +1,324 @@
+{
+  "recorded_at": "2026-08-20T08:11:03.438532+00:00",
+  "sample_size": 7,
+  "scored": 7,
+  "skipped": [],
+  "closure": [
+    "2026-07-17: control total 33285.97, corrections -33285.96414516834280717096633 in base, residual 0.0059 (closes to the cent)",
+    "2026-08-17: control total -4529562.69, corrections 4529562.697397567497627878892 in base, residual 0.0074 (closes to the cent)"
+  ],
+  "metric_definitions": {
+    "classification": "per detected case, credited when the named capability belongs to any golden scenario that case covers -- the USD cash balance carries two",
+    "legs": "per cycle, matched one-to-one against every expected correction; a scenario's legs can span two cases, so per-case matching would fail a correct answer",
+    "causes": "per case, against the best-matching scenario it covers: required facts cited and the golden's own figures stated, compared numerically rather than as prose"
+  },
+  "systems": {
+    "fleet": {
+      "classification": [
+        7,
+        8
+      ],
+      "legs": [
+        3,
+        7
+      ],
+      "causes": [
+        5,
+        8
+      ],
+      "cycle_legs": [
+        [
+          "2026-07-17",
+          [
+            "cash_at_bank USD -38062.50"
+          ],
+          []
+        ],
+        [
+          "2026-08-17",
+          [
+            "investments_at_market EUR -86625.48",
+            "investments_at_market EUR 4649020.49",
+            "missing stock_record None 0.00",
+            "missing cash_at_bank USD -38062.50",
+            "missing investments_at_market USD -3724800.00",
+            "missing cash_at_bank USD 3724800.00"
+          ],
+          []
+        ]
+      ],
+      "cases": [
+        {
+          "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET",
+          "expected": "nav.corporate_action",
+          "actual": "nav.corporate_action",
+          "routed": true,
+          "classified": true,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "CASE-MERID-GEF-2026-08-17-cash-EUR",
+          "expected": "nav.unclassified",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": false,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET, SETTLE_FAILED_TRADE",
+          "expected": "nav.corporate_action | nav.settlement",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE",
+          "expected": "nav.settlement",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "FX_INVERTED_CROSS",
+          "expected": "nav.fx_rate",
+          "actual": "nav.fx_rate",
+          "routed": true,
+          "classified": true,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "FX_STALE_RATE",
+          "expected": "nav.fx_rate",
+          "actual": "nav.fx_rate",
+          "routed": true,
+          "classified": true,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "CA_STOCK_SPLIT_NOT_APPLIED",
+          "expected": "nav.corporate_action",
+          "actual": "nav.corporate_action",
+          "routed": true,
+          "classified": true,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "SETTLE_FAILED_TRADE",
+          "expected": "nav.settlement",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [],
+          "refused": null
+        }
+      ]
+    },
+    "heuristic baseline": {
+      "classification": [
+        7,
+        8
+      ],
+      "legs": [
+        3,
+        7
+      ],
+      "causes": [
+        1,
+        8
+      ],
+      "cycle_legs": [
+        [
+          "2026-07-17",
+          [
+            "cash_at_bank USD -38062.50"
+          ],
+          []
+        ],
+        [
+          "2026-08-17",
+          [
+            "investments_at_market EUR -86625.48",
+            "investments_at_market EUR 4649020.49",
+            "missing stock_record None 0.00",
+            "expected cash_at_bank USD -38062.50, got cash_at_bank EUR 5208800.00",
+            "expected investments_at_market USD -3724800.00, got investments_at_market EUR -5208800.00",
+            "expected cash_at_bank USD 3724800.00, got cash_at_bank EUR 5208800.00"
+          ],
+          [
+            "cash_at_bank EUR 5208800.00",
+            "cash_at_bank USD 3686737.50",
+            "stock_record None -8500.0000",
+            "investments_at_market EUR -5208800.00",
+            "stock_record None 96000.0000",
+            "stock_record None -120000.0000",
+            "investments_at_market EUR -3212973.35"
+          ]
+        ]
+      ],
+      "cases": [
+        {
+          "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET",
+          "expected": "nav.corporate_action",
+          "actual": "nav.corporate_action",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "filing",
+            "gross_rate",
+            "withholding_pct"
+          ],
+          "missing_figures": [
+            "2.5375E+5",
+            "215687.5"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "CASE-MERID-GEF-2026-08-17-cash-EUR",
+          "expected": "nav.unclassified",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": false,
+          "cause_correct": true,
+          "missing_facts": [],
+          "missing_figures": [],
+          "refused": null
+        },
+        {
+          "covers": "CA_ADR_DIVIDEND_GROSS_VS_NET, SETTLE_FAILED_TRADE",
+          "expected": "nav.corporate_action | nav.settlement",
+          "actual": "nav.corporate_action",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [
+            "1.2E+5",
+            "2026"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "SETTLE_TRADE_DATE_VS_SETTLEMENT_DATE",
+          "expected": "nav.settlement",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [
+            "2026"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "FX_INVERTED_CROSS",
+          "expected": "nav.fx_rate",
+          "actual": "nav.fx_rate",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "rate",
+            "rate_date"
+          ],
+          "missing_figures": [
+            "0.855",
+            "1.16959064"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "FX_STALE_RATE",
+          "expected": "nav.fx_rate",
+          "actual": "nav.fx_rate",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "rate",
+            "rate_date"
+          ],
+          "missing_figures": [
+            "1.1567",
+            "1.1593",
+            "2026"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "CA_STOCK_SPLIT_NOT_APPLIED",
+          "expected": "nav.corporate_action",
+          "actual": "nav.corporate_action",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "filing"
+          ],
+          "missing_figures": [
+            "2026"
+          ],
+          "refused": null
+        },
+        {
+          "covers": "SETTLE_FAILED_TRADE",
+          "expected": "nav.settlement",
+          "actual": "nav.settlement",
+          "routed": true,
+          "classified": true,
+          "cause_correct": false,
+          "missing_facts": [
+            "trade",
+            "settlement_date"
+          ],
+          "missing_figures": [
+            "2026"
+          ],
+          "refused": null
+        }
+      ]
+    }
+  }
+}

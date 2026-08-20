@@ -32,13 +32,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nav_sentinel.agents.contract import UNKNOWN
 from nav_sentinel.agents.investigator import (
-    NotAuthorisedForCapability,
     UnparseableAnswer,
     adk_name,
 )
 from nav_sentinel.control_plane import gateway, identity, telemetry
 from nav_sentinel.control_plane.policies import PolicyViolation
 from nav_sentinel.domain.models import (
+    NAV_ACCOUNTS,
     JournalEntryLine,
     Outcome,
     QuantityRestatementLine,
@@ -201,17 +201,15 @@ async def draft(
             f"the verdict on {case.case_id} asserts no cause "
             f"({verdict.unresolved or UNKNOWN}), so there is nothing to correct"
         )
-    if manifest.agent_id != "remediation-agent" and not manifest.authority.may_propose_remediation:
-        raise NotAuthorisedForCapability(
-            f"{manifest.ref} does not hold drafting authority; only the remediation agent drafts."
-        )
-
     configure_sdk_environment()
 
     with identity.acting_as(manifest.agent_id):
-        # Checked, not assumed. P-002 is the reason this agent exists and the reason no other may
-        # call this function, so the decision is recorded in the governance log before a line of
-        # the proposal is built.
+        # The *only* drafting check, and it is the gateway's. There was an agent-side copy above
+        # this line -- `if manifest.agent_id != "remediation-agent" ...` -- which fired first, so
+        # P-002 was never reached: mutating the policy to always ALLOW broke nothing in this
+        # section's suite, and an investigator's attempted draft left no decision in the governance
+        # log at all. An agent checking its own permissions is the anti-pattern the gateway module
+        # docstring opens with, and a hardcoded agent id in the agents layer is how it crept back.
         gateway.authorize_drafting()
 
         agent = Agent(
@@ -284,13 +282,21 @@ def _finalise(
     correction, and a lower band needs fewer signatures.
     """
     agent, _, version = manifest.ref.partition("@")
+    base = _base_currency(case.fund_id)
     return RemediationProposal(
         proposal_id=_proposal_id(case, drafted),
         outcome=Outcome(drafted.outcome),
         lines=[
             JournalEntryLine(
                 account=line.account,
-                currency=line.currency or (case.breaks[0].currency or "EUR"),
+                # The fund's base currency when the model omits one -- never a break's `currency`,
+                # which on a market-value break is the security's *local trading* currency while the
+                # difference is already in base. That fallback silently produced
+                # `investments_at_market USD -86,625.48` for the FX case: verbatim the defect this
+                # section's prompt fix was written for, still hardcoded in the code path. It also
+                # read `breaks[0]`, so a two-break case got whichever currency happened to be first,
+                # and a case with no breaks raised IndexError.
+                currency=line.currency or base,
                 debit=line.debit,
                 credit=line.credit,
                 narrative=line.narrative,
@@ -307,8 +313,11 @@ def _finalise(
             )
             for line in drafted.quantity_lines
         ],
-        # Computed from the case's own scored impact. Never the model's number.
-        expected_residual=Decimal(0),
+        # Genuinely computed now. It was `Decimal(0)` under this exact comment, so every proposal
+        # reported "closes exactly" whether it did or not -- a control reporting success in a state
+        # where it never ran, and against PLAN.md's own words, which name `expected_residual` as
+        # *the* reason S4 is mandatory: "already exists as the hook and nothing computes it".
+        expected_residual=_residual(case, drafted),
         rationale=drafted.rationale,
         proposed_by_agent=agent,
         proposed_by_version=version or manifest.version,
@@ -316,6 +325,29 @@ def _finalise(
         # approval level would decide how many humans need to look at it.
         requires=case.approval_class or _band_for(case),
     )
+
+
+def _residual(case: ExceptionCase, drafted: ProposalDraft) -> Decimal:
+    """What would still be unreconciled after posting this draft.
+
+    The case's own signed impact plus the draft's effect on net assets, in base currency. Zero means
+    the entry closes the break; anything else is the amount a reviewer still has to explain, and it
+    is the single most useful number on a proposal.
+
+    Computed here, never taken from the model: a model asked for its own residual has an interest in
+    reporting zero.
+    """
+    from nav_sentinel.domain import cycle
+    from nav_sentinel.pipeline.cycle_runner import _fixture_rates
+
+    to_base = _fixture_rates(case.as_of)
+    effect = Decimal(0)
+    for line in drafted.lines:
+        if line.account not in NAV_ACCOUNTS:
+            continue
+        currency = line.currency or _base_currency(case.fund_id)
+        effect += to_base(line.debit - line.credit, currency)
+    return (cycle.signed_impact_base(case, to_base) + effect).quantize(Decimal("0.01"))
 
 
 def _band_for(case: ExceptionCase):
