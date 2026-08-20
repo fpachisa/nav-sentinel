@@ -111,6 +111,31 @@ def tracer() -> trace.Tracer:
     return trace.get_tracer(SERVICE_NAME)
 
 
+def flush(timeout_millis: int = 12_000) -> bool:
+    """Export everything buffered, now, and report whether it got out.
+
+    Cloud Run throttles a container's CPU to near zero as soon as a request finishes, so
+    `BatchSpanProcessor`'s delayed flush runs with no CPU to run on. Measured on revision
+    nav-sentinel-00002: the push returned at 02:02:28 and the exporter failed at 02:02:41 with
+    DEADLINE_EXCEEDED, thirteen seconds after the response, having never got the spans out.
+
+    So the caller flushes inside the request, while CPU is still allocated. For an audit trail
+    that is the right ordering anyway: a message whose audit span was dropped should not be
+    acknowledged as handled.
+    """
+    provider = trace.get_tracer_provider()
+    force_flush = getattr(provider, "force_flush", None)
+    if force_flush is None:  # a no-op provider, i.e. tracing never configured
+        return False
+    try:
+        return bool(force_flush(timeout_millis))
+    except Exception as exc:  # noqa: BLE001
+        # Never let telemetry failure become request failure; the caller decides what an
+        # unexported span means for its own contract.
+        logger.warning("span flush failed (%s)", exc)
+        return False
+
+
 def _flatten(value: Any) -> Any:
     if isinstance(value, Decimal):
         return str(value)

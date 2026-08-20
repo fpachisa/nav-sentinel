@@ -76,3 +76,9 @@ markers = [
     "live: requires live Google Cloud credentials and network access",
 ]
 addopts = "-m 'not live'"
+
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` in an argument default is how FastAPI declares a dependency; the call is
+# evaluated once at import and the result is never mutated, so B008's mutable-default concern
+# does not apply. Naming it here keeps B008 live for every other call.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query"]

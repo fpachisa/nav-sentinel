@@ -2,7 +2,7 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap registry demo clean
+.PHONY: help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -40,6 +40,12 @@ bootstrap: ## Provision Google Cloud: APIs, per-agent identities, Model Armor, P
 
 registry: ## Show the published agent fleet and its coverage
 	$(PY) -m nav_sentinel.registry.cli
+
+deploy: ## Build and deploy to Cloud Run, and wire Pub/Sub push
+	bash infra/deploy.sh
+
+teardown: ## Remove the deployed service and subscription (keeps identities and fixtures)
+	bash infra/teardown.sh
 
 demo: ## Run one reconciliation cycle: detect, score, band, route, trace
 	$(PY) -m nav_sentinel.pipeline.cycle_runner

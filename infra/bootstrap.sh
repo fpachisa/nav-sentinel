@@ -60,30 +60,42 @@ for m in load_manifests():
         ["gcloud", "iam", "service-accounts", "describe", email, "--project", project],
         capture_output=True,
     ).returncode == 0
-    if exists:
-        print(f"  {sa:32s} exists")
-        continue
-    subprocess.run(
-        ["gcloud", "iam", "service-accounts", "create", sa,
-         "--display-name", m.display_name,
-         "--description", f"{m.ref} -- scopes: {','.join(m.data_scopes.read) or 'none'}",
-         "--project", project],
-        check=True, capture_output=True,
-    )
-    print(f"  {sa:32s} created")
+    if not exists:
+        subprocess.run(
+            ["gcloud", "iam", "service-accounts", "create", sa,
+             "--display-name", m.display_name,
+             "--description", f"{m.ref} -- scopes: {','.join(m.data_scopes.read) or 'none'}",
+             "--project", project],
+            check=True, capture_output=True,
+        )
 
-    # Least privilege: read-only telemetry write plus model access. No agent gets
-    # datastore.user unless its manifest declares a write scope.
+    # Roles are reconciled on every run, not only at creation. `continue`-ing past an existing
+    # account meant a re-run silently left it unprivileged, while the script claimed to be
+    # idempotent -- and add-iam-policy-binding is itself idempotent, so there is no reason to skip.
+    #
+    # NOTE on least privilege: roles/datastore.user is granted at *project* level and is not
+    # collection-scoped, so an agent with a write scope can write any collection. That is a real
+    # gap, recorded in the README rather than papered over; narrowing it needs per-scope databases
+    # or security rules.
     roles = ["roles/aiplatform.user", "roles/cloudtrace.agent", "roles/telemetry.tracesWriter"]
     if m.data_scopes.write:
         roles.append("roles/datastore.user")
+    failures = []
     for role in roles:
-        subprocess.run(
+        done = subprocess.run(
             ["gcloud", "projects", "add-iam-policy-binding", project,
              "--member", f"serviceAccount:{email}", "--role", role, "--condition", "None"],
-            check=False, capture_output=True,
+            check=False, capture_output=True, text=True,
         )
-    print(f"    roles: {', '.join(roles)}")
+        if done.returncode != 0:
+            failures.append(f"{role}: {done.stderr.strip().splitlines()[-1][:80]}")
+    state = "exists" if exists else "created"
+    print(f"  {sa:32s} {state}, {len(roles) - len(failures)}/{len(roles)} roles")
+    for f in failures:
+        print(f"    FAILED {f}")
+    if failures:
+        # `check=False` meant an account could be created silently unprivileged despite set -e.
+        raise SystemExit(f"role binding failed for {sa}; refusing to report success")
 PYEOF
 
 say "Pub/Sub topic for asynchronous exception dispatch"

@@ -1,0 +1,14 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+.env
+.env.local
+tests/
+docs/
+scripts/
+infra/
+fixtures/generate.py
+.pytest_cache/
+.ruff_cache/
+*.png
