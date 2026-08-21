@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from nav_sentinel.control_plane import approvals, packs, repository
+from nav_sentinel.control_plane import approvals, gateway, packs, repository
 from nav_sentinel.registry import discover
 
 # Manifests are sourced from the packs, so any registration change must drop the discovery
@@ -74,6 +74,8 @@ def configure(
     _approvals_backend = approvals_backend
 
     from nav_sentinel.domain.pack import PACK as NAV_PACK
+    from nav_sentinel.memory import recurrence
+    from nav_sentinel.remediation_office.pack import PACK as REM_PACK
     from nav_sentinel.transfer_agency.pack import PACK as TA_PACK
 
     # Registry discovery is a platform capability rather than a fund-accounting one, so it is
@@ -90,14 +92,58 @@ def configure(
             source="agent_registry", uri_template="registry://coverage",
             description="Which capabilities currently have an authorised investigator.",
         ),
+        # Recurrence. A platform tool rather than a pack's, because "what happened to this subject
+        # before" is not one process's question -- and because `memory` is process-side in the seam
+        # scan, so no pack may import it and only this root may introduce the two.
+        #
+        # The store is bound here rather than passed by the agent: an agent that could name the
+        # store it reads could name one that says what suits it.
+        packs.ToolSpec(
+            "memory.prior_errors",
+            lambda fund_id, since, excluding="": recurrence.prior_errors(
+                store(), fund_id, since, excluding=excluding
+            ),
+            ("case_history",),
+            observe=recurrence.observe,
+            facts=("prior_errors", "since", "fund_id"),
+            source="recorded_case_history",
+            uri_template="memory://recurrence/{fund_id}",
+            description="How many errors this fund has recorded on or after a date, with the case "
+                        "ids behind the count. A recurring failure is not assessed like an "
+                        "isolated one, so the count changes the threshold that applies.",
+        ),
     )
     packs.register(NAV_PACK)
     # A second process, and this is the whole change. Its capabilities, tools, manifests, prompts
     # and thresholds all come from the pack; the control plane and the registry are untouched, which
     # `git diff --stat` shows rather than asserts.
     packs.register(TA_PACK)
+    # The third process. It coordinates the other two and reaches them only through the delegation
+    # its pack declares -- so registering it changes nothing about either.
+    packs.register(REM_PACK)
+
+    # How the gateway runs an agent. Injected here because the control plane may not import the
+    # agents layer: `agents` is process-side and the seam test forbids any path from the platform to
+    # it, including under TYPE_CHECKING. The gateway declares what it needs, the composition root
+    # decides what satisfies it, and an offline test supplies a fake.
+    gateway.register_agent_invoker(_invoke_agent)
     _configure_approvals(approvals_backend)
     return packs.registered()
+
+
+def _invoke_agent(manifest, brief, **kwargs):
+    """Run one agent on one brief. The gateway's injected invoker.
+
+    Synchronous by signature and asynchronous underneath, because `gateway.delegate` is called from
+    synchronous code -- a stage handler -- while `investigator.investigate` is a coroutine. Bridging
+    here rather than making the gateway async keeps the platform free of an event-loop assumption it
+    has never needed.
+    """
+    import asyncio
+
+    from nav_sentinel.agents import investigator
+
+    return asyncio.run(investigator.investigate(brief, manifest, **kwargs))
 
 
 def _configure_approvals(backend: str) -> None:

@@ -258,6 +258,68 @@ def band_for(
     return ApprovalClass.CIO_ESCALATION
 
 
+def delegation(
+    caller_ref: str,
+    capability: str,
+    *,
+    permitted: tuple[str, ...],
+    depth: int,
+    max_depth: int,
+) -> PolicyDecision:
+    """P-009: may this agent ask another agent to do something.
+
+    Two refusals, and they guard different things.
+
+    **An undeclared capability.** An agent may request only what its *process* declares it may
+    request. Declared on the pack rather than in the agent's manifest for a reason beyond the
+    seam: delegation is a statement about how two processes are allowed to interact, and putting
+    it in the manifest would let one agent's document widen the coupling between departments.
+
+    **Depth.** An agent that can delegate to an agent that can delegate is a loop, and a loop
+    inside a model's tool surface is an unbounded bill. Bounded rather than detected, because
+    cycle detection answers "is this call currently looping" and the question that matters is
+    "could it".
+
+    What this policy does *not* do is lend privileges. The sub-agent is resolved from the
+    published registry and bound to its own identity, so its allowlist and data scopes are its
+    own; a caller cannot pass its own along. That is enforced by `identity.acting_as` and the
+    ordinary P-001 and P-006 checks, not here -- this decides only whether the request may be
+    made at all.
+    """
+    if depth >= max_depth:
+        return PolicyDecision(
+            effect=Effect.DENY,
+            policy_id="P-009-DELEGATION",
+            reason=(
+                f"delegation depth {depth + 1} exceeds the limit of {max_depth}. An agent that "
+                f"delegates to an agent that delegates is a loop with a model in it."
+            ),
+            agent_ref=caller_ref,
+            resource=capability,
+            metadata={"depth": str(depth + 1), "max_depth": str(max_depth)},
+        )
+    if capability not in permitted:
+        return PolicyDecision(
+            effect=Effect.DENY,
+            policy_id="P-009-DELEGATION",
+            reason=(
+                f"{caller_ref} may not request {capability!r}. Its process declares "
+                f"{list(permitted) or 'no delegations'}."
+            ),
+            agent_ref=caller_ref,
+            resource=capability,
+            metadata={"declared": ",".join(permitted)},
+        )
+    return PolicyDecision(
+        effect=Effect.ALLOW,
+        policy_id="P-009-DELEGATION",
+        reason=f"{caller_ref} may request {capability!r} at depth {depth + 1}",
+        agent_ref=caller_ref,
+        resource=capability,
+        metadata={"depth": str(depth + 1), "max_depth": str(max_depth)},
+    )
+
+
 def stage_transition(
     case_id: str, frm: str | None, to: str, *, allowed: bool, reason: str
 ) -> PolicyDecision:

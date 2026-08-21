@@ -1,0 +1,43 @@
+# The delegatee. Published by transfer agency, requested by the remediation office through the
+# Agent Gateway -- never imported, never named by the caller. The caller asks for a *capability* and
+# the registry decides who answers.
+#
+# Its allowlist is one tool. That is the point of routing a cross-department request through the
+# gateway rather than through an import: whatever the calling agent is permitted to read, this agent
+# reads the register's dealing records and nothing else, because its own manifest says so.
+agent_id: dealing-impact-reporter
+version: 1.0.0
+display_name: Dealing Impact Reporter
+owner: transfer-agency-platform
+description: >
+  Reports who dealt at a published price on a given dealing date, and for how many units.
+
+  The register records a trade date against every deal, so it can answer this. The fund's own unit
+  ledger cannot: it recognises a deal on settlement, which is days later and a different population.
+  That asymmetry is why a NAV error assessment has to ask transfer agency rather than working it out
+  from the accounting books.
+
+  Reports a holder *count* and total units. Not a list of investors: materiality turns on how many
+  were affected, and carrying names into a model context or an audit record would be collecting
+  identities that no decision depends on.
+
+handles_capabilities: [ta.dealing_impact]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - register.dealt_on
+
+data_scopes:
+  read: [deals]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_impact: null
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 30

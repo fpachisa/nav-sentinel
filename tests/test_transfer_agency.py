@@ -54,8 +54,10 @@ def _case() -> RegisterCase:
 
 
 class TestTheProcessRegistersLikeAnyOther:
-    def test_both_processes_are_hosted(self):
-        assert {p.key for p in packs.registered()} == {"nav", "ta"}
+    def test_every_process_is_hosted(self):
+        """Three now. Named individually rather than counted: a count would pass if a process were
+        replaced by a different one."""
+        assert {p.key for p in packs.registered()} == {"nav", "rem", "ta"}
 
     def test_its_capabilities_are_namespaced(self):
         """Unnamespaced capabilities would collide between processes, which `register()` refuses."""

@@ -13,7 +13,7 @@ port and each process supplies specs through it.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,6 +121,14 @@ class ProcessPack:
     #: and inherits the check, which is the extensibility claim as a mechanism rather than a
     #: promise.
     evidence_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    #: Capabilities an agent of this process may **request from another process**, through
+    #: `gateway.delegate`. Empty for every process that does not coordinate, which is most of them.
+    #:
+    #: Declared on the pack rather than in an agent's manifest, and not only to keep `registry/`
+    #: untouched: delegation is a statement about how two *departments* are permitted to interact,
+    #: and putting it in a manifest would let one agent's own document widen the coupling between
+    #: them. A pack is the smallest thing that can honestly own that decision.
+    delegations: tuple[str, ...] = ()
     notes: str = ""
 
     def declared_facts(self) -> frozenset[str]:
@@ -319,6 +327,22 @@ def register(pack: ProcessPack) -> None:
 
     _packs[pack.key] = pack
     _on_change()
+
+
+def delegations_for(capabilities: Iterable[str]) -> tuple[str, ...]:
+    """What an agent handling these capabilities is permitted to request from other processes.
+
+    Resolved from the pack that owns each capability, so the permission follows the *process* the
+    agent belongs to. Takes capabilities rather than an agent reference deliberately: looking an
+    agent up would mean this module reaching into the registry, and the control plane's tool
+    catalogue has no business knowing how identities are published.
+    """
+    permitted: set[str] = set()
+    for capability in capabilities:
+        pack = process_of(capability)
+        if pack is not None:
+            permitted.update(pack.delegations)
+    return tuple(sorted(permitted))
 
 
 def evidence_requirement_for(capability: str) -> tuple[str, ...]:

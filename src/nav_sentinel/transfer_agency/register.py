@@ -39,6 +39,19 @@ def deals(fund_id: str | None = None) -> list[Deal]:
     ]
 
 
+def dealt_on(fund_id: str, trade_date: date) -> list[Deal]:
+    """Every deal transacted on one dealing date.
+
+    The transfer-agency answer to a question fund accounting cannot ask of its own books: *who
+    dealt at the price we published, and for how many units.* The register knows because it records
+    a trade date per deal; the fund ledger does not, because it recognises deals on settlement.
+
+    This is the data behind the `ta.dealing_impact` capability, which the remediation office reaches
+    by delegation rather than by importing this module.
+    """
+    return [deal for deal in deals(fund_id) if deal.trade_date == trade_date]
+
+
 def in_transit(fund_id: str, as_of: date) -> list[Deal]:
     """Deals dealt on or before the valuation point but settling after it.
 

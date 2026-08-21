@@ -64,6 +64,12 @@ class TestRegistry:
             # reason: the registry reporting NONE is a governance demonstration, not a gap.
             "ta.transfer_mismatch",
             "ta.unclassified",
+            # And the remediation office declares one deliberately: drafting a regulator
+            # notification is a real stage of that process and nothing in this fleet holds the
+            # authority to do it, so the case escalates to a human instead of being routed to
+            # whichever agent looks closest.
+            "rem.regulator_notification",
+            "rem.unclassified",
         }, (
             f"coverage gaps are {sorted(gaps)}; expected the two unpublished capabilities plus "
             f"nav.unclassified, which reaches no investigator by design -- an uncertain break "

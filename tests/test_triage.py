@@ -207,6 +207,10 @@ class TestRoutingStaysWithTheRegistry:
             "nav.cash_fees",
             "nav.pricing",
             "nav.unclassified",
+            # Declared by the remediation office and published by nobody: drafting a regulator
+            # notification is not authority this fleet holds.
+            "rem.regulator_notification",
+            "rem.unclassified",
             "ta.transfer_mismatch",
             "ta.unclassified",
         ], unrouted

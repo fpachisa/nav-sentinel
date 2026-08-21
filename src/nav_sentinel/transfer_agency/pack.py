@@ -28,6 +28,11 @@ CAPABILITIES = (
     #: A holder's units moved between accounts. Declared and **published by nobody**, so the
     #: registry reports NONE rather than routing it to whichever agent looks closest.
     "ta.transfer_mismatch",
+    #: Who dealt at a published price, and for how many units. Requested by *another process* --
+    #: the remediation office, through the gateway -- rather than by anything in this one. The
+    #: register can answer it because it records a trade date per deal; the fund's unit ledger
+    #: cannot, because it recognises a deal on settlement.
+    "ta.dealing_impact",
     "ta.unclassified",
 )
 
@@ -57,6 +62,10 @@ PACK = ProcessPack(
     #: same shape as the FX rule, where a rate without its date does not establish staleness.
     evidence_requirements=(
         ("ta.subscription_in_transit", ("units", "trade_date", "settlement_date")),
+        #: An impact report must name the dealing date it counted, not just a number of holders.
+        #: "41 investors" without the date it belongs to is uncheckable, which is the same defect
+        #: the FX rule exists for.
+        ("ta.dealing_impact", ("holders", "units", "trade_date")),
     ),
     notes=(
         "Reconciles a share register in units. Its subscription-in-transit correction is "

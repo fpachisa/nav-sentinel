@@ -1,0 +1,41 @@
+# The coordinating identity. It holds no more authority than any other agent here: it cannot post,
+# cannot draft a correction, and cannot read another department's books. What it can do is *ask* --
+# and the one thing it may ask for is declared on its pack, not in this file.
+agent_id: remediation-officer
+version: 1.0.0
+display_name: Remediation Officer
+owner: remediation-office
+description: >
+  Decides whether a published NAV error is material enough to require investor compensation, and
+  routes the case for approval when it is.
+
+  The decision is not the size of the error alone. Regulatory guidance treats a recurring pricing
+  failure differently from an isolated one, so the assessment reads how many errors this fund has
+  had in the current quarter and says which threshold it applied.
+
+  It does not compute the compensation, approve anything, or contact a regulator. Those are
+  separate stages with separate authority, and two of them are not held by any agent in this fleet.
+
+handles_capabilities: [rem.materiality]
+model: gemini-3.7-flash
+
+# One tool, and deliberately none belonging to another department. Impact comes from transfer agency
+# by delegation through the gateway, under *that* agent's identity and allowlist -- not by granting
+# this one a read on the share register.
+allowed_tools:
+  - memory.prior_errors
+
+data_scopes:
+  read: [case_history]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_impact: null
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 45

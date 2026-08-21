@@ -10,6 +10,7 @@ one prompt away from deciding it has them.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
@@ -342,6 +343,104 @@ def authorize_posting(
 
 def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
+
+
+#: How deep the current call chain has delegated. A ContextVar, for the reason the decision log is
+#: one: concurrent requests in one process must not see each other's depth, and a module-level int
+#: made eight concurrent cycles report each other's counts once already.
+_delegation_depth: ContextVar[int] = ContextVar("nav_delegation_depth", default=0)
+
+#: The default ceiling. One hop: a department may ask another department, and that department
+#: answers rather than asking a third.
+MAX_DELEGATION_DEPTH = 1
+
+#: Injected by the composition root. The gateway cannot import the agents layer -- `agents` is a
+#: process-side package and the seam test forbids any path from the control plane to it, including
+#: under TYPE_CHECKING -- so the thing that actually runs an agent is handed in. This is the same
+#: shape as `register_platform_tools` taking `discover.discover_for_capability`: the platform
+#: declares what it needs, the root decides what satisfies it, and a test supplies a fake.
+_invoker: Callable[..., Any] | None = None
+
+
+class UnroutableCapability(RuntimeError):
+    """Nobody publishes an agent for the requested capability."""
+
+
+class NoInvoker(RuntimeError):
+    """No agent invoker was registered, so delegation cannot run.
+
+    Raised rather than returning None. A delegation that silently produced nothing would look
+    exactly like a sub-agent that found nothing, and those mean opposite things.
+    """
+
+
+def register_agent_invoker(invoker: Callable[..., Any]) -> None:
+    """Tell the gateway how to run an agent. Called once, by the composition root."""
+    global _invoker
+    _invoker = invoker
+
+
+def delegate(capability: str, *args: Any, **kwargs: Any) -> Any:
+    """Ask the agent authorised for `capability` to do something, under *its* identity.
+
+    The coordination primitive. Three things happen here and the order matters:
+
+    1. **P-009** decides whether the caller's process may make this request at all, and whether the
+       chain is already too deep. Recorded either way, naming both the caller and the capability.
+    2. The sub-agent is **resolved from the published registry**, never named by the caller. A
+       caller that could name the agent could name one whose manifest suits it.
+    3. The call runs inside `identity.acting_as(sub_agent)`, so every downstream P-001 and P-006
+       check reads the *sub-agent's* allowlist and data scopes. The caller's privileges are not
+       inherited and cannot be lent -- which is the whole point of routing this through the
+       gateway instead of importing the other department's code.
+    """
+    caller = identity.current()
+    depth = _delegation_depth.get()
+    permitted = packs.delegations_for(caller.handles_capabilities)
+
+    decision = _enforce(
+        policies.delegation(
+            caller.ref,
+            capability,
+            permitted=permitted,
+            depth=depth,
+            max_depth=MAX_DELEGATION_DEPTH,
+        )
+    )
+
+    from nav_sentinel.registry import discover
+
+    agent = discover.discover_for_capability(capability)
+    if agent is None:
+        # Recorded, then raised. "Department X asked for something nobody publishes" is a
+        # governance event and a discovery answer, not a missing feature.
+        _record(
+            PolicyDecision(
+                effect=Effect.DENY,
+                policy_id="P-009-DELEGATION",
+                reason=f"no published agent handles {capability!r}, so the request cannot route",
+                agent_ref=caller.ref,
+                resource=capability,
+            )
+        )
+        raise UnroutableCapability(
+            f"no published agent handles {capability!r}. The registry refuses to route rather "
+            f"than picking whichever agent looks closest."
+        )
+
+    if _invoker is None:
+        raise NoInvoker(
+            "no agent invoker is registered; the composition root must call "
+            "gateway.register_agent_invoker() before a delegation can run"
+        )
+
+    token = _delegation_depth.set(depth + 1)
+    try:
+        with identity.acting_as(agent.agent_id):
+            return _invoker(agent, *args, **kwargs)
+    finally:
+        _delegation_depth.reset(token)
+        del decision
 
 
 def record_stage_transition(

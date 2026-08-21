@@ -52,6 +52,23 @@ def _observe_positions(result, _args) -> dict:
     }
 
 
+def _observe_dealt_on(result, args) -> dict:
+    """Who dealt on a date, and for how many units.
+
+    `holders` is a count, not a list of names. The remediation office needs to know *how many*
+    investors were affected to assess materiality; it does not need their identities to do that, and
+    a projection that carried them would put named investors into a model context and an audit
+    record for no decision that depends on them.
+    """
+    if not result:
+        return {}
+    return {
+        "holders": len({d.holder_id for d in result}),
+        "units": sum(d.units for d in result),
+        "trade_date": args.get("trade_date"),
+    }
+
+
 def _observe_deals(result, _args) -> dict:
     """Every deal the call returned, aggregated. Deliberately not `_observe_positions`: deals have
     no holder balance, and sharing one function is what let both declare `as_of`."""
@@ -82,6 +99,18 @@ TA_TOOLS: tuple[ToolSpec, ...] = (
         uri_template=_REGISTER_URI,
         description="Every instruction on the register -- subscriptions, redemptions, transfers -- "
                     "with its trade date and settlement date.",
+    ),
+    ToolSpec(
+        "register.dealt_on",
+        register.dealt_on,
+        ("deals",),
+        observe=_observe_dealt_on,
+        facts=("holders", "units", "trade_date"),
+        source=_REGISTER,
+        uri_template=_REGISTER_URI,
+        description="Deals transacted on one dealing date, with the holder count and total units. "
+                    "Answers who dealt at a published price -- which the fund's own ledger cannot, "
+                    "because it recognises deals on settlement rather than trade date.",
     ),
     ToolSpec(
         "register.in_transit",
