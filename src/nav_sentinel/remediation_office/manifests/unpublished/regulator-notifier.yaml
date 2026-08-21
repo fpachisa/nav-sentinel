@@ -1,0 +1,34 @@
+# NOT LOADED -- see README.md in this directory.
+agent_id: regulator-notifier
+version: 0.1.0
+display_name: Regulator Notification Drafter
+owner: remediation-office
+description: >
+  Drafts the notification a fund's management company sends a regulator when a NAV error breaches
+  the reportable threshold.
+
+  Unpublished deliberately. Drafting external correspondence on a regulated entity's behalf is not
+  authority this fleet holds, and publishing an agent for it would be claiming it. The stage exists
+  in the lifecycle because the process really has it; what the registry says about it is that nobody
+  here is authorised.
+
+handles_capabilities: [rem.regulator_notification]
+model: gemini-3.7-flash
+
+allowed_tools:
+  - memory.prior_errors
+
+data_scopes:
+  read: [case_history]
+  write: []
+
+authority:
+  may_propose_remediation: false
+  may_post_entries: false
+  max_autonomous_impact: null
+
+untrusted_inputs: false
+requires_model_armor: false
+
+sla:
+  target_latency_seconds: 60

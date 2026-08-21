@@ -52,20 +52,20 @@ def _observe_positions(result, _args) -> dict:
     }
 
 
-def _observe_dealt_on(result, args) -> dict:
-    """Who dealt on a date, and for how many units.
+def _observe_dealt_on(result, _args) -> dict:
+    """Pass through the counts the tool already aggregated.
 
-    `holders` is a count, not a list of names. The remediation office needs to know *how many*
-    investors were affected to assess materiality; it does not need their identities to do that, and
-    a projection that carried them would put named investors into a model context and an audit
-    record for no decision that depends on them.
+    Nothing to project from: `register.dealt_on` returns counts rather than deals, so no identifier
+    exists at this point to accidentally carry into a citation. The projection used to do the
+    aggregating, which meant the identities had already been handed to the model by the time this
+    ran -- the wrong end of the pipe to be careful at.
     """
-    if not result:
+    if not isinstance(result, dict):
         return {}
     return {
-        "holders": len({d.holder_id for d in result}),
-        "units": sum(d.units for d in result),
-        "trade_date": args.get("trade_date"),
+        "holders": result.get("holders"),
+        "units": result.get("units"),
+        "trade_date": result.get("trade_date"),
     }
 
 
