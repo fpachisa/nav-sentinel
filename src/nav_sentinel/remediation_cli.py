@@ -155,7 +155,19 @@ def main() -> None:
         # The remediation office establishes whether this fund has a pattern; the threshold
         # comparison is arithmetic.
         if event == "materiality_decided":
-            assessment = _assess(case, store, timeline, console, offline=args.offline)
+            try:
+                assessment = _assess(case, store, timeline, console, offline=args.offline)
+            except AssessmentDisputed as dispute:
+                # The case stays where it is, awaiting a human. Advancing it on either number
+                # would be choosing which of two contradictory records to believe.
+                console.print(
+                    Panel(
+                        Text(str(dispute)),
+                        title="Assessment disputed — escalated, case not advanced",
+                        border_style="red",
+                    )
+                )
+                break
             payload["note"] = assessment.rationale
 
         applied = runner.apply_event(store, payload)
@@ -242,6 +254,29 @@ def _holder_count(observations: Any) -> int:
     return 0
 
 
+class AssessmentDisputed(RuntimeError):
+    """The officer's cited count and the record disagree, so nothing is assessed.
+
+    The one outcome that must not be smoothed over. If the agent's evidence says three prior errors
+    and the store says five, the threshold that applies is in question and a human has to look --
+    proceeding on either number would be choosing which of two contradictory records to believe.
+    """
+
+
+def _cited_count(verdict: Any, observations: Any) -> int | None:
+    """The prior-error count the officer actually **cited**, from the observations it named.
+
+    Read from the cited observation rather than parsed out of the sentence. A number lifted from
+    prose is a number nobody checked, and the projection recorded this one as a fact precisely so
+    it could be compared against the record.
+    """
+    cited = {c.observation_id for c in verdict.citations}
+    for observation_id, observation in observations.as_mapping().items():
+        if observation_id in cited and "prior_errors" in observation.observed:
+            return int(Decimal(str(observation.observed["prior_errors"])))
+    return None
+
+
 def _assess(
     case: NavErrorCase,
     store: Any,
@@ -250,11 +285,19 @@ def _assess(
     *,
     offline: bool,
 ) -> materiality.Assessment:
-    """The officer establishes the history; the arithmetic decides."""
+    """The officer establishes the history and the arithmetic decides -- and the two must agree.
+
+    The count used below is read from the store, because a materiality threshold has to be
+    reproducible. That would make the officer's answer decorative on its own, so its **cited** count
+    is compared against the record and a disagreement stops the assessment. The model call is a
+    control rather than a flourish: it produces the citation trail that shows *why* the count is
+    what it is, and it is checked against the thing it claims to describe.
+    """
     window = timeline["quarter_start"]
     counted = recurrence.prior_errors(
         store, case.fund_id, window, excluding=case.case_id
     )
+    recorded = int(counted["prior_errors"])
 
     if not offline:
         with identity.acting_as(OFFICER):
@@ -278,10 +321,30 @@ def _assess(
             )
         )
 
+        if not verdict.asserts_a_cause:
+            raise AssessmentDisputed(
+                f"the officer established no count: {verdict.unresolved[:200]}"
+            )
+        claimed = _cited_count(verdict, observations)
+        if claimed is None:
+            raise AssessmentDisputed(
+                "the officer cited no observation carrying a prior-error count, so its answer "
+                "cannot be checked against the record"
+            )
+        if claimed != recorded:
+            raise AssessmentDisputed(
+                f"the officer cited {claimed} prior errors and the record holds {recorded}. The "
+                f"threshold that applies is in question, so nothing is assessed."
+            )
+        console.print(
+            f"  [dim]cited count {claimed} agrees with the record ({recorded}) — the threshold "
+            f"below rests on a number that was checked, not quoted[/dim]"
+        )
+
     assessment = materiality.assess(
         error_bps=case.error_bps,
         affected_investors=case.affected_investors or 0,
-        prior_errors=int(counted["prior_errors"]),
+        prior_errors=recorded,
         since=str(counted["since"]),
     )
     console.print(

@@ -414,3 +414,100 @@ class TestTheWalkthroughRunsAndRenders:
         before = composition.store().stages_for(case_id)
         self._run(monkeypatch, case_id)
         assert composition.store().stages_for(case_id) == before
+
+
+class TestTheOfficersAnswerIsCheckedNotDisplayed:
+    """The defect this class exists for: the officer ran, its verdict was printed, and the
+    assessment then read the count straight from the store -- so the model's answer changed nothing
+    and the run would have been identical had it returned nonsense. A model call whose result is
+    discarded is theatre. Found while writing the review brief, which is where several of this
+    project's defects have been found."""
+
+    @staticmethod
+    def _verdict(count: int, *, cause: str = "3 prior errors since 2026-07-01"):
+        from datetime import UTC, datetime
+
+        from nav_sentinel.agents.contract import Citation, Verdict
+        from nav_sentinel.control_plane.observations import Observation, ObservationStore
+
+        store = ObservationStore()
+        observation = store.record(
+            Observation(
+                observation_id="OBS-cited000000000",
+                case_id="CASE-REM-CHECK",
+                trace_id="d8bc651a64bdcd4eac21517327b02b85",
+                agent_ref="remediation-officer@1.0.0",
+                tool="memory.prior_errors",
+                args="fund_id=MERID-GEF,since=2026-07-01",
+                digest="0123456789abcdef",
+                retrieved_at=datetime(2026, 8, 20, 9, 0, tzinfo=UTC),
+                source="recorded_case_history",
+                source_uri="memory://recurrence/MERID-GEF",
+                observed={"prior_errors": str(count), "since": "2026-07-01"},
+                summary=f"{count} prior errors",
+            )
+        )
+        verdict = Verdict(
+            case_id="CASE-REM-CHECK",
+            capability="rem.materiality",
+            root_cause=cause,
+            confidence=0.95,
+            citations=[Citation(observation_id=observation.observation_id, relevance="the count")],
+        )
+        return verdict, store
+
+    def test_the_cited_count_is_read_from_the_observation_not_the_prose(self):
+        from nav_sentinel import remediation_cli
+
+        verdict, store = self._verdict(3, cause="there were nine hundred prior errors")
+        assert remediation_cli._cited_count(verdict, store) == 3, (
+            "the count was parsed from the sentence rather than the cited observation"
+        )
+
+    def test_a_verdict_citing_no_count_yields_nothing_to_check(self):
+        """A verdict citing *nothing at all* is already impossible -- `Verdict` refuses an asserted
+        cause with no citations, which is a stronger control than this test first assumed. The
+        reachable case is citing an observation that does not carry the count: it cannot be compared
+        against the record, so nothing may be assessed from it."""
+        from nav_sentinel import remediation_cli
+        from nav_sentinel.control_plane.observations import ObservationStore
+
+        verdict, store = self._verdict(3)
+        unrelated = store.as_mapping()["OBS-cited000000000"].model_copy(
+            update={"observed": {"units": "101250", "trade_date": "2026-08-17"}}
+        )
+        other = ObservationStore()
+        other.record(unrelated)
+        assert remediation_cli._cited_count(verdict, other) is None
+
+    def test_a_disagreement_between_the_officer_and_the_record_stops_the_assessment(
+        self, monkeypatch
+    ):
+        """The control the whole class is about. If the agent says three and the store says five,
+        the threshold is in question and proceeding on either would be picking a winner."""
+        import sys
+
+        from nav_sentinel import remediation_cli
+
+        # An officer that cites a count the seeded history does not support.
+        wrong = self._verdict(99)
+
+        async def fake_investigate(_brief, _manifest, **_kwargs):
+            return wrong
+
+        monkeypatch.setattr(
+            "nav_sentinel.agents.investigator.investigate", fake_investigate
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["remediation_cli", "--case-id", "CASE-REM-DISPUTE"]
+        )
+        remediation_cli.main()
+
+        from nav_sentinel import composition
+        from nav_sentinel.control_plane import casefile as cf
+
+        parked = cf.load(composition.store(), "CASE-REM-DISPUTE")
+        assert parked is not None
+        assert parked.stage == "impact_assessed", (
+            "the case advanced past a disputed assessment"
+        )
