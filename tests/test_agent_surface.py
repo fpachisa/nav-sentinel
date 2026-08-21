@@ -418,16 +418,49 @@ class TestEvidenceRequirementsAreDeclaredByTheProcess:
 
     def test_a_requirement_naming_a_fact_no_tool_can_produce_is_refused(self):
         """No verdict could ever satisfy it, so every verdict for that capability would be denied
-        by a rule that reads as a typo."""
+        by a rule that reads as a typo.
+
+        Refused at **registration** rather than construction, because producibility depends on what
+        is registered: a platform tool is reachable by any pack, so a fact it projects is citable,
+        and platform tools are registered by the composition root after a pack module is imported.
+        Checking at construction measured an empty catalogue and refused every requirement over a
+        shared capability -- which is how the remediation office could not state a rule about the
+        recurrence count it decides against.
+        """
         from nav_sentinel.control_plane.packs import ProcessPack
 
-        with pytest.raises(ValueError, match="no\\s+tool of this process can produce"):
-            ProcessPack(
-                key="nav3", name="n", capabilities=("nav3.a",),
-                manifest_dir=packs.registered()[0].manifest_dir,
-                tools=(packs.catalogue()["ecb_fx.rate_on"],),
-                evidence_requirements=(("nav3.a", ("rate_dat",)),),   # note the typo
-            )
+        typo = ProcessPack(
+            key="nav3", name="n", capabilities=("nav3.a",),
+            manifest_dir=packs.registered()[0].manifest_dir,
+            tools=(packs.catalogue()["ecb_fx.rate_on"],),
+            evidence_requirements=(("nav3.a", ("rate_dat",)),),   # note the typo
+        )
+        with pytest.raises(ValueError, match="no registered tool can produce"):
+            packs.register(typo)
+        assert "nav3" not in {p.key for p in packs.registered()}, "a refused pack registered"
+
+    def test_a_requirement_over_a_platform_tools_fact_is_accepted(self, tmp_path):
+        """The case the construction-time check made impossible. `memory.prior_errors` belongs to no
+        pack, and the remediation office's whole assessment cites what it returns.
+
+        Its own `manifest_dir`, because `_prompt_dir_of` falls back to a `prompts` directory beside
+        the manifests -- borrowing another pack's directory made this pack "ship" that pack's
+        templates and the collision guard refused it, correctly.
+        """
+        from nav_sentinel.control_plane.packs import ProcessPack
+
+        assert "prior_errors" in packs.platform_facts()
+        pack = ProcessPack(
+            key="nav5", name="n", capabilities=("nav5.a",),
+            manifest_dir=tmp_path / "manifests",
+            tools=(),
+            evidence_requirements=(("nav5.a", ("prior_errors",)),),
+        )
+        try:
+            packs.register(pack)
+            assert "nav5" in {p.key for p in packs.registered()}
+        finally:
+            packs._packs.pop("nav5", None)
 
     def test_an_empty_requirement_is_refused(self):
         from nav_sentinel.control_plane.packs import ProcessPack

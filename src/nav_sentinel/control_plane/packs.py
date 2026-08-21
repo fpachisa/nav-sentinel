@@ -155,6 +155,35 @@ class ProcessPack:
         _validate_evidence_requirements(self)
 
 
+def platform_facts() -> frozenset[str]:
+    """Facts projected by tools every process may use."""
+    return frozenset(name for spec in _platform_tools.values() for name in spec.facts)
+
+
+def _validate_producible_facts(pack: ProcessPack) -> None:
+    """Refuse a requirement no tool could ever satisfy. **Checked at registration, not construction.**
+
+    Producibility depends on what is registered: a pack's own tools *plus the platform's*, because a
+    platform tool is reachable by any agent whose manifest allows it and a fact it projects is
+    therefore citable. Platform tools are registered by the composition root, which necessarily runs
+    after a pack module is imported -- so checking this in `__post_init__` measured an empty
+    catalogue and refused every requirement over a shared capability. The only workaround would have
+    been duplicating the tool into the pack, which `register` separately refuses as a name collision.
+
+    The *shape* of a requirement -- a capability this pack declares, no duplicates, not empty -- is
+    knowable at construction and stays there, because construction is bypassable.
+    """
+    producible = pack.declared_facts() | platform_facts()
+    for capability, required in pack.evidence_requirements:
+        unknown = sorted(set(required) - producible)
+        if unknown:
+            raise ValueError(
+                f"process {pack.key!r} requires fact(s) {unknown} for {capability!r}, which no "
+                f"registered tool can produce -- no verdict could ever satisfy it. Producible: "
+                f"{sorted(producible)}"
+            )
+
+
 def _validate_evidence_requirements(pack: ProcessPack) -> None:
     """Refuse a requirement that can never bind.
 
@@ -172,7 +201,6 @@ def _validate_evidence_requirements(pack: ProcessPack) -> None:
             )
 
     declared = set(pack.capabilities)
-    producible = pack.declared_facts()
     seen: set[str] = set()
     for capability, required in pack.evidence_requirements:
         if capability in seen:
@@ -191,13 +219,6 @@ def _validate_evidence_requirements(pack: ProcessPack) -> None:
             raise ValueError(
                 f"process {pack.key!r} declares an empty evidence requirement for {capability!r}. "
                 f"Omit the entry instead, so 'no requirement' is stated once."
-            )
-        unknown = sorted(set(required) - producible)
-        if unknown:
-            raise ValueError(
-                f"process {pack.key!r} requires fact(s) {unknown} for {capability!r}, which no "
-                f"tool of this process can produce -- no verdict could ever satisfy it. "
-                f"Producible: {sorted(producible)}"
             )
 
 
@@ -289,6 +310,7 @@ def register(pack: ProcessPack) -> None:
     if pack.key in _packs and _packs[pack.key] is not pack:
         raise DuplicateProcess(f"process {pack.key!r} is already registered")
     _validate_evidence_requirements(pack)
+    _validate_producible_facts(pack)
     unsourced = sorted(spec.name for spec in pack.tools if not spec.source.strip())
     if unsourced:
         raise ValueError(

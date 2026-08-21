@@ -52,6 +52,10 @@ PACK = ProcessPack(
     tools=(),
     thresholds=(INVESTOR_THRESHOLDS,),
     control_total_unit="investors",
+    #: A materiality assessment must cite the recurrence count **and the window it was taken
+    #: over**. A bare "three prior errors" is uncheckable; "three since 2026-07-01" can be checked
+    #: against the case ids behind it. Same rule as an FX rate without its date.
+    evidence_requirements=(("rem.materiality", ("prior_errors", "since")),),
     #: The one thing this department may ask another department for. Transfer agency publishes an
     #: agent for it; this pack never learns which one, because the registry decides that.
     delegations=("ta.dealing_impact",),
