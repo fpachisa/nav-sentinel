@@ -1,0 +1,66 @@
+{
+  "_comment": "One remediation, twenty-eight days, seven deliveries. Business dates are weeks apart and are what every figure is computed from; wall-clock is compressed when this is replayed. Every event falls on a business day. Nothing here is a transition -- each event names a destination and the lifecycle decides whether the case may go there.",
+  "case_id": "CASE-REM-MERID-GEF-2026-08-17",
+  "fund_id": "MERID-GEF",
+  "nav_date": "2026-08-17",
+  "events": [
+    {
+      "day": 0,
+      "occurred_on": "2026-08-18",
+      "event": "error_detected",
+      "department": "fund accounting",
+      "note": "published NAV for 2026-08-17 misstated by 285.57bps: stale USD rate applied to the ADR sleeve",
+      "evidence": []
+    },
+    {
+      "day": 1,
+      "occurred_on": "2026-08-19",
+      "event": "impact_reported",
+      "department": "transfer agency",
+      "note": "41 investors dealt at the misstated price across 3 dealing days, 2,140,000 units",
+      "affected_investors": 41,
+      "affected_units": "2140000",
+      "evidence": []
+    },
+    {
+      "day": 2,
+      "occurred_on": "2026-08-20",
+      "event": "materiality_decided",
+      "department": "remediation office",
+      "note": "material: 285.57bps exceeds the 50bps threshold, and this is the fund's fourth pricing error this quarter",
+      "evidence": []
+    },
+    {
+      "day": 2,
+      "occurred_on": "2026-08-20",
+      "event": "routed_for_approval",
+      "department": "remediation office",
+      "note": "compensation plan drafted for 41 investors; requires four eyes",
+      "evidence": []
+    },
+    {
+      "day": 6,
+      "occurred_on": "2026-08-24",
+      "event": "approval_recorded",
+      "department": "oversight",
+      "note": "approved by two signatories outside the fleet",
+      "evidence": []
+    },
+    {
+      "day": 13,
+      "occurred_on": "2026-08-31",
+      "event": "compensation_started",
+      "department": "transfer agency",
+      "note": "payments instructed for 41 investors",
+      "evidence": []
+    },
+    {
+      "day": 28,
+      "occurred_on": "2026-09-15",
+      "event": "compensation_confirmed",
+      "department": "transfer agency",
+      "note": "all 41 confirmations received; 29 days after the misstated valuation point",
+      "evidence": []
+    }
+  ]
+}

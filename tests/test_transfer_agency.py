@@ -266,7 +266,11 @@ class TestThePlatformWasNotTouched:
         if known.returncode != 0:
             return None
         result = subprocess.run(
-            ["git", "diff", "--name-only", ref, "HEAD"],
+            # `ref` against the **working tree**, not against HEAD. Comparing to HEAD made this
+            # check permanently one commit behind the code it describes: a platform change passed
+            # at the moment it was committed and only failed on the *next* run, which is how two
+            # files reached the tree unadmitted.
+            ["git", "diff", "--name-only", ref],
             capture_output=True,
             text=True,
             check=False,
@@ -295,7 +299,10 @@ class TestThePlatformWasNotTouched:
     #: legitimate second change landed -- and it passed at commit time only because `git diff`
     #: reads the *previous* HEAD, so the assertion was one commit behind the tree it described.
     ADMITTED_PLATFORM_CHANGES = {
-        # `CaseBrief`, so an investigator takes a flat value instead of fund accounting's case type.
+        # `CaseBrief`, so an investigator takes a flat value instead of fund accounting's case
+        # type. And `Lifecycle`, which is process-declared vocabulary the control plane consumes --
+        # it belongs beside `ThresholdSet` in the leaf module, and putting it next to the machine
+        # that walks it created a real cycle: packs -> casefile -> gateway -> policies -> packs.
         "src/nav_sentinel/control_plane/governance.py",
         # `register` refuses two processes shipping one prompt filename, and one definition of where
         # a pack's templates live. Both are rules *about* hosting processes, not about any process.
@@ -310,6 +317,12 @@ class TestThePlatformWasNotTouched:
         # stage machine on top of an overwriting store is a variable that happened to survive.
         "src/nav_sentinel/control_plane/casefile.py",
         "src/nav_sentinel/control_plane/repository.py",
+        # P-008 is a policy, so it lives in `policies.py` and the gateway exposes the function that
+        # records it -- the shape every other policy here already has. A stage change that left no
+        # governance record would be the one state change this project's whole claim says is
+        # impossible.
+        "src/nav_sentinel/control_plane/policies.py",
+        "src/nav_sentinel/control_plane/gateway.py",
     }
 
     def test_no_platform_file_changed_without_a_recorded_reason(self):

@@ -14,6 +14,7 @@ primitives and control-plane types, and the control plane reads nothing else.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
@@ -202,3 +203,68 @@ class CaseBrief(BaseModel):
     capability: str
     #: The breaks, rendered by the process that owns their shape. One line each.
     breaks: str = ""
+
+
+# --- process-declared lifecycles ---------------------------------------------------------------
+#
+# `Lifecycle` lives here rather than beside the machine that walks it, for the reason this module's
+# docstring gives: it is vocabulary a *process* declares and the control plane consumes, exactly
+# like `ThresholdSet`. Putting it next to the machine created a genuine import cycle --
+# `packs -> casefile -> gateway -> policies -> packs` -- because the machine has to reach the
+# gateway to record a decision. A leaf module cannot have that problem.
+
+class UnknownStage(ValueError):
+    """A stage the declaring process never declared."""
+
+
+class IllegalTransition(ValueError):
+    """An edge that is not in the declared graph.
+
+    Raised rather than warned. The case this protects is compensation before approval: a move that
+    is individually plausible, arrives as a well-formed external event, and must not happen.
+    """
+
+
+@dataclass(frozen=True)
+class Lifecycle:
+    """The stages a process declares, and which moves between them are legal.
+
+    Declared as explicit edges rather than a linear list. A remediation that can go from
+    *materiality determined* either to *awaiting approval* or straight to *closed* (immaterial, no
+    compensation due) is two edges from one stage, and a linear list cannot say that.
+    """
+
+    stages: tuple[str, ...]
+    transitions: tuple[tuple[str, str], ...]
+    initial: str
+    terminal: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        unknown = {s for edge in self.transitions for s in edge} - set(self.stages)
+        if unknown:
+            raise UnknownStage(f"transitions reference undeclared stage(s): {sorted(unknown)}")
+        if self.initial not in self.stages:
+            raise UnknownStage(f"initial stage {self.initial!r} is not declared")
+        undeclared_terminal = set(self.terminal) - set(self.stages)
+        if undeclared_terminal:
+            raise UnknownStage(f"terminal stage(s) not declared: {sorted(undeclared_terminal)}")
+        # A terminal stage with an outbound edge is not terminal, and a non-terminal stage with no
+        # outbound edge is a case that can never finish. Both are graph mistakes worth refusing at
+        # construction rather than discovering when a case gets stuck in production.
+        for stage in self.stages:
+            outbound = [b for a, b in self.transitions if a == stage]
+            if stage in self.terminal and outbound:
+                raise IllegalTransition(
+                    f"{stage!r} is declared terminal but has outbound edges to {outbound}"
+                )
+            if stage not in self.terminal and not outbound:
+                raise IllegalTransition(
+                    f"{stage!r} is not terminal and has no outbound edge, so a case reaching it "
+                    f"can never progress or close"
+                )
+
+    def allows(self, frm: str, to: str) -> bool:
+        return (frm, to) in self.transitions
+
+    def next_stages(self, frm: str) -> tuple[str, ...]:
+        return tuple(b for a, b in self.transitions if a == frm)

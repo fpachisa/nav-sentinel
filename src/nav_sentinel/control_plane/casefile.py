@@ -36,67 +36,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from nav_sentinel.control_plane import gateway
+from nav_sentinel.control_plane.governance import (
+    IllegalTransition,
+    Lifecycle,
+    UnknownStage,
+)
 from nav_sentinel.control_plane.observations import utcnow
 
 if TYPE_CHECKING:  # pragma: no cover
     from nav_sentinel.control_plane.repository import Repository
-
-class UnknownStage(ValueError):
-    """A stage the declaring process never declared."""
-
-
-class IllegalTransition(ValueError):
-    """An edge that is not in the declared graph.
-
-    Raised rather than warned. The case this protects is compensation before approval: a move that
-    is individually plausible, arrives as a well-formed external event, and must not happen.
-    """
-
-
-@dataclass(frozen=True)
-class Lifecycle:
-    """The stages a process declares, and which moves between them are legal.
-
-    Declared as explicit edges rather than a linear list. A remediation that can go from
-    *materiality determined* either to *awaiting approval* or straight to *closed* (immaterial, no
-    compensation due) is two edges from one stage, and a linear list cannot say that.
-    """
-
-    stages: tuple[str, ...]
-    transitions: tuple[tuple[str, str], ...]
-    initial: str
-    terminal: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        unknown = {s for edge in self.transitions for s in edge} - set(self.stages)
-        if unknown:
-            raise UnknownStage(f"transitions reference undeclared stage(s): {sorted(unknown)}")
-        if self.initial not in self.stages:
-            raise UnknownStage(f"initial stage {self.initial!r} is not declared")
-        undeclared_terminal = set(self.terminal) - set(self.stages)
-        if undeclared_terminal:
-            raise UnknownStage(f"terminal stage(s) not declared: {sorted(undeclared_terminal)}")
-        # A terminal stage with an outbound edge is not terminal, and a non-terminal stage with no
-        # outbound edge is a case that can never finish. Both are graph mistakes worth refusing at
-        # construction rather than discovering when a case gets stuck in production.
-        for stage in self.stages:
-            outbound = [b for a, b in self.transitions if a == stage]
-            if stage in self.terminal and outbound:
-                raise IllegalTransition(
-                    f"{stage!r} is declared terminal but has outbound edges to {outbound}"
-                )
-            if stage not in self.terminal and not outbound:
-                raise IllegalTransition(
-                    f"{stage!r} is not terminal and has no outbound edge, so a case reaching it "
-                    f"can never progress or close"
-                )
-
-    def allows(self, frm: str, to: str) -> bool:
-        return (frm, to) in self.transitions
-
-    def next_stages(self, frm: str) -> tuple[str, ...]:
-        return tuple(b for a, b in self.transitions if a == frm)
-
 
 @dataclass(frozen=True)
 class Casefile:

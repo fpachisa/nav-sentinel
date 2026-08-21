@@ -48,6 +48,9 @@ PROCESS_PACKAGES = (
     # accounting, it may not reach transfer agency either, and a package the seam scan does not
     # know about is a package the seam does not protect.
     "transfer_agency",
+    # The third. It coordinates the other two and is still a process: the control plane may not
+    # reach it either, and it may not reach them.
+    "remediation_office",
 )
 PLATFORM_PACKAGES = ("control_plane", "registry")
 
