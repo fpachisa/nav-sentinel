@@ -78,7 +78,11 @@ def apply_event(store: Repository, payload: dict[str, Any]) -> Applied:
                 advanced=False,
             )
         opened = casefile.open_case(
-            store, case_id, REMEDIATION, note=str(payload.get("note", ""))
+            store,
+            case_id,
+            REMEDIATION,
+            note=str(payload.get("note", "")),
+            occurred_on=str(payload.get("occurred_on", "")),
         )
         return Applied(
             case_id=case_id,
@@ -128,6 +132,7 @@ def _advance(
             REMEDIATION,
             note=str(payload.get("note", "")),
             evidence=tuple(str(e) for e in evidence),
+            occurred_on=str(payload.get("occurred_on", "")),
         )
     except ImmutableRecord:
         # Two deliveries raced and the other one won. Re-read: the case is where it should be, and

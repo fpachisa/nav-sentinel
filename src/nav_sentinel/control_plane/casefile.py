@@ -56,12 +56,24 @@ class Casefile:
     history: tuple[dict[str, Any], ...] = ()
 
 
-def open_case(store: Repository, case_id: str, lifecycle: Lifecycle, *, note: str = "") -> Casefile:
+def open_case(
+    store: Repository,
+    case_id: str,
+    lifecycle: Lifecycle,
+    *,
+    note: str = "",
+    occurred_on: str = "",
+) -> Casefile:
     """Record a case's arrival at its initial stage."""
     entry = {
         "from": None,
         "to": lifecycle.initial,
+        # Two dates, deliberately. `recorded_at` is when this system wrote the row;
+        # `occurred_on` is when the thing happened in the business world. For a case that runs for
+        # weeks they are different, and collapsing them would make a replay look like a month of
+        # uptime -- or make a genuine month look like a replay.
         "recorded_at": utcnow().isoformat(),
+        "occurred_on": occurred_on,
         "note": note,
     }
     store.record_stage(case_id, 0, entry)
@@ -96,6 +108,7 @@ def advance(
     *,
     note: str = "",
     evidence: tuple[str, ...] = (),
+    occurred_on: str = "",
 ) -> Casefile:
     """Move a case one stage, or refuse and say why.
 
@@ -121,6 +134,7 @@ def advance(
         "from": casefile.stage,
         "to": to,
         "recorded_at": utcnow().isoformat(),
+        "occurred_on": occurred_on,
         "note": note,
         "evidence": list(evidence),
     }

@@ -301,3 +301,116 @@ class TestTheThirdProcessIsStillAProcess:
         assert "nav_sentinel.control_plane.casefile" in modules
         assert "nav_sentinel.control_plane.repository" in modules
         assert any(m.startswith("nav_sentinel.remediation_office") for m in modules)
+
+
+class TestTheWalkthroughRunsAndRenders:
+    """`make ta` once died on an AttributeError with 631 tests green because nothing rendered its
+    output. The same hole, closed before it opens: this drives the whole walkthrough offline."""
+
+    #: A distinct case id per test. The store is configured once for the session and stage history
+    #: is append-only, so two tests walking the same id would have the second one refused -- which
+    #: is the machine behaving correctly, not a test to work around.
+    @staticmethod
+    def _run(monkeypatch, case_id: str) -> str:
+        import sys
+
+        from nav_sentinel import remediation_cli
+
+        monkeypatch.setattr(
+            sys, "argv", ["remediation_cli", "--offline", "--case-id", case_id]
+        )
+        remediation_cli.main()
+        return case_id
+
+    def test_the_offline_walkthrough_completes(self, monkeypatch):
+        self._run(monkeypatch, "CASE-REM-WALK-0")
+
+    def test_it_walks_every_stage_and_closes(self, monkeypatch):
+        from nav_sentinel import composition
+        from nav_sentinel.control_plane import casefile as cf
+
+        case_id = self._run(monkeypatch, "CASE-REM-WALK-1")
+        recovered = cf.load(composition.store(), case_id)
+        assert recovered is not None
+        assert recovered.stage == "closed"
+        assert [e["to"] for e in recovered.history] == [
+            "detected",
+            "impact_assessed",
+            "materiality_determined",
+            "awaiting_approval",
+            "approved",
+            "compensation_in_flight",
+            "closed",
+        ]
+
+    def test_every_stage_records_both_dates(self, monkeypatch):
+        """The compression claim depends on both being present: when it happened, and when this
+        system wrote it down."""
+        from nav_sentinel import composition
+
+        case_id = self._run(monkeypatch, "CASE-REM-WALK-2")
+        history = composition.store().stages_for(case_id)
+        assert all(entry["occurred_on"] for entry in history), history
+        assert all(entry["recorded_at"] for entry in history)
+        span = (
+            date.fromisoformat(history[-1]["occurred_on"])
+            - date.fromisoformat(history[0]["occurred_on"])
+        ).days
+        assert span >= 21, f"the business dates span only {span} days"
+
+    def test_the_affected_population_comes_from_the_register(self, monkeypatch):
+        """Not from the fixture. A count written into the timeline could disagree with the data,
+        and did: it said 41 investors while the register held four."""
+        from datetime import date as _date
+
+        from nav_sentinel.transfer_agency import register
+
+        for entry in TIMELINE["events"]:
+            assert "affected_investors" not in entry, entry["event"]
+        dealt = register.dealt_on(TIMELINE["fund_id"], _date.fromisoformat(TIMELINE["nav_date"]))
+        assert dealt["holders"] > 0, "nobody dealt at the misstated price, so there is no case"
+
+    def test_somebody_dealt_on_the_misstated_valuation_point(self):
+        """The fixture coherence check the first live run failed. The register's only deal was
+        dated three days before the NAV in question, so the impact report was 0 holders."""
+        from datetime import date as _date
+
+        from nav_sentinel.transfer_agency import register
+
+        nav_date = _date.fromisoformat(TIMELINE["nav_date"])
+        assert register.dealt_on(TIMELINE["fund_id"], nav_date)["deals"] > 0
+
+    def test_the_error_size_sits_between_the_two_thresholds(self):
+        """Otherwise the walkthrough would reach the same outcome with or without the recurrence
+        count, and the beat it exists to show would be decoration."""
+        from decimal import Decimal
+
+        from nav_sentinel.remediation_office import materiality
+
+        error = Decimal(TIMELINE["error_bps"])
+        assert materiality.RECURRING_THRESHOLD_BPS < error < materiality.ISOLATED_THRESHOLD_BPS
+
+    def test_the_seeded_history_crosses_the_recurrence_trigger(self):
+        from nav_sentinel.remediation_office import materiality
+
+        assert len(TIMELINE["prior_errors"]) >= materiality.RECURRENCE_TRIGGER
+
+    def test_a_closed_case_refuses_replay_with_a_message_not_a_traceback(self, monkeypatch, capsys):
+        """Append-only history means a second run cannot reopen a case. That is correct; crashing
+        on it is not. Found by two tests sharing a store, which is exactly the situation a second
+        `make remediation` against Firestore creates."""
+        self._run(monkeypatch, "CASE-REM-REPLAY")
+        capsys.readouterr()
+        self._run(monkeypatch, "CASE-REM-REPLAY")
+        out = capsys.readouterr().out
+        assert "already exists at stage" in out
+        assert "closed" in out
+        assert "--case-id" in out, "the refusal should say how to run another one"
+
+    def test_replaying_appends_nothing(self, monkeypatch):
+        from nav_sentinel import composition
+
+        case_id = self._run(monkeypatch, "CASE-REM-REPLAY-2")
+        before = composition.store().stages_for(case_id)
+        self._run(monkeypatch, case_id)
+        assert composition.store().stages_for(case_id) == before

@@ -1,5 +1,5 @@
 {
-  "_comment": "One remediation, twenty-eight days, seven deliveries. Business dates are weeks apart and are what every figure is computed from; wall-clock is compressed when this is replayed. Every event falls on a business day. Nothing here is a transition -- each event names a destination and the lifecycle decides whether the case may go there.",
+  "_comment": "One remediation, twenty-eight days, seven deliveries. Business dates are weeks apart and are what every figure is computed from; wall-clock is compressed when this is replayed. Every event falls on a business day. Nothing here is a transition -- each event names a destination and the lifecycle decides whether the case may go there. `error_bps` sits deliberately between the isolated (50) and recurring (20) materiality thresholds, so the outcome depends on the prior errors below and on nothing else.",
   "case_id": "CASE-REM-MERID-GEF-2026-08-17",
   "fund_id": "MERID-GEF",
   "nav_date": "2026-08-17",
@@ -17,9 +17,7 @@
       "occurred_on": "2026-08-19",
       "event": "impact_reported",
       "department": "transfer agency",
-      "note": "41 investors dealt at the misstated price across 3 dealing days, 2,140,000 units",
-      "affected_investors": 41,
-      "affected_units": "2140000",
+      "note": "transfer agency reports who dealt at the misstated price",
       "evidence": []
     },
     {
@@ -27,7 +25,7 @@
       "occurred_on": "2026-08-20",
       "event": "materiality_decided",
       "department": "remediation office",
-      "note": "material: 285.57bps exceeds the 50bps threshold, and this is the fund's fourth pricing error this quarter",
+      "note": "materiality assessed against the fund's recent error history",
       "evidence": []
     },
     {
@@ -35,7 +33,7 @@
       "occurred_on": "2026-08-20",
       "event": "routed_for_approval",
       "department": "remediation office",
-      "note": "compensation plan drafted for 41 investors; requires four eyes",
+      "note": "compensation plan drafted; requires four eyes",
       "evidence": []
     },
     {
@@ -51,7 +49,7 @@
       "occurred_on": "2026-08-31",
       "event": "compensation_started",
       "department": "transfer agency",
-      "note": "payments instructed for 41 investors",
+      "note": "payments instructed for the affected holders",
       "evidence": []
     },
     {
@@ -59,8 +57,27 @@
       "occurred_on": "2026-09-15",
       "event": "compensation_confirmed",
       "department": "transfer agency",
-      "note": "all 41 confirmations received; 29 days after the misstated valuation point",
+      "note": "every affected investor's compensation confirmed, 29 days after the valuation point",
       "evidence": []
+    }
+  ],
+  "quarter_start": "2026-07-01",
+  "error_bps": "30",
+  "prior_errors": [
+    {
+      "case_id": "CASE-REM-MERID-GEF-2026-07-14",
+      "as_of": "2026-07-14",
+      "note": "pricing error on the ADR sleeve, 62bps, compensated"
+    },
+    {
+      "case_id": "CASE-REM-MERID-GEF-2026-07-28",
+      "as_of": "2026-07-28",
+      "note": "stale FX rate applied to the EUR share class, 88bps, compensated"
+    },
+    {
+      "case_id": "CASE-REM-MERID-GEF-2026-08-11",
+      "as_of": "2026-08-11",
+      "note": "corporate action booked a day late, 54bps, compensated"
     }
   ]
 }

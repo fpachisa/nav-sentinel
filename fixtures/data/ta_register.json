@@ -1,12 +1,85 @@
 {
-  "note": "A share register for MERID-GEF at 2026-08-17, in units. Two books: the registrar's and the fund's own unit ledger. HOLD-002 dealt a subscription on 2026-08-14 settling 2026-08-19 -- in transit at the valuation point, so the registrar counts it and the ledger does not.",
+  "note": "A share register for MERID-GEF at 2026-08-17, in units. Two books: the registrar's and the fund's own unit ledger. HOLD-002 dealt a subscription on 2026-08-14 settling 2026-08-19 -- in transit at the valuation point, so the registrar counts it and the ledger does not. Four holders also dealt on 2026-08-17, the valuation point whose NAV was later found misstated: they are the population a remediation has to compensate, and they are separate from HOLD-002 so the in-transit break stays a single-holder story.",
   "positions": [
-    {"fund_id": "MERID-GEF", "holder_id": "HOLD-001", "as_of": "2026-08-17", "units": "2800000.0000", "source": "registrar"},
-    {"fund_id": "MERID-GEF", "holder_id": "HOLD-001", "as_of": "2026-08-17", "units": "2800000.0000", "source": "fund_accounting"},
-    {"fund_id": "MERID-GEF", "holder_id": "HOLD-002", "as_of": "2026-08-17", "units": "1575000.0000", "source": "registrar"},
-    {"fund_id": "MERID-GEF", "holder_id": "HOLD-002", "as_of": "2026-08-17", "units": "1450000.0000", "source": "fund_accounting"}
+    {
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-001",
+      "as_of": "2026-08-17",
+      "units": "2800000.0000",
+      "source": "registrar"
+    },
+    {
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-001",
+      "as_of": "2026-08-17",
+      "units": "2800000.0000",
+      "source": "fund_accounting"
+    },
+    {
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-002",
+      "as_of": "2026-08-17",
+      "units": "1575000.0000",
+      "source": "registrar"
+    },
+    {
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-002",
+      "as_of": "2026-08-17",
+      "units": "1450000.0000",
+      "source": "fund_accounting"
+    }
   ],
   "deals": [
-    {"deal_id": "DEAL-0001", "fund_id": "MERID-GEF", "holder_id": "HOLD-002", "deal_type": "subscription", "trade_date": "2026-08-14", "settlement_date": "2026-08-19", "units": "125000.0000", "source": "registrar"}
+    {
+      "deal_id": "DEAL-0001",
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-002",
+      "deal_type": "subscription",
+      "trade_date": "2026-08-14",
+      "settlement_date": "2026-08-19",
+      "units": "125000.0000",
+      "source": "registrar"
+    },
+    {
+      "deal_id": "DEAL-0002",
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-005",
+      "deal_type": "subscription",
+      "trade_date": "2026-08-17",
+      "settlement_date": "2026-08-19",
+      "units": "48000.0000",
+      "source": "registrar"
+    },
+    {
+      "deal_id": "DEAL-0003",
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-006",
+      "deal_type": "subscription",
+      "trade_date": "2026-08-17",
+      "settlement_date": "2026-08-19",
+      "units": "12500.0000",
+      "source": "registrar"
+    },
+    {
+      "deal_id": "DEAL-0004",
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-007",
+      "deal_type": "redemption",
+      "trade_date": "2026-08-17",
+      "settlement_date": "2026-08-19",
+      "units": "31000.0000",
+      "source": "registrar"
+    },
+    {
+      "deal_id": "DEAL-0005",
+      "fund_id": "MERID-GEF",
+      "holder_id": "HOLD-008",
+      "deal_type": "subscription",
+      "trade_date": "2026-08-17",
+      "settlement_date": "2026-08-19",
+      "units": "9750.0000",
+      "source": "registrar"
+    }
   ]
 }

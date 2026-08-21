@@ -19,7 +19,7 @@ from typing import Any
 
 from nav_sentinel.control_plane import identity, packs, policies, telemetry
 from nav_sentinel.control_plane.extraction import ExtractionRejected
-from nav_sentinel.control_plane.governance import CaseFacts
+from nav_sentinel.control_plane.governance import CaseBrief, CaseFacts
 
 # The exception only. `model_armor` defers the Google SDK import into its own
 # functions, so naming it here costs nothing at import time.
@@ -380,7 +380,7 @@ def register_agent_invoker(invoker: Callable[..., Any]) -> None:
     _invoker = invoker
 
 
-def delegate(capability: str, *args: Any, **kwargs: Any) -> Any:
+def delegate(capability: str, brief: CaseBrief, **kwargs: Any) -> Any:
     """Ask the agent authorised for `capability` to do something, under *its* identity.
 
     The coordination primitive. Three things happen here and the order matters:
@@ -434,10 +434,18 @@ def delegate(capability: str, *args: Any, **kwargs: Any) -> Any:
             "gateway.register_agent_invoker() before a delegation can run"
         )
 
+    # The brief is re-stamped with the **requested** capability before it goes anywhere. It arrives
+    # carrying the caller's -- a remediation officer asks for `ta.dealing_impact` while holding
+    # `rem.materiality` -- and handing that to the sub-agent means two things break at once: its own
+    # manifest check refuses work it never claimed, and `evidence_requirement_for` resolves the
+    # *caller's* P-007 rule instead of the one for the capability actually being performed. Enforced
+    # here rather than asked of callers, because a caller that forgot would look like it worked.
+    delegated = brief.model_copy(update={"capability": capability})
+
     token = _delegation_depth.set(depth + 1)
     try:
         with identity.acting_as(agent.agent_id):
-            return _invoker(agent, *args, **kwargs)
+            return _invoker(agent, delegated, **kwargs)
     finally:
         _delegation_depth.reset(token)
         del decision
