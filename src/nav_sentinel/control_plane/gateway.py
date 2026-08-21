@@ -344,6 +344,19 @@ def route_for_approval(facts: CaseFacts) -> PolicyDecision:
     return _record(policies.approval_route(facts))
 
 
+def record_stage_transition(
+    case_id: str, frm: str | None, to: str, *, allowed: bool, reason: str
+) -> PolicyDecision:
+    """P-009 through the gateway, so a stage change lands in the governance log like any other.
+
+    A lifecycle move that left no policy record would be a state change this project's whole claim
+    says is impossible -- and the one an auditor of a multi-week case would ask about first.
+    """
+    return _record(
+        policies.stage_transition(case_id, frm, to, allowed=allowed, reason=reason)
+    )
+
+
 def prompt_dirs() -> tuple[Path, ...]:
     """Every registered process's prompt directory.
 

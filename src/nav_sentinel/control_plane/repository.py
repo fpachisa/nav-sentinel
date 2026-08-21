@@ -68,6 +68,16 @@ class Repository(ABC):
     @abstractmethod
     def cases_for(self, subject_id: str, as_of: str) -> list[dict[str, Any]]: ...
 
+    @abstractmethod
+    def cases_by_recurrence(self, recurrence_key: str) -> list[dict[str, Any]]: ...
+
+    # --- stage history: append-only, ordered ----------------------------------------------
+    @abstractmethod
+    def record_stage(self, case_id: str, sequence: int, entry: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    def stages_for(self, case_id: str) -> list[dict[str, Any]]: ...
+
     # --- observations: append-only, immutable ---------------------------------------------
     @abstractmethod
     def record_observation(self, observation: Observation) -> None: ...
@@ -95,6 +105,17 @@ def _decision_id(case_id: str, trace_id: str | None, sequence: int) -> str:
     return f"{case_id}|{trace_id or 'no-trace'}|{sequence:04d}"
 
 
+def _stage_id(case_id: str, sequence: int) -> str:
+    """Keyed by case and position, and that is the concurrency control.
+
+    A case at stage N has exactly one stage N+1. Two workers advancing the same case both write
+    sequence N+1, one collides, and a collision on an append-only record raises rather than
+    overwrites -- so a case cannot be double-advanced by two Pub/Sub deliveries of the same event.
+    Pub/Sub is at-least-once, so that is not a hypothetical.
+    """
+    return f"{case_id}|{sequence:04d}"
+
+
 def _decision_order(record: dict[str, Any]) -> tuple[str, int]:
     """Group a case's decisions by the run that produced them, then by position within it.
 
@@ -118,6 +139,7 @@ class InMemoryRepository(Repository):
         self._cases: dict[str, dict[str, Any]] = {}
         self._observations: dict[str, Observation] = {}
         self._decisions: dict[str, dict[str, Any]] = {}
+        self._stages: dict[str, dict[str, Any]] = {}
 
     def save_case(self, case_id: str, document: dict[str, Any]) -> None:
         self._cases[case_id] = dict(document)
@@ -132,6 +154,28 @@ class InMemoryRepository(Repository):
             for document in self._cases.values()
             if document.get("subject_id") == subject_id and document.get("as_of") == as_of
         ]
+
+    def cases_by_recurrence(self, recurrence_key: str) -> list[dict[str, Any]]:
+        return [
+            dict(document)
+            for document in self._cases.values()
+            if document.get("recurrence_key") == recurrence_key
+        ]
+
+    def record_stage(self, case_id: str, sequence: int, entry: dict[str, Any]) -> None:
+        stage_id = _stage_id(case_id, sequence)
+        if stage_id in self._stages:
+            raise ImmutableRecord(
+                f"stage {sequence} of {case_id} already recorded as "
+                f"{self._stages[stage_id].get('to')!r}. A case has one stage at each position."
+            )
+        self._stages[stage_id] = {"case_id": case_id, "sequence": sequence, **entry}
+
+    def stages_for(self, case_id: str) -> list[dict[str, Any]]:
+        return sorted(
+            (dict(e) for e in self._stages.values() if e["case_id"] == case_id),
+            key=lambda e: e["sequence"],
+        )
 
     def record_observation(self, observation: Observation) -> None:
         existing = self._observations.get(observation.observation_id)
@@ -198,6 +242,7 @@ class FirestoreRepository(Repository):
         self._cases = self._client.collection(f"{prefix}_cases")
         self._observation_docs = self._client.collection(f"{prefix}_observations")
         self._decision_docs = self._client.collection(f"{prefix}_decisions")
+        self._stage_docs = self._client.collection(f"{prefix}_stages")
 
     def save_case(self, case_id: str, document: dict[str, Any]) -> None:
         self._cases.document(case_id).set(document)
@@ -217,6 +262,33 @@ class FirestoreRepository(Repository):
             for document in (doc.to_dict() for doc in query.stream())
             if document.get("subject_id") == subject_id
         ]
+
+    def cases_by_recurrence(self, recurrence_key: str) -> list[dict[str, Any]]:
+        # One equality filter and no ordering, for the reason recorded above: every additional
+        # constrained field needs a composite index provisioned before the read can succeed. The
+        # caller filters by date in Python, which for a handful of cases per fund is the right trade.
+        query = self._cases.where(filter=FieldFilter("recurrence_key", "==", recurrence_key))
+        return [doc.to_dict() for doc in query.stream()]
+
+    def record_stage(self, case_id: str, sequence: int, entry: dict[str, Any]) -> None:
+        doc = self._stage_docs.document(_stage_id(case_id, sequence))
+        try:
+            # `create()`, not `set()`: it fails when the document exists, which is what makes two
+            # deliveries of the same event collide instead of one silently overwriting the other.
+            doc.create({"case_id": case_id, "sequence": sequence, **entry})
+        except Exception as exc:  # noqa: BLE001
+            if type(exc).__name__ == "AlreadyExists":
+                raise ImmutableRecord(
+                    f"stage {sequence} of {case_id} is already recorded. A case has one stage at "
+                    f"each position, so this delivery has already been handled."
+                ) from exc
+            raise
+
+    def stages_for(self, case_id: str) -> list[dict[str, Any]]:
+        query = self._stage_docs.where(filter=FieldFilter("case_id", "==", case_id))
+        return sorted(
+            (doc.to_dict() for doc in query.stream()), key=lambda e: e.get("sequence", 0)
+        )
 
     def record_observation(self, observation: Observation) -> None:
         doc = self._observation_docs.document(observation.observation_id)

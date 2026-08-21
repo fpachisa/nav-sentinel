@@ -258,6 +258,28 @@ def band_for(
     return ApprovalClass.CIO_ESCALATION
 
 
+def stage_transition(
+    case_id: str, frm: str | None, to: str, *, allowed: bool, reason: str
+) -> PolicyDecision:
+    """P-008: may this case move to that stage.
+
+    Numbered alongside the others rather than folded into P-004. Approval *routing* decides who must
+    sign; this decides whether the case is even at a point where signing is the next thing that can
+    happen. Compensation before approval is refused here, and P-004 has nothing to say about it.
+
+    A denial is a decision, so it is returned and recorded like any other. A rejected external event
+    that left no trace would be indistinguishable from an event that never arrived, and "this
+    delivery was refused, for this reason" is exactly what a reviewer of a stalled case needs.
+    """
+    return PolicyDecision(
+        effect=Effect.ALLOW if allowed else Effect.DENY,
+        policy_id="P-008-STAGE-TRANSITION",
+        reason=reason,
+        resource=case_id,
+        metadata={"from": frm or "not_opened", "to": to},
+    )
+
+
 def approval_route(facts: CaseFacts, thresholds: ThresholdSet | None = None) -> PolicyDecision:
     """P-004: route a case to its approval class.
 

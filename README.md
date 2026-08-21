@@ -92,7 +92,7 @@ where token spend would otherwise run away.
 > general availability as of August 2026 — it missed its I/O target. We satisfy the
 > requirement with Gemini 3.7 Flash, which is GA and better suited to agentic workloads.
 
-### The seven enforced policies
+### The eight enforced policies
 
 | ID | Policy |
 | :--- | :--- |
@@ -103,6 +103,7 @@ where token spend would otherwise run away.
 | `P-005-UNTRUSTED-INGEST` | An agent that reads the public internet cannot opt out of Model Armor screening. |
 | `P-006-DATA-SCOPE` | A tool may only read the data domains its caller's manifest declares. |
 | `P-007-EVIDENCE-CORROBORATION` | An agent may not assert a root cause without the external corroboration its process demands. An FX verdict resting only on our own books has restated the disagreement, not explained it. The requirement is declared per capability by the process pack and evaluated once in the control plane, so a second process states its own and inherits the check. |
+| `P-008-STAGE-TRANSITION` | A case may move only along an edge its process declares. Compensation before approval is refused, and the refusal is recorded — a rejected event that left no trace would be indistinguishable from one that never arrived. |
 
 ### Why the governance is load-bearing, not decorative
 
@@ -212,7 +213,7 @@ evaluation can be scored automatically.
 make verify
 ```
 
-Lint, the diagram geometry checks, then **634 invariant tests** in about five seconds. These are
+Lint, the diagram geometry checks, then **653 invariant tests** in about five seconds. These are
 not smoke tests — they assert properties like *no agent in the fleet may post a journal entry*,
 *a units magnitude bands through the same policy as a basis-point one*, and *the transfer-agency
 package imports no fund-accounting module*.

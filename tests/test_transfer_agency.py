@@ -303,6 +303,13 @@ class TestThePlatformWasNotTouched:
         # The call counter is readable by the caller, so a span can record calls and observations
         # as the different numbers they are.
         "src/nav_sentinel/control_plane/agent_surface.py",
+        # S11. A case that spans weeks needs a stage machine, and the machine is platform while the
+        # stages are the process's -- so `casefile` validates transitions a pack declares, exactly
+        # as `band_for` derives a band from thresholds a pack declares. And `Repository` gains
+        # append-only stage history plus a recurrence lookup, because `save_case` overwrites: a
+        # stage machine on top of an overwriting store is a variable that happened to survive.
+        "src/nav_sentinel/control_plane/casefile.py",
+        "src/nav_sentinel/control_plane/repository.py",
     }
 
     def test_no_platform_file_changed_without_a_recorded_reason(self):

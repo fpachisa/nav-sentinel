@@ -177,9 +177,9 @@ quote what it cites, and `_appears_in` scans numeric literals. That is strong fo
 and **weak for small integers** — a recalled count of `3` matches almost any sentence. Say so
 rather than implying uniform strength.
 
-### 3.3 Delegation (`gateway.delegate` + P-008)
+### 3.3 Delegation (`gateway.delegate` + P-009)
 
-Permission lives on `ProcessPack`, not the manifest (blocker 1). The gateway evaluates P-008,
+Permission lives on `ProcessPack`, not the manifest (blocker 1). The gateway evaluates P-009,
 records a decision naming both agents, and calls an invoker injected by `composition` (blocker 2).
 Depth bounded at 1.
 
@@ -244,7 +244,7 @@ caveat beside a video implying a month is still the dishonest version.
 | S11.0 | Extend `ADMITTED_PLATFORM_CHANGES` per file with a reason, in the commit that adds each | 0.5 | **M** |
 | S11.1 | Stage machine + `Repository` history methods + transition decisions + `stage_history` | 3.5 | **M** |
 | S11.2 | Event route, park/resume, timeline fixture | 3.0 | **M** |
-| S11.3 | `gateway.delegate` + P-008 on `ProcessPack` + injected invoker + child spans | 3.0 | **M** |
+| S11.3 | `gateway.delegate` + P-009 on `ProcessPack` + injected invoker + child spans | 3.0 | **M** |
 | S11.4 | Recurrence index as a platform tool; one materiality rule consumes it; recurrence lever on the band | 2.5 | **M** |
 | S11.5 | `remediation_office` pack — stage capabilities, agent, prompt, thresholds in investors | 2.0 | **M** |
 | S11.6 | Discovery beat: unpublished → refused → published → routes | 0.5 | **M** |
