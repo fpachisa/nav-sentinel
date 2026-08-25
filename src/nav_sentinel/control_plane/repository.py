@@ -271,18 +271,28 @@ class FirestoreRepository(Repository):
         return [doc.to_dict() for doc in query.stream()]
 
     def record_stage(self, case_id: str, sequence: int, entry: dict[str, Any]) -> None:
+        # Imported here, like `record_decision` does: a module-scope import would pull the Google
+        # SDK into every offline run.
+        from google.cloud.exceptions import Conflict
+
         doc = self._stage_docs.document(_stage_id(case_id, sequence))
         try:
             # `create()`, not `set()`: it fails when the document exists, which is what makes two
             # deliveries of the same event collide instead of one silently overwriting the other.
             doc.create({"case_id": case_id, "sequence": sequence, **entry})
-        except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == "AlreadyExists":
-                raise ImmutableRecord(
-                    f"stage {sequence} of {case_id} is already recorded. A case has one stage at "
-                    f"each position, so this delivery has already been handled."
-                ) from exc
-            raise
+        except Conflict as exc:
+            # `Conflict`, not `type(exc).__name__ == "AlreadyExists"`. `AlreadyExists` is a
+            # *subclass* of `Conflict`, so matching on the class name re-raised a plain `Conflict`
+            # untranslated -- and `remediation_runner` catches only `ImmutableRecord`, so a
+            # duplicate Pub/Sub delivery would raise instead of being the idempotent no-op the
+            # at-least-once tests claim to guarantee. The subscription then retries forever and the
+            # dead-letter topic fills with events that were in fact handled. `record_decision`
+            # forty lines below already used `Conflict`, and that path was verified against the
+            # live database.
+            raise ImmutableRecord(
+                f"stage {sequence} of {case_id} is already recorded. A case has one stage at "
+                f"each position, so this delivery has already been handled."
+            ) from exc
 
     def stages_for(self, case_id: str) -> list[dict[str, Any]]:
         query = self._stage_docs.where(filter=FieldFilter("case_id", "==", case_id))

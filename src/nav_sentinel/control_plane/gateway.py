@@ -398,18 +398,11 @@ def delegate(capability: str, brief: CaseBrief, **kwargs: Any) -> Any:
     depth = _delegation_depth.get()
     permitted = packs.delegations_for(caller.handles_capabilities)
 
-    decision = _enforce(
-        policies.delegation(
-            caller.ref,
-            capability,
-            permitted=permitted,
-            depth=depth,
-            max_depth=MAX_DELEGATION_DEPTH,
-        )
-    )
-
     from nav_sentinel.registry import discover
 
+    # Routing is resolved *before* P-009 is evaluated, so an unroutable request records one decision
+    # rather than two. Evaluating first produced an ALLOW followed by a DENY for a single request,
+    # and anyone counting allowed delegations got a hit for one that never ran.
     agent = discover.discover_for_capability(capability)
     if agent is None:
         # Recorded, then raised. "Department X asked for something nobody publishes" is a
@@ -427,6 +420,16 @@ def delegate(capability: str, brief: CaseBrief, **kwargs: Any) -> Any:
             f"no published agent handles {capability!r}. The registry refuses to route rather "
             f"than picking whichever agent looks closest."
         )
+
+    _enforce(
+        policies.delegation(
+            caller.ref,
+            capability,
+            permitted=permitted,
+            depth=depth,
+            max_depth=MAX_DELEGATION_DEPTH,
+        )
+    )
 
     if _invoker is None:
         raise NoInvoker(
@@ -448,13 +451,12 @@ def delegate(capability: str, brief: CaseBrief, **kwargs: Any) -> Any:
             return _invoker(agent, delegated, **kwargs)
     finally:
         _delegation_depth.reset(token)
-        del decision
 
 
 def record_stage_transition(
     case_id: str, frm: str | None, to: str, *, allowed: bool, reason: str
 ) -> PolicyDecision:
-    """P-009 through the gateway, so a stage change lands in the governance log like any other.
+    """P-008 through the gateway, so a stage change lands in the governance log like any other.
 
     A lifecycle move that left no policy record would be a state change this project's whole claim
     says is impossible -- and the one an auditor of a multi-week case would ask about first.

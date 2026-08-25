@@ -49,6 +49,30 @@ FORBIDDEN_TO_A_PROCESS = (
 )
 
 
+def _named_modules(tree, *, members: bool = True):
+    """Every module a source file names, however it spells it.
+
+    Checking only `ast.ImportFrom.module` missed two spellings entirely, and the gap was total:
+    `import x.y as z` is an `ast.Import` and was never visited, while `from nav_sentinel import
+    transfer_agency` has `module == "nav_sentinel"` and matches no forbidden prefix. Measured on the
+    remediation package -- adding both left the whole suite green, so the seam rested on nothing.
+
+    `members=False` yields only real module paths, for an exact allow-list that must not reject
+    `governance.CaseBrief` for failing to be a module.
+    """
+    import ast
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            yield node.module
+            if members:
+                for alias in node.names:
+                    yield f"{node.module}.{alias.name}"
+
+
 def _case() -> RegisterCase:
     return tolerance.detect(FUND, AS_OF)[0]
 
@@ -279,6 +303,18 @@ class TestThePlatformWasNotTouched:
         )
         return [line for line in result.stdout.splitlines() if line]
 
+    #: Registry files changed *after* the second process landed, each with the reason. Adding a
+    #: process still costs nothing here -- these are later hardenings, and keeping them in a named
+    #: list is how the difference stays visible instead of the claim quietly widening.
+    ADMITTED_REGISTRY_CHANGES = {
+        # A manifest declaring another process's capability could have the registry route that
+        # capability to it, and `packs.delegations_for` unions the delegations of every pack owning
+        # any of an agent's capabilities -- so a one-line YAML edit granted an agent the right to
+        # request what its own department may not. Delegation is declared on the pack precisely so an
+        # agent's own document cannot widen it, and nothing enforced that.
+        "src/nav_sentinel/registry/discover.py",
+    }
+
     def test_adding_the_second_process_changed_nothing_under_the_registry(self):
         """The headline claim, against git rather than against a paragraph.
 
@@ -291,7 +327,10 @@ class TestThePlatformWasNotTouched:
         if changed is None:
             pytest.skip("shallow checkout: the baseline commit is not present")
         assert changed, "the diff is empty, so this test is proving nothing"
-        assert [f for f in changed if f.startswith("src/nav_sentinel/registry/")] == []
+        registry = {f for f in changed if f.startswith("src/nav_sentinel/registry/")}
+        assert registry <= self.ADMITTED_REGISTRY_CHANGES, sorted(
+            registry - self.ADMITTED_REGISTRY_CHANGES
+        )
         assert any(f.startswith("src/nav_sentinel/transfer_agency/") for f in changed)
 
     #: Platform files that changed after the second process arrived, each with the reason it had to.
@@ -351,12 +390,11 @@ class TestThePlatformWasNotTouched:
         root = Path(__file__).resolve().parents[1] / "src" / "nav_sentinel" / "transfer_agency"
         offenders: dict[str, list[str]] = {}
         for path in root.rglob("*.py"):
-            reached = []
-            for node in ast.walk(ast.parse(path.read_text())):
-                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                    FORBIDDEN_TO_A_PROCESS
-                ):
-                    reached.append(node.module or "")
+            reached = [
+                module
+                for module in _named_modules(ast.parse(path.read_text()))
+                if module.startswith(FORBIDDEN_TO_A_PROCESS)
+            ]
             if reached:
                 offenders[path.name] = reached
         assert not offenders, offenders
@@ -373,11 +411,9 @@ class TestThePlatformWasNotTouched:
         }
         root = Path(__file__).resolve().parents[1] / "src" / "nav_sentinel" / "transfer_agency"
         for path in root.rglob("*.py"):
-            for node in ast.walk(ast.parse(path.read_text())):
-                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                    "nav_sentinel.control_plane"
-                ):
-                    assert node.module in allowed, f"{path.name} imports {node.module}"
+            for module in _named_modules(ast.parse(path.read_text()), members=False):
+                if module.startswith("nav_sentinel.control_plane"):
+                    assert module in allowed, f"{path.name} imports {module}"
 
 
 class TestTheInvestigatorIsReachableAndNotJustPublished:

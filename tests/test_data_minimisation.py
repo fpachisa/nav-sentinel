@@ -69,9 +69,13 @@ class TestNoToolQuietlyStartsEmittingIdentifiers:
         assert not offenders, offenders
 
     def test_the_guard_would_notice_an_identifier(self):
-        """A guard that matches nothing passes forever. So this constructs the thing it is meant to
-        catch and confirms it is caught -- the first version of this test ended in `or True`, which
-        made its own second assertion vacuous."""
+        """A guard that matches nothing passes forever, so this puts the offending tool *in the
+        catalogue the guard reads* and confirms the guard fires.
+
+        Two earlier versions did not. The first ended in `or True`. The second built a leaky
+        `ToolSpec` and never registered it, then asserted a set intersection -- which tests
+        `set.__and__`, not the catalogue check twenty lines above it.
+        """
         leaky = packs.ToolSpec(
             "register.leaky",
             register.dealt_on,
@@ -81,7 +85,14 @@ class TestNoToolQuietlyStartsEmittingIdentifiers:
             uri_template="register://leak",
             description="a tool that projects an identifier",
         )
-        assert IDENTIFYING & set(leaky.facts) == {"holder_id"}
+        catalogue = dict(packs.catalogue())
+        catalogue["register.leaky"] = leaky
+        offenders = {
+            name: sorted(IDENTIFYING & set(spec.facts))
+            for name, spec in catalogue.items()
+            if IDENTIFYING & set(spec.facts)
+        }
+        assert offenders == {"register.leaky": ["holder_id"]}, offenders
 
 
 class TestRecalledMemoryHasNoFreeTextSurface:

@@ -133,7 +133,35 @@ class TestClaimedCoverage:
         assert in_readme <= in_code, (
             f"README names policy ids the code does not emit: {sorted(in_readme - in_code)}"
         )
+        # And the other direction, which was missing. One-sided, this caught a README naming a
+        # policy the code lacked and never a policy the code emitted that the README omitted --
+        # which is what actually happened: P-009 was enforced, cited in prose, and in no table row.
+        assert in_code <= in_readme, (
+            f"the code emits policy ids the README does not document: {sorted(in_code - in_readme)}"
+        )
         assert policies.band_for is not None
+
+    def test_the_readme_counts_the_policies_it_documents(self):
+        """The heading said eight over a table of eight while the code emitted nine, and four other
+        sentences still said seven. A count written as a word is a claim, and nothing read it."""
+        import re
+
+        words = {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        }
+        source = (ROOT / "src" / "nav_sentinel" / "control_plane" / "policies.py").read_text()
+        emitted = len(set(re.findall(r'policy_id="(P-\d+-[A-Z-]+)"', source)))
+
+        claimed = {
+            words[m.lower()]
+            for m in re.findall(r"\b(\w+) (?:enforced )?policies\b", README)
+            if m.lower() in words
+        }
+        assert claimed, "README states no policy count in words"
+        assert claimed == {emitted}, (
+            f"README states policy counts {sorted(claimed)}; the code emits {emitted}"
+        )
 
     def test_license_claim_has_a_file(self):
         assert "MIT" in README

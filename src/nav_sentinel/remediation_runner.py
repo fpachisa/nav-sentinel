@@ -17,9 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from nav_sentinel.control_plane import casefile
+from nav_sentinel.control_plane import audit, casefile, gateway
 from nav_sentinel.control_plane.casefile import Casefile
-from nav_sentinel.control_plane.governance import IllegalTransition, UnknownStage
+from nav_sentinel.control_plane.governance import (
+    CaseFacts,
+    IllegalTransition,
+    UnknownStage,
+)
 from nav_sentinel.control_plane.repository import ImmutableRecord, Repository
 from nav_sentinel.remediation_office import events
 from nav_sentinel.remediation_office.lifecycle import AWAITING, REMEDIATION
@@ -47,8 +51,18 @@ class Applied:
         return self.stage in REMEDIATION.terminal
 
 
-def apply_event(store: Repository, payload: dict[str, Any]) -> Applied:
+def apply_event(store: Repository, payload: dict[str, Any], *, facts: CaseFacts) -> Applied:
     """Apply one event to one case, or refuse and say why.
+
+    **Opens a span and persists every decision the event produced.** Neither was true at first, and
+    the omission emptied the section's whole deliverable: `telemetry.record_policy_decision` returns
+    silently when no span is recording, so each P-008 transition reached a per-context list and
+    nothing else. A 28-day, seven-delivery case left one span and zero persisted decisions -- stage
+    history survived, and *why* the case moved did not. The pattern here is the one
+    `pipeline/cycle_runner.py` already uses: mark the log, do the work, write what followed.
+
+    `facts` is required rather than optional. An optional audit record is one that is absent
+    wherever a caller forgot, which is exactly the failure this repairs.
 
     Refusals are exceptions rather than return values because each has a different correct response
     from the caller: an unknown event or an illegal transition is permanently undeliverable, while a
@@ -58,6 +72,29 @@ def apply_event(store: Repository, payload: dict[str, Any]) -> Applied:
     case_id = payload.get("case_id")
     if not isinstance(case_id, str) or not case_id:
         raise UnknownCase("event carries no case_id")
+
+    # One span per delivered event, so seven deliveries leave seven traces joined by
+    # `nav.case.id` -- OTel cannot append to a finished trace, so a single trace across a case
+    # resumed over weeks is not a thing that exists.
+    # Marked *before* the span opens, because `case_trace` records the P-004 approval-route
+    # decision on the way in. Marking inside excluded it, so the band derivation -- the one
+    # governance record that says who must sign -- was persisted for no event.
+    marker = f"{case_id}|{payload.get('event')}"
+    gateway.mark_decisions(marker)
+    with audit.case_trace(facts) as (span, trace_id, _band):
+        try:
+            return _apply(store, payload, case_id)
+        finally:
+            # In a `finally`, so a *refused* event still persists the denial that refused it. A
+            # rejected delivery that left no durable trace is indistinguishable from one that
+            # never arrived, which is the question a stalled case raises first.
+            for sequence, decision in enumerate(gateway.decisions_since(marker)):
+                store.record_decision(case_id, trace_id, sequence, decision)
+            audit.close_case(span, facts)
+
+
+def _apply(store: Repository, payload: dict[str, Any], case_id: str) -> Applied:
+    """The transition itself, inside the span the caller opened."""
 
     event = payload.get("event")
     if not isinstance(event, str):

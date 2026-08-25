@@ -42,22 +42,38 @@ def prior_errors(
     error of a quarter would report a prior count of one and be assessed as a repeat -- the kind of
     off-by-one that makes a governance threshold fire on the wrong side.
 
-    Dates are compared as ISO strings. The store holds them that way, string ordering on ISO dates
-    is chronological, and parsing them here would add a failure mode to a comparison that does not
-    need one.
+    **Dates are parsed, not compared as strings.** The earlier version compared ISO text on the
+    argument that ordering is chronological -- true only for zero-padded dates. Measured against a
+    boundary of 2026-07-01, cases stamped `2026-6-15` and `2026-5-02` both counted as *after* it,
+    because `'6' > '0'`: two errors from the previous quarter selected the stricter threshold. That
+    traded a loud failure mode for a silent wrong answer on a governance input, which is the wrong
+    direction. A case whose `as_of` cannot be parsed is refused rather than dropped, because a
+    silent undercount reads as a clean quarter.
     """
     try:
         boundary = date.fromisoformat(since)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"`since` must be an ISO date, got {since!r}") from exc
 
-    cases = store.cases_by_recurrence(recurrence_key_for(fund_id))
-    counted = [
-        case
-        for case in cases
-        if str(case.get("as_of", "")) >= boundary.isoformat()
-        and case.get("case_id") != excluding
-    ]
+    counted = []
+    unparseable = []
+    for case in store.cases_by_recurrence(recurrence_key_for(fund_id)):
+        if case.get("case_id") == excluding:
+            continue
+        try:
+            when = date.fromisoformat(str(case.get("as_of", "")))
+        except ValueError:
+            unparseable.append(str(case.get("case_id", "?")))
+            continue
+        if when >= boundary:
+            counted.append(case)
+
+    if unparseable:
+        raise ValueError(
+            f"case(s) {sorted(unparseable)} carry an unparseable `as_of`, so the recurrence count "
+            f"for {fund_id} cannot be established. Dropping them would report a quieter quarter "
+            f"than the record holds."
+        )
     return {
         "prior_errors": len(counted),
         "since": boundary.isoformat(),

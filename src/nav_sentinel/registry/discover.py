@@ -85,6 +85,21 @@ def _validate_manifest(manifest: AgentManifest) -> None:
             f"{manifest.ref} claims drafting authority. Only the remediation agent drafts; "
             f"investigators report causes."
         )
+    owners = {
+        owner.key
+        for capability in manifest.handles_capabilities
+        if (owner := packs.process_of(capability)) is not None
+    }
+    if len(owners) > 1:
+        raise PublicationRefused(
+            f"{manifest.ref} declares capabilities owned by more than one process "
+            f"({sorted(owners)}). An agent belongs to one department. Two consequences otherwise, "
+            f"both reached by a one-line YAML edit: the registry may route another process's "
+            f"capability to this agent, and `packs.delegations_for` unions the delegations of every "
+            f"pack owning any of its capabilities -- so a manifest could grant itself the right to "
+            f"request what its own department may not. Delegation is declared on the pack precisely "
+            f"so an agent's own document cannot widen it, and that was enforced by nothing."
+        )
     if not manifest.allowed_tools:
         raise PublicationRefused(
             f"{manifest.ref} declares no tools and could never do any work."

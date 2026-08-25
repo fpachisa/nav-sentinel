@@ -35,14 +35,59 @@ from nav_sentinel import remediation_runner as runner
 from nav_sentinel.control_plane import casefile, gateway, identity
 from nav_sentinel.memory import recurrence
 from nav_sentinel.registry import discover
-from nav_sentinel.remediation_office import materiality
-from nav_sentinel.remediation_office.lifecycle import AWAITING
+from nav_sentinel.remediation_office import events, materiality
+from nav_sentinel.remediation_office.lifecycle import AWAITING, REMEDIATION
 from nav_sentinel.remediation_office.models import NavErrorCase
 
 TIMELINE = Path(__file__).resolve().parents[2] / "fixtures" / "data" / "remediation_timeline.json"
 
 OFFICER = "remediation-officer"
 IMPACT_CAPABILITY = "ta.dealing_impact"
+
+
+def _resume(
+    store: Any, case: NavErrorCase, console: Console
+) -> tuple[NavErrorCase, set[str]] | None:
+    """Pick a case up where a previous invocation left it, or refuse if it is finished.
+
+    Returns None when there is nothing to do. An existing case is **resumed**, not refused: the
+    first version refused every existing case and blamed append-only history, which was wrong twice
+    -- nothing about append-only prevents advancing from sequence 1 to 2, and the reasoning came
+    from `open_case` colliding on sequence 0, a fact about *opening* applied to every stage.
+    Refusing to resume a parked case is refusing the thing this section is about.
+
+    The affected population is read back from the case document, not recomputed and not assumed
+    zero. Skipping the impact event on a resume left it unknown, and unknown fell through as zero --
+    which closes a material error with nothing paid. That is the same wrong answer the population
+    selector produced, arriving by a different route.
+    """
+    existing = casefile.load(store, case.case_id)
+    if existing is None:
+        return case, set()
+
+    if existing.stage in REMEDIATION.terminal:
+        console.print(
+            f"  [yellow]{case.case_id} is already [bold]{existing.stage}[/bold] after "
+            f"{len(existing.history)} transitions. A finished case has nowhere to go; re-run with "
+            f"--case-id to walk a new one.[/yellow]"
+        )
+        return None
+
+    stored = store.load_case(case.case_id) or {}
+    population = stored.get("affected_investors")
+    if population is not None:
+        case = case.model_copy(update={"affected_investors": int(population)})
+    console.print(
+        f"  [dim]resuming {case.case_id} from [bold]{existing.stage}[/bold] — "
+        f"{len(existing.history)} transitions already recorded"
+        + (
+            f", {population} affected investors read back from the case document"
+            if population is not None
+            else ", affected population not yet established"
+        )
+        + "[/dim]"
+    )
+    return case, {entry["to"] for entry in existing.history}
 
 
 def _seed_history(store: Any, timeline: dict, console: Console) -> None:
@@ -104,31 +149,32 @@ def main() -> None:
             border_style="yellow",
         )
     )
-    # A closed case cannot be reopened: stage history is append-only and `open_case` collides on
-    # the existing sequence 0. Refusing with the case's actual stage is more use than a traceback,
-    # and re-running with a new id is the honest way to replay -- deleting history to make a demo
-    # repeatable would undermine the one claim this section is making.
-    existing = casefile.load(store, case.case_id)
-    if existing is not None:
-        console.print(
-            f"  [yellow]{case.case_id} already exists at stage "
-            f"[bold]{existing.stage}[/bold] with {len(existing.history)} recorded "
-            f"transitions.[/yellow]"
-        )
-        console.print(
-            "  [dim]Stage history is append-only, so this case cannot be replayed. Re-run with "
-            "--case-id to walk a new one.[/dim]"
-        )
+    # An existing case is **resumed**, not refused. Only a finished one has nowhere to go.
+    #
+    # The first version refused every existing case and said append-only history was the reason,
+    # which was wrong twice: nothing about append-only prevents advancing from sequence 1 to 2, and
+    # the reasoning came from `open_case` colliding on sequence 0 -- a fact about opening, applied to
+    # every stage. Resuming a parked case is the whole point of the section, so refusing to do it was
+    # refusing the demo.
+    resumed = _resume(store, case, console)
+    if resumed is None:
         _print_summary(console, store, case)
         return
-
-    _seed_history(store, timeline, console)
+    case, already = resumed
+    if not already:
+        _seed_history(store, timeline, console)
 
     impact: dict[str, Any] | None = None
     assessment: materiality.Assessment | None = None
 
     for entry in timeline["events"]:
         event = entry["event"]
+        if events.stage_for(event) in already:
+            # Already recorded on a previous invocation. Skipped rather than re-applied: the
+            # transition is not legal from where the case now stands, and `apply_event`'s duplicate
+            # no-op only covers the case sitting *at* that stage.
+            console.print(f"  [dim]day {entry['day']:>2}  skipped {event} — already recorded[/dim]")
+            continue
         payload: dict[str, Any] = {
             "case_id": case.case_id,
             "event": event,
@@ -151,6 +197,7 @@ def main() -> None:
             if impact is not None:
                 case = case.model_copy(update={"affected_investors": impact["holders"]})
                 payload["evidence"] = impact["citations"]
+                _persist_observations(store, impact.get("observations"))
 
         # The remediation office establishes whether this fund has a pattern; the threshold
         # comparison is arithmetic.
@@ -170,7 +217,7 @@ def main() -> None:
                 break
             payload["note"] = assessment.rationale
 
-        applied = runner.apply_event(store, payload)
+        applied = runner.apply_event(store, payload, facts=case.to_facts())
         _print_event(console, entry, applied)
 
         # Persist the case document once impact is known, so the *next* error's recurrence count
@@ -190,7 +237,9 @@ def main() -> None:
                         "case_id": case.case_id,
                         "event": "closed_immaterial",
                         "note": assessment.rationale,
+                        "occurred_on": entry["occurred_on"],
                     },
+                    facts=case.to_facts(),
                 )
                 break
 
@@ -207,7 +256,7 @@ def _ask_transfer_agency(case: NavErrorCase, console: Console) -> dict[str, Any]
             console.print(f"  [yellow]{exc}[/yellow]")
             return None
 
-    holders = _holder_count(observations)
+    holders = _holder_count(observations, dealing_date=case.as_of.isoformat())
     console.print(
         Panel(
             Text(
@@ -221,7 +270,21 @@ def _ask_transfer_agency(case: NavErrorCase, console: Console) -> dict[str, Any]
     return {
         "holders": holders,
         "citations": [c.observation_id for c in verdict.citations],
+        "observations": observations,
     }
+
+
+def _persist_observations(store: Any, observations: Any) -> None:
+    """Write an agent's observations to the store.
+
+    Without this a citation resolves only inside the process that produced it: `investigate` returns
+    its `ObservationStore` to the caller and the caller dropped it, so a verdict's evidence vanished
+    the moment the run ended -- on the one path whose claim is that the trail outlives the process.
+    """
+    if observations is None:
+        return
+    for observation in observations.as_mapping().values():
+        store.record_observation(observation)
 
 
 def _ask_without_a_model(case: NavErrorCase, console: Console) -> dict[str, Any]:
@@ -239,19 +302,35 @@ def _ask_without_a_model(case: NavErrorCase, console: Console) -> dict[str, Any]
     return {"holders": int(result["holders"]), "citations": []}
 
 
-def _holder_count(observations: Any) -> int:
-    """The holder count from the observations, not from the model's prose.
+class ImpactNotEstablished(RuntimeError):
+    """No observation reports dealing on the date whose NAV was misstated."""
 
-    A number parsed out of a sentence is a number nobody checked. The projection recorded it as a
-    fact, so that is what the assessment reads.
+
+def _holder_count(observations: Any, *, dealing_date: str) -> int:
+    """The holder count for **the date whose NAV was misstated**, from the observations.
+
+    Matched on `trade_date`, not "the first observation carrying a holders fact". That earlier
+    version made dict insertion order load-bearing on a governance input, and the reporting agent's
+    own prompt invites it to probe more than one date. Measured: an agent that checked 2026-08-13
+    first (nobody dealt) and 2026-08-17 second (four holders) yielded **0** -- and 0 affected
+    investors closes a material NAV error with nothing paid while four investors were harmed.
+
+    Raises rather than returning 0 when no observation covers the date. Zero is a real answer --
+    nobody dealt -- and "I never looked" must not be reported as it.
     """
     # `as_mapping().values()`, not the store itself: iterating an `ObservationStore` yields
     # observation *ids*, so a loop over it reads strings and every `.observed` lookup raises.
     for observation in observations.as_mapping().values():
+        if observation.observed.get("trade_date") != dealing_date:
+            continue
         recorded = observation.observed.get("holders")
-        if recorded:
+        # `is None`, not falsiness: "0" is a genuine nil return and must not read as absent.
+        if recorded is not None:
             return int(Decimal(str(recorded)))
-    return 0
+    raise ImpactNotEstablished(
+        f"no observation reports dealing on {dealing_date}, so the affected population is "
+        f"unknown. Reporting it as zero would close a material error with nothing paid."
+    )
 
 
 class AssessmentDisputed(RuntimeError):
@@ -263,17 +342,23 @@ class AssessmentDisputed(RuntimeError):
     """
 
 
-def _cited_count(verdict: Any, observations: Any) -> int | None:
-    """The prior-error count the officer actually **cited**, from the observations it named.
+def _cited_count(verdict: Any, observations: Any, *, since: str) -> int | None:
+    """The prior-error count the officer cited **for the window under assessment**.
 
-    Read from the cited observation rather than parsed out of the sentence. A number lifted from
-    prose is a number nobody checked, and the projection recorded this one as a fact precisely so
-    it could be compared against the record.
+    Matched on `since` for the same reason `_holder_count` matches on the dealing date: an agent
+    free to query more than one window would otherwise have whichever observation happened to be
+    first decide a governance threshold. Measured on the earlier version: a count of 7 from an
+    unrelated window where the quarter held 3, which fires a spurious dispute and parks the case.
     """
     cited = {c.observation_id for c in verdict.citations}
     for observation_id, observation in observations.as_mapping().items():
-        if observation_id in cited and "prior_errors" in observation.observed:
-            return int(Decimal(str(observation.observed["prior_errors"])))
+        if observation_id not in cited:
+            continue
+        if observation.observed.get("since") != since:
+            continue
+        recorded = observation.observed.get("prior_errors")
+        if recorded is not None:
+            return int(Decimal(str(recorded)))
     return None
 
 
@@ -321,11 +406,13 @@ def _assess(
             )
         )
 
+        _persist_observations(store, observations)
+
         if not verdict.asserts_a_cause:
             raise AssessmentDisputed(
                 f"the officer established no count: {verdict.unresolved[:200]}"
             )
-        claimed = _cited_count(verdict, observations)
+        claimed = _cited_count(verdict, observations, since=str(counted["since"]))
         if claimed is None:
             raise AssessmentDisputed(
                 "the officer cited no observation carrying a prior-error count, so its answer "

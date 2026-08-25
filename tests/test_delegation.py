@@ -278,16 +278,149 @@ class TestObservationsAreReadAsObjectsNotIds:
     so every `.observed` lookup raises -- which is how the walkthrough's holder count was written
     against a type it never received."""
 
-    def test_iterating_the_store_yields_strings(self):
-        from nav_sentinel.control_plane.observations import ObservationStore
+    @staticmethod
+    def _store_with(*facts: dict[str, str]):
+        from datetime import UTC, datetime
+
+        from nav_sentinel.control_plane.observations import Observation, ObservationStore
 
         store = ObservationStore()
-        assert all(isinstance(item, str) for item in store) or len(store) == 0
+        for index, observed in enumerate(facts):
+            store.record(
+                Observation(
+                    observation_id=f"OBS-order{index:011d}",
+                    case_id="CASE-ORDER",
+                    trace_id="d8bc651a64bdcd4eac21517327b02b85",
+                    agent_ref="dealing-impact-reporter@1.0.0",
+                    tool="register.dealt_on",
+                    args=f"trade_date={observed.get('trade_date')}",
+                    digest=f"{index:016d}",
+                    retrieved_at=datetime(2026, 8, 19, 9, index, tzinfo=UTC),
+                    source="share_register",
+                    observed=observed,
+                    summary="",
+                )
+            )
+        return store
 
-    def test_the_walkthrough_reads_the_mapping(self):
-        import inspect
+    def test_iterating_the_store_yields_ids_not_observations(self):
+        """Asserted against a *populated* store. The earlier version ran on an empty one with an
+        `or len(store) == 0` escape, so changing `__iter__` to yield values kept it green."""
+        store = self._store_with({"holders": "4", "trade_date": "2026-08-17"})
+        assert len(store) == 1
+        assert all(isinstance(item, str) for item in store)
 
+    def test_the_population_is_selected_by_date_not_by_insertion_order(self):
+        """The blocker this replaces a source-text assertion for.
+
+        The old test asserted the string `"as_mapping()"` appeared in the function's source, which a
+        constant satisfies. Measured on the old implementation: an agent that probed 2026-08-13
+        first (nobody dealt) and 2026-08-17 second (four holders) yielded **0** -- and zero affected
+        investors closes a material NAV error with nothing paid.
+        """
         from nav_sentinel import remediation_cli
 
-        source = inspect.getsource(remediation_cli._holder_count)
-        assert "as_mapping()" in source, "reading the store directly yields ids, not observations"
+        store = self._store_with(
+            {"holders": "0", "trade_date": "2026-08-13"},
+            {"holders": "4", "trade_date": "2026-08-17"},
+        )
+        assert remediation_cli._holder_count(store, dealing_date="2026-08-17") == 4
+        assert remediation_cli._holder_count(store, dealing_date="2026-08-13") == 0
+
+    def test_a_genuine_nil_return_is_not_read_as_missing(self):
+        """`if recorded:` treated "0" as absent. Currently masked because observed values are
+        strings, so `"0"` is truthy -- one change to the projection type and a real nil return
+        silently becomes "I never looked"."""
+        from nav_sentinel import remediation_cli
+
+        store = self._store_with({"holders": "0", "trade_date": "2026-08-17"})
+        assert remediation_cli._holder_count(store, dealing_date="2026-08-17") == 0
+
+    def test_an_unexamined_date_raises_rather_than_reporting_zero(self):
+        """Zero is a real answer -- nobody dealt. "I never looked" must not be reported as it."""
+        from nav_sentinel import remediation_cli
+
+        store = self._store_with({"holders": "4", "trade_date": "2026-08-17"})
+        with pytest.raises(remediation_cli.ImpactNotEstablished):
+            remediation_cli._holder_count(store, dealing_date="2026-08-18")
+
+
+class TestAManifestCannotWidenItsOwnDelegations:
+    """A one-line YAML edit was enough to defeat the whole design.
+
+    `packs.delegations_for` unions the delegations of every pack owning *any* of an agent's declared
+    capabilities, and nothing checked that an agent's capabilities belong to its own process. So a
+    fund-accounting investigator that also declared `rem.materiality` inherited the remediation
+    office's right to request share-register dealing counts -- data P-006 denies it directly, and
+    which it would receive because delegation runs the *sub-agent's* allowlist. `delegations` lives
+    on the pack precisely so an agent's own document cannot widen it; that was enforced by nothing.
+    """
+
+    @staticmethod
+    def _greedy():
+        from nav_sentinel.registry import discover
+        from nav_sentinel.registry.models import AgentManifest
+
+        base = discover.get("fx-rates-investigator").model_dump()
+        base.update(version="2.0.0", handles_capabilities=("nav.fx_rate", "rem.materiality"))
+        return AgentManifest.model_validate(base)
+
+    def test_publication_refuses_a_manifest_spanning_two_processes(self):
+        from nav_sentinel.registry import discover
+
+        with pytest.raises(discover.PublicationRefused) as refused:
+            discover.validate_fleet((self._greedy(),))
+        assert "more than one process" in str(refused.value)
+
+    def test_the_capability_it_reached_for_is_one_it_would_have_inherited(self):
+        """Without this the test could pass against a capability that grants nothing."""
+        greedy = self._greedy()
+        inherited = packs.delegations_for(greedy.handles_capabilities)
+        assert IMPACT in inherited, (
+            "the fabricated manifest inherits no delegation, so refusing it proves nothing"
+        )
+        assert IMPACT not in packs.delegations_for(("nav.fx_rate",))
+
+    def test_every_published_agent_belongs_to_exactly_one_process(self):
+        from nav_sentinel.registry import discover
+
+        for manifest in discover.all_agents():
+            owners = {
+                owner.key
+                for capability in manifest.handles_capabilities
+                if (owner := packs.process_of(capability)) is not None
+            }
+            assert len(owners) <= 1, (manifest.ref, sorted(owners))
+
+
+class TestAnUnroutableRequestRecordsOneDecision:
+    """It recorded two: an ALLOW from P-009 followed by a DENY when routing failed. Anyone counting
+    allowed delegations got a hit for a delegation that never ran."""
+
+    def test_exactly_one_decision_for_an_unroutable_capability(self, invoked):
+        rem = packs.process_of("rem.materiality")
+        widened = packs.ProcessPack(
+            **{**rem.__dict__, "delegations": ("rem.regulator_notification",)}
+        )
+        packs._packs[rem.key] = widened
+        gateway.mark_decisions("one-decision")
+        try:
+            with identity.acting_as(OFFICER), pytest.raises(gateway.UnroutableCapability):
+                gateway.delegate("rem.regulator_notification", brief())
+        finally:
+            packs._packs[rem.key] = rem
+
+        recorded = [
+            d for d in gateway.decisions_since("one-decision") if d.policy_id == "P-009-DELEGATION"
+        ]
+        assert len(recorded) == 1, [(d.effect.value, d.reason[:40]) for d in recorded]
+        assert recorded[0].effect.value == "deny"
+
+    def test_an_allowed_delegation_still_records_its_allow(self, invoked):
+        gateway.mark_decisions("still-allows")
+        with identity.acting_as(OFFICER):
+            gateway.delegate(IMPACT, brief())
+        recorded = [
+            d for d in gateway.decisions_since("still-allows") if d.policy_id == "P-009-DELEGATION"
+        ]
+        assert [d.effect.value for d in recorded] == ["allow"]
