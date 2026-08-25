@@ -16,8 +16,16 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Dependencies first, so a source change does not reinstall them.
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir . && pip install --no-cache-dir "uvicorn[standard]>=0.32.0"
+#
+# **Installed under constraints, and that is the point.** Without them pip resolved whatever was
+# newest at build time, so the artefact that shipped was not the artefact that was tested: one build
+# picked up `google-api-core` 2.35.0 against 2.34.0 locally, and Firestore *queries* began failing
+# with `Invalid database id %28default%29` while document reads carried on working. The exception
+# desk loaded; only the pages that run a query returned 500. A smoke test that fetches one document
+# would have passed.
+COPY pyproject.toml constraints.txt ./
+RUN pip install --no-cache-dir -c constraints.txt . \
+    && pip install --no-cache-dir -c constraints.txt "uvicorn[standard]>=0.32.0"
 
 COPY src/ ./src/
 # The books and records travel with the image because this deployment reads the committed

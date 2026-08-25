@@ -7,7 +7,15 @@ dependencies = [
     "google-adk>=2.7.1",
     "google-genai>=2.18.0",
     "google-cloud-aiplatform>=1.164.0",
-    "google-cloud-firestore>=2.19.0",
+    # Upper bound, and the reason is a deployed-only failure. The container resolved 2.29.0 while
+    # this project is tested against 2.28.1, and 2.29 rejects the default database on a *query*:
+    # `InvalidArgument: 400 Invalid database id %28default%29`. Document reads still worked, so the
+    # exception desk loaded and only the pages that run a query returned 500 -- which is the worst
+    # shape of failure, since a smoke test that fetches one document passes.
+    #
+    # The general lesson is bigger than the bound: an unpinned dependency means the artefact that
+    # was deployed is not the artefact that was tested, and the difference surfaces in production.
+    "google-cloud-firestore>=2.19.0,<2.29.0",
     "google-cloud-pubsub>=2.23.0",
     "google-cloud-modelarmor>=0.1.0",
     "google-cloud-trace>=1.13.0",
