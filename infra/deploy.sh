@@ -22,6 +22,13 @@ RUNTIME_SA="nav-runtime@${PROJECT}.iam.gserviceaccount.com"
 PUSH_SA="nav-pubsub-push@${PROJECT}.iam.gserviceaccount.com"
 TOPIC="nav-exceptions"
 DLQ_TOPIC="nav-exceptions-dlq"
+# Signs the exception desk's session cookie. Generated per deploy rather than committed: a signing
+# key in a public repository is every session forgeable by anyone who reads it. Rotating it on each
+# deploy signs analysts out, which is the correct trade for a key nobody has to store.
+SESSION_SECRET="$(openssl rand -hex 32)"
+# `NAV_REPOSITORY` stated explicitly even though the server derives it from `NAV_APPROVALS`: a
+# deployment writing its audit trail to memory looks identical to a healthy one from outside, so the
+# intent is named rather than inferred. `/readyz` now refuses to report ready unless it is durable.
 
 say() { printf "\n\033[1m== %s\033[0m\n" "$1"; }
 
@@ -61,7 +68,7 @@ gcloud run deploy "$SERVICE" \
   --project "$PROJECT" \
   --service-account "$RUNTIME_SA" \
   --no-allow-unauthenticated \
-  --update-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,NAV_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,NAV_APPROVALS=firestore,NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
+  --update-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,NAV_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,NAV_APPROVALS=firestore,NAV_REPOSITORY=firestore,NAV_SESSION_SECRET=${SESSION_SECRET},NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
   --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \

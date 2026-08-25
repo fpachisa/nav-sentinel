@@ -205,6 +205,7 @@ def health() -> dict:
 @app.get("/readyz")
 def readyz() -> dict:
     """Readiness: the registry loaded and at least one process is hosted."""
+    from nav_sentinel import composition
     from nav_sentinel.control_plane import packs
     from nav_sentinel.registry import discover
 
@@ -212,7 +213,29 @@ def readyz() -> dict:
     agents = len(discover.all_agents())
     if not processes or not agents:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "registry not loaded")
-    return {"status": "ready", "processes": processes, "agents": agents}
+    # The store is named in the readiness answer, so "is this deployment actually persisting?" is a
+    # question anyone can ask the service instead of inferring from an env var. A service holding its
+    # audit trail in a dict that vanishes when the instance scales down would look identical to a
+    # healthy one from the outside.
+    backend = type(composition.store()).__name__
+    intended = os.environ.get("NAV_REPOSITORY") or os.environ.get("NAV_APPROVALS") or "memory"
+    durable = backend == "FirestoreRepository"
+    # The mismatch, not the backend. An offline run is legitimately in memory; a deployment that
+    # *asked* for Firestore and got memory is the dangerous state, and it looks identical to a
+    # healthy service from the outside.
+    if intended == "firestore" and not durable:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"configured for firestore and running {backend}: this service would write its audit "
+            f"trail to memory and lose it when the instance scales down",
+        )
+    return {
+        "status": "ready",
+        "processes": processes,
+        "agents": agents,
+        "repository": backend,
+        "capabilities": len(discover.coverage()),
+    }
 
 
 @app.post("/pubsub/exceptions", status_code=status.HTTP_204_NO_CONTENT)

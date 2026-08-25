@@ -15,6 +15,11 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
     "opentelemetry-resourcedetector-gcp>=1.7.0a0",
     "fastapi>=0.115.0",
+    # Explicit, not inherited. FastAPI needs it for `Form(...)` -- the exception desk's sign-in and
+    # approval posts -- but only declares it under its `standard` extra, which this project does not
+    # install. It was present locally as somebody else's transitive dependency, which would have
+    # held right up until the container was built without it and the service failed at import.
+    "python-multipart>=0.0.18",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.6.0",
