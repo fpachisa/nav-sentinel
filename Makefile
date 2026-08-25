@@ -2,7 +2,7 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: ta remediation help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
+.PHONY: ta remediation console help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
 # `eval` collides with the eval/ directory, so without .PHONY make reports it up to date and
 # silently runs nothing -- a target that appears to succeed while doing no work.
 
@@ -57,6 +57,9 @@ investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike 
 
 ta:  ## one transfer-agency cycle: the same investigator, a different process
 	$(PY) -m nav_sentinel.ta_cli
+
+console: ## Serve the read-only operations console at http://127.0.0.1:8080/console
+	NAV_REPOSITORY=$${NAV_REPOSITORY:-firestore} .venv/bin/uvicorn nav_sentinel.server:app --port 8080
 
 remediation: ## One NAV error remediation: 28 days, four departments, two model calls
 	$(PY) -m nav_sentinel.remediation_cli
