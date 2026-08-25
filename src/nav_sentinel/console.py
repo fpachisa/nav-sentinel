@@ -42,6 +42,10 @@ CSS = """
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--ink:#E7ECF2;--soft:#A9B4C0;
 --faint:#78838F;--paper:#12161B;--sunk:#171C22;--rule:#2A323B;--accent:#7FB3D8;--wash:#182634;
 --deny:#E08B84;--ok:#7FC0A8}}
+/* Again for an explicit choice, so a viewer's dark toggle wins over a light OS. A palette defined
+   only inside the media query never applies to a viewer who has chosen dark on a light system. */
+:root[data-theme=dark]{--ink:#E7ECF2;--soft:#A9B4C0;--faint:#78838F;--paper:#12161B;--sunk:#171C22;
+--rule:#2A323B;--accent:#7FB3D8;--wash:#182634;--deny:#E08B84;--ok:#7FC0A8}
 *{box-sizing:border-box}
 body{margin:0;background:var(--sunk);color:var(--ink);
 font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
@@ -224,22 +228,29 @@ def _governance(store: Any, case_id: str) -> str:
         # decided nothing.
         effect = str(record.get("nav.policy.effect", ""))
         denied = effect == "deny"
+        # Trace, not agent. A stage transition and a band derivation belong to a *case* rather
+        # than to an agent, so `nav.agent.ref` was absent on every row and the column was a
+        # colonnade of dashes. The trace is the useful thing there: it shows one per delivered
+        # event, which is also why the sequence beside it restarts.
+        trace = str(record.get("trace_id") or "")
         rows.append([
+            f'<span class="mono muted">{_e(trace[:8]) or "—"}</span>',
             f'<span class="mono">{_e(record.get("sequence"))}</span>',
             f'<code>{_e(record.get("nav.policy.id"))}</code>',
             f'<span class="pill {"deny" if denied else "allow"}">{_e(effect.upper())}</span>',
-            f'<code>{_e(record.get("nav.agent.ref") or "—")}</code>',
             f'<code>{_e(record.get("nav.policy.resource") or "—")}</code>',
             _e(record.get("nav.policy.reason")),
         ])
     denials = sum(1 for r in decisions if str(r.get("nav.policy.effect")) == "deny")
     return (
         "<h2>Governance</h2>"
-        f'<p class="sub">{len(decisions)} recorded decisions, <strong>{denials}</strong> of them '
-        "refusals. Denials are kept because a refusal that left no trace is indistinguishable from "
-        "a request that was never made.</p>"
+        f'<p class="sub">{len(decisions)} recorded decisions across '
+        f"<strong>{len({d.get('trace_id') for d in decisions})}</strong> traces, "
+        f"<strong>{denials}</strong> of them refusals. One trace per delivered event, so the "
+        "sequence restarts within each. Denials are kept because a refusal that left no trace is "
+        "indistinguishable from a request that was never made.</p>"
         + _table(
-            ["#", "Policy", "Effect", "Agent", "Resource", "Reason"],
+            ["Trace", "#", "Policy", "Effect", "Resource", "Reason"],
             rows,
             "no policy decisions recorded for this case",
         )

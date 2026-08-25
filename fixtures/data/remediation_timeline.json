@@ -1,5 +1,5 @@
 {
-  "_comment": "One remediation, twenty-eight days, seven deliveries. Business dates are weeks apart and are what every figure is computed from; wall-clock is compressed when this is replayed. Every event falls on a business day. Nothing here is a transition -- each event names a destination and the lifecycle decides whether the case may go there. `error_bps` sits deliberately between the isolated (50) and recurring (20) materiality thresholds, so the outcome depends on the prior errors below and on nothing else.",
+  "_comment": "One remediation, twenty-eight days, seven deliveries. Business dates are weeks apart and are what every figure is computed from; wall-clock is compressed when this is replayed. Every event falls on a business day. Nothing here is a transition -- each event names a destination and the lifecycle decides whether the case may go there. `error_bps` sits deliberately between the isolated (50) and recurring (20) materiality thresholds, so the outcome depends on the prior errors below and on nothing else. One event is deliberately out of order: a payment release arriving before approval. The lifecycle has no edge from awaiting_approval to compensation_in_flight, so it is refused, the denial is recorded, and the case does not move.",
   "case_id": "CASE-REM-MERID-GEF-2026-08-17",
   "fund_id": "MERID-GEF",
   "nav_date": "2026-08-17",
@@ -9,7 +9,7 @@
       "occurred_on": "2026-08-18",
       "event": "error_detected",
       "department": "fund accounting",
-      "note": "published NAV for 2026-08-17 misstated by 285.57bps: stale USD rate applied to the ADR sleeve",
+      "note": "published NAV for 2026-08-17 misstated by 30bps: stale USD rate applied to the ADR sleeve",
       "evidence": []
     },
     {
@@ -35,6 +35,14 @@
       "department": "remediation office",
       "note": "compensation plan drafted; requires four eyes",
       "evidence": []
+    },
+    {
+      "day": 2,
+      "occurred_on": "2026-08-20",
+      "event": "compensation_started",
+      "department": "transfer agency",
+      "note": "payment file released early by the settlement system, before approval was recorded",
+      "expect": "refused"
     },
     {
       "day": 6,

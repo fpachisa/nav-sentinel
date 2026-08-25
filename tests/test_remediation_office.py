@@ -25,6 +25,11 @@ TIMELINE = json.loads(
     .read_text()
 )
 CASE = TIMELINE["case_id"]
+#: Events the lifecycle is expected to refuse. One is deliberately out of order -- a payment release
+#: arriving before approval -- because real settlement systems fire early and the governance record
+#: should show a refusal rather than only allows.
+REFUSED = [e for e in TIMELINE["events"] if e.get("expect") == "refused"]
+ADVANCING = [e for e in TIMELINE["events"] if e.get("expect") != "refused"]
 
 
 @pytest.fixture
@@ -108,26 +113,46 @@ class TestTheVocabularyAndTheLifecycleAgree:
 
 class TestOneCaseWalksTheWholeTimeline:
     def test_the_recorded_timeline_closes_the_case(self, store):
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             applied = _apply(store, entry["event"], note=entry["note"])
         assert applied.closed
         assert applied.stage == "closed"
 
-    def test_the_history_records_one_entry_per_delivered_event(self, store):
-        for entry in TIMELINE["events"]:
+    def test_the_history_records_one_entry_per_accepted_event(self, store):
+        """Refused deliveries leave a decision, not a stage. Counting them here would assert that a
+        refusal moved the case."""
+        for entry in ADVANCING:
             _apply(store, entry["event"])
-        assert len(store.stages_for(CASE)) == len(TIMELINE["events"])
+        assert len(store.stages_for(CASE)) == len(ADVANCING)
+
+    def test_the_out_of_order_event_is_refused_and_the_case_does_not_move(self, store):
+        """The demo's governance beat, and a real failure mode: a settlement system releasing a
+        payment file before anyone approved."""
+        assert REFUSED, "the timeline no longer contains a refused delivery"
+        for entry in ADVANCING:
+            if entry["event"] == "approval_recorded":
+                break
+            _apply(store, entry["event"])
+        before = len(store.stages_for(CASE))
+        for entry in REFUSED:
+            with pytest.raises(IllegalTransition):
+                _apply(store, entry["event"])
+        assert len(store.stages_for(CASE)) == before
+        denials = [
+            d for d in store.decisions_for(CASE) if d.get("nav.policy.effect") == "deny"
+        ]
+        assert denials, "the refusal was not persisted"
 
     def test_every_transition_left_a_policy_decision(self, store):
         gateway.mark_decisions("timeline")
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             _apply(store, entry["event"])
         stage_decisions = [
             d
             for d in gateway.decisions_since("timeline")
             if d.policy_id == "P-008-STAGE-TRANSITION"
         ]
-        assert len(stage_decisions) == len(TIMELINE["events"])
+        assert len(stage_decisions) == len(ADVANCING)
 
     def test_a_parked_case_says_what_it_is_waiting_for(self, store):
         _apply(store, "error_detected")
@@ -158,7 +183,7 @@ class TestStateLivesInTheStoreAndNowhereElse:
         clock is compressed; the dependency on persisted state is not simulated.
         """
         stages: list[str] = []
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             # A fresh view of the case each time, derived from storage only.
             before = casefile.load(store, CASE)
             applied = _apply(store, entry["event"])
@@ -671,19 +696,19 @@ class TestTheGovernanceRecordOutlivesTheProcess:
         # `tracer()` reads the global provider, which OTel refuses to replace once set. Patching the
         # accessor is the only way to observe spans without a process-wide side effect.
         monkeypatch.setattr(telemetry, "tracer", lambda: provider.get_tracer("test"))
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             _apply(store, entry["event"], occurred_on=entry["occurred_on"])
 
         cases = [s for s in exporter.get_finished_spans() if s.name == "nav_sentinel.exception_case"]
-        assert len(cases) == len(TIMELINE["events"]), (
+        assert len(cases) == len(ADVANCING), (
             "one span for a seven-delivery case means six deliveries left no trace"
         )
-        assert len({s.context.trace_id for s in cases}) == len(TIMELINE["events"]), (
+        assert len({s.context.trace_id for s in cases}) == len(ADVANCING), (
             "the deliveries share a trace id, which OTel cannot produce across invocations"
         )
 
     def test_every_event_persists_its_decisions(self, store):
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             _apply(store, entry["event"], occurred_on=entry["occurred_on"])
         decisions = store.decisions_for(CASE)
         ids = {d.get("nav.policy.id") for d in decisions}
@@ -691,13 +716,13 @@ class TestTheGovernanceRecordOutlivesTheProcess:
         assert "P-004-APPROVAL-ROUTE" in ids, (
             "the band derivation was marked after the span opened, so it was never persisted"
         )
-        assert len(decisions) == 2 * len(TIMELINE["events"])
+        assert len(decisions) == 2 * len(ADVANCING)
 
     def test_the_decisions_carry_one_trace_id_per_event(self, store):
-        for entry in TIMELINE["events"]:
+        for entry in ADVANCING:
             _apply(store, entry["event"], occurred_on=entry["occurred_on"])
         traces = {d["trace_id"] for d in store.decisions_for(CASE)}
-        assert len(traces) == len(TIMELINE["events"]), (
+        assert len(traces) == len(ADVANCING), (
             "decisions from different deliveries share a trace, so the append-only key collides"
         )
 

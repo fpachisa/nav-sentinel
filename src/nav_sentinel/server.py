@@ -352,6 +352,11 @@ _PROBE_INJECTION = (
 )
 
 
+from nav_sentinel.webapp.routes import router as _app_router  # noqa: E402
+
+app.include_router(_app_router)
+
+
 @app.get("/console", response_class=HTMLResponse)
 def operations_console(case_id: str = "") -> str:
     """The operations console: the fleet, one case, its evidence, its governance log.

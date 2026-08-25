@@ -33,6 +33,7 @@ from rich.text import Text
 from nav_sentinel import composition
 from nav_sentinel import remediation_runner as runner
 from nav_sentinel.control_plane import casefile, gateway, identity
+from nav_sentinel.control_plane.governance import IllegalTransition
 from nav_sentinel.memory import recurrence
 from nav_sentinel.registry import discover
 from nav_sentinel.remediation_office import events, materiality
@@ -164,7 +165,6 @@ def main() -> None:
     if not already:
         _seed_history(store, timeline, console)
 
-    impact: dict[str, Any] | None = None
     assessment: materiality.Assessment | None = None
 
     for entry in timeline["events"]:
@@ -186,18 +186,9 @@ def main() -> None:
         # for a capability, the registry decides who answers, and that agent runs under its own
         # identity with its own allowlist.
         if event == "impact_reported":
-            if args.offline:
-                # The same tool the reporting agent would call, through the gateway and under that
-                # agent's identity -- so P-001 and P-006 still apply and the number comes from the
-                # register. Only the model is skipped. Reading a count from the fixture instead let
-                # it disagree with the data: it said 41 investors while the register held four.
-                impact = _ask_without_a_model(case, console)
-            else:
-                impact = _ask_transfer_agency(case, console)
-            if impact is not None:
-                case = case.model_copy(update={"affected_investors": impact["holders"]})
-                payload["evidence"] = impact["citations"]
-                _persist_observations(store, impact.get("observations"))
+            case, payload = _establish_impact(
+                store, case, payload, console, offline=args.offline
+            )
 
         # The remediation office establishes whether this fund has a pattern; the threshold
         # comparison is arithmetic.
@@ -217,7 +208,19 @@ def main() -> None:
                 break
             payload["note"] = assessment.rationale
 
-        applied = runner.apply_event(store, payload, facts=case.to_facts())
+        try:
+            applied = runner.apply_event(store, payload, facts=case.to_facts())
+        except IllegalTransition as refused:
+            # An out-of-order delivery. Real settlement systems release payment files early, so a
+            # remediation has to survive one arriving before approval: the lifecycle refuses it,
+            # the denial is persisted, and the case stays where it is. Continuing is the correct
+            # handling -- aborting the run would make one misordered event look like a system
+            # failure.
+            console.print(
+                f"  day {entry['day']:>2}  {entry['occurred_on']}  [red]x REFUSED[/red]  "
+                f"[dim]{entry['department']} — {str(refused)[:96]}[/dim]"
+            )
+            continue
         _print_event(console, entry, applied)
 
         # Persist the case document once impact is known, so the *next* error's recurrence count
@@ -272,6 +275,33 @@ def _ask_transfer_agency(case: NavErrorCase, console: Console) -> dict[str, Any]
         "citations": [c.observation_id for c in verdict.citations],
         "observations": observations,
     }
+
+
+def _establish_impact(
+    store: Any,
+    case: NavErrorCase,
+    payload: dict[str, Any],
+    console: Console,
+    *,
+    offline: bool,
+) -> tuple[NavErrorCase, dict[str, Any]]:
+    """Who dealt at the misstated price, and how we came to know.
+
+    Offline calls the same tool the reporting agent would, through the gateway and under that
+    agent's identity -- so P-001 and P-006 still apply and the number comes from the register. Only
+    the model is skipped. Reading a count from the fixture instead let it disagree with the data: it
+    said 41 investors while the register held four.
+    """
+    impact = (
+        _ask_without_a_model(case, console) if offline else _ask_transfer_agency(case, console)
+    )
+    if impact is None:
+        return case, payload
+    _persist_observations(store, impact.get("observations"))
+    return (
+        case.model_copy(update={"affected_investors": impact["holders"]}),
+        {**payload, "evidence": impact["citations"]},
+    )
 
 
 def _persist_observations(store: Any, observations: Any) -> None:
