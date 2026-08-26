@@ -274,3 +274,57 @@ class TestTheWorkflowHoldsNoPrivilegeOfItsOwn:
         source = inspect.getsource(pages)
         for forbidden in ("save_case", "record_decision", "record_observation", "grant("):
             assert forbidden not in source, forbidden
+
+
+class TestTheRemediationPageFindsTheCaseTheStoreActuallyHolds:
+    """It resolved its default case id from a local fixture file.
+
+    That worked on a laptop, where the same run had just written the case, and pointed the deployed
+    console at an id Firestore had never heard of. The multi-week cross-department case is the
+    centre of this project and it rendered as an empty state in the only environment anyone would
+    look at it in -- another lookup that was correct everywhere except where it mattered.
+    """
+
+    def test_it_prefers_a_case_in_the_store_over_the_fixture(self):
+        from nav_sentinel.webapp import routes
+
+        composition.configure()
+        store = composition.store()
+        store.record_stage(
+            "CASE-REM-FROM-THE-STORE",
+            1,
+            {"to": "detected", "recorded_at": "2026-08-20T09:00:00", "occurred_on": "2026-08-20"},
+        )
+        assert routes._default_remediation_case() == "CASE-REM-FROM-THE-STORE"
+
+    def test_the_most_recently_written_case_wins(self):
+        from nav_sentinel.webapp import routes
+
+        composition.configure()
+        store = composition.store()
+        for case_id, recorded in (("CASE-REM-OLDER", "2026-07-01T09:00:00"),
+                                  ("CASE-REM-NEWER", "2026-09-01T09:00:00")):
+            store.record_stage(case_id, 1, {"to": "detected", "recorded_at": recorded})
+        assert routes._default_remediation_case() == "CASE-REM-NEWER"
+
+    def test_an_empty_store_still_names_the_case_make_remediation_would_create(self, monkeypatch):
+        """The fixture remains the fallback, so an offline run points somewhere meaningful."""
+        from nav_sentinel.control_plane.repository import InMemoryRepository
+        from nav_sentinel.webapp import routes
+
+        composition.configure()
+        monkeypatch.setattr(composition, "store", InMemoryRepository)
+        assert routes._default_remediation_case().startswith("CASE-REM-")
+
+    def test_an_unreachable_store_does_not_blank_the_page(self, monkeypatch):
+        """A console that 500s because its *default selection* could not be computed would be a
+        page taken down by a convenience."""
+        from nav_sentinel.webapp import routes
+
+        composition.configure()
+
+        def unreachable():
+            raise RuntimeError("Firestore is not answering")
+
+        monkeypatch.setattr(composition, "store", unreachable)
+        assert routes._default_remediation_case().startswith("CASE-REM-")

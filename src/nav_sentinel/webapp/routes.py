@@ -180,8 +180,23 @@ def remediation(request: Request, case_id: str = "") -> str:
 
 
 def _default_remediation_case() -> str:
+    """The most recent remediation case **this store actually holds**, not one a file names.
+
+    It used to read a case id out of a local fixture. That worked on a laptop, where the same run
+    had just written the case, and pointed the deployed console at an id Firestore had never heard
+    of -- so the multi-week case, which is the centre of this project, rendered as an empty state
+    in the only environment anyone would look at it in. The fixture is still the fallback, because
+    an offline run with an empty store should name the case `make remediation` would create.
+    """
     import json
     from pathlib import Path
+
+    try:
+        recorded = composition.store().cases_with_stages()
+    except Exception:  # noqa: BLE001 -- an unreachable store must not blank the whole page
+        recorded = []
+    if recorded:
+        return recorded[0]
 
     fixture = (
         Path(__file__).resolve().parents[3] / "fixtures" / "data" / "remediation_timeline.json"

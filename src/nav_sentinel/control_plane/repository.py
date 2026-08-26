@@ -96,6 +96,16 @@ class Repository(ABC):
     @abstractmethod
     def stages_for(self, case_id: str) -> list[dict[str, Any]]: ...
 
+    @abstractmethod
+    def cases_with_stages(self) -> list[str]:
+        """Every case this store holds a stage history for, most recently written first.
+
+        So a console can ask the store what it actually has, rather than being told by something
+        else. The remediation page resolved its default case id from a local fixture file, which
+        named a case the deployed Firestore had never heard of: the page worked perfectly offline
+        and showed an empty state in production, where the multi-week case is the whole point.
+        """
+
     # --- observations: append-only, immutable ---------------------------------------------
     @abstractmethod
     def record_observation(self, observation: Observation) -> None: ...
@@ -208,6 +218,14 @@ class InMemoryRepository(Repository):
             (dict(e) for e in self._stages.values() if e["case_id"] == case_id),
             key=lambda e: e["sequence"],
         )
+
+    def cases_with_stages(self) -> list[str]:
+        latest: dict[str, str] = {}
+        for entry in self._stages.values():
+            recorded = str(entry.get("recorded_at", ""))
+            case_id = str(entry["case_id"])
+            latest[case_id] = max(latest.get(case_id, ""), recorded)
+        return [case_id for case_id, _ in sorted(latest.items(), key=lambda kv: kv[1], reverse=True)]
 
     def record_observation(self, observation: Observation) -> None:
         existing = self._observations.get(observation.observation_id)
@@ -353,6 +371,19 @@ class FirestoreRepository(Repository):
         return sorted(
             (doc.to_dict() for doc in query.stream()), key=lambda e: e.get("sequence", 0)
         )
+
+    def cases_with_stages(self) -> list[str]:
+        # A full scan of the stage collection. Correct here because it is bounded by the number of
+        # remediation *events* this deployment has ever recorded, and a console asking "what cases
+        # do you have?" is a rare, deliberate query -- not something on the reconciliation path.
+        latest: dict[str, str] = {}
+        for document in (doc.to_dict() or {} for doc in self._stage_docs.stream()):
+            case_id = str(document.get("case_id", ""))
+            if not case_id:
+                continue
+            recorded = str(document.get("recorded_at", ""))
+            latest[case_id] = max(latest.get(case_id, ""), recorded)
+        return [case_id for case_id, _ in sorted(latest.items(), key=lambda kv: kv[1], reverse=True)]
 
     def record_observation(self, observation: Observation) -> None:
         doc = self._observation_docs.document(observation.observation_id)
