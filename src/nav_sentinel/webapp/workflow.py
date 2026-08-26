@@ -481,6 +481,41 @@ LIVE_STAGES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
+    """What has to happen next, and who has to do it.
+
+    The fleet finishing is not the case finishing, and a screen that showed four green ticks and
+    stopped would imply otherwise. Every one of these is a person's move: the whole claim of this
+    system is that the last step is never the agent's.
+    """
+    from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS
+    from nav_sentinel.control_plane.governance import ApprovalClass
+
+    if document.get("approval_ref"):
+        return "posted_by_ledger", "Cleared — release to the ledger"
+    if document.get("routed") is False:
+        return "human_investigation", "No authorised agent — investigate by hand"
+    if not document.get("verdict"):
+        return "fleet", "Fleet working"
+    if not document.get("proposal"):
+        return "human_investigation", "No cause established — investigate by hand"
+
+    band = str(document.get("approval_band", "single_reviewer"))
+    try:
+        allowed, required = BAND_REQUIREMENTS[ApprovalClass(band)]
+    except (KeyError, ValueError):
+        return "sign", "Awaiting signature"
+    outstanding = max(0, required - len(set(document.get("signed_by", []))))
+    if outstanding == 0:
+        return "sign", "Awaiting signature"
+    # "cio, controller or reviewer" rather than "cio or controller or reviewer".
+    names = sorted(allowed)
+    who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" or {names[-1]}"
+    return "sign", (
+        f"Needs {outstanding} more signature{'s' if outstanding > 1 else ''} from {who}"
+    )
+
+
 def _stage_states(document: dict[str, Any]) -> dict[str, str]:
     """Where this case has got to, read from what is stored."""
     routed = document.get("routed")
@@ -538,6 +573,8 @@ def live_snapshot(
                 "approved": bool(document.get("approval_ref")),
                 "stages": _stage_states(document),
                 "evidence": len(observations),
+                "next_kind": _next_step(document)[0],
+                "next_step": _next_step(document)[1],
             }
         )
 
@@ -563,6 +600,14 @@ def live_snapshot(
         },
         # Terminal means nothing more will change without someone acting. The page stops polling
         # then and says so, rather than asking Firestore the same question every second forever.
+        "handover": {
+            "sign": sum(1 for r in rows if r["next_kind"] == "sign"),
+            "human_investigation": sum(
+                1 for r in rows if r["next_kind"] == "human_investigation"
+            ),
+            "fleet": sum(1 for r in rows if r["next_kind"] == "fleet"),
+            "posted_by_ledger": sum(1 for r in rows if r["next_kind"] == "posted_by_ledger"),
+        },
         "settled": all(
             r["stages"]["draft"] in ("done", "blocked")
             and r["stages"]["investigation"] in ("done", "blocked")

@@ -266,6 +266,84 @@ def readyz() -> dict:
     }
 
 
+@app.post("/pubsub/case", status_code=status.HTTP_204_NO_CONTENT)
+def handle_case(
+    envelope: PubSubEnvelope,
+    claims: dict = Depends(verify_push),  # noqa: ARG001 -- the dependency is the check
+) -> None:
+    """Investigate one case with the fleet. **This spends model calls.**
+
+    The other half of the fan-out: `/pubsub/exceptions` detects and publishes one message per case,
+    and each lands here. One case per request, so a slow investigation cannot fail a batch and a
+    retry cannot re-bill the cases that already succeeded.
+
+    Returns 204 on every outcome a retry cannot improve, because Pub/Sub retries a non-2xx
+    indefinitely. Each path logs a distinct `outcome=` line, since the status alone cannot tell a
+    completed investigation from a discarded message.
+
+    A sync `def`, deliberately: `work_case` calls `asyncio.run`, which raises inside a running event
+    loop. FastAPI runs this in a threadpool, which is the same shape as the desk's own work route.
+    """
+    from nav_sentinel.control_plane.governance import PolicyViolation
+    from nav_sentinel.control_plane.repository import ImmutableRecord
+    from nav_sentinel.webapp import workflow
+
+    raw = envelope.message.data or ""
+    try:
+        payload = json.loads(base64.b64decode(raw)) if raw else {}
+        case_id = str(payload["case_id"])
+        as_of = date.fromisoformat(str(payload["as_of"]))
+    except (
+        binascii.Error, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError
+    ) as exc:
+        logger.error(
+            "outcome=undeliverable reason=unparseable message=%s: %s",
+            envelope.message.messageId, exc,
+        )
+        return
+
+    composition.configure()
+    store = composition.store()
+    document = store.load_case(case_id) or {}
+    if not document:
+        logger.error("outcome=undeliverable reason=unknown_case case=%s", case_id)
+        return
+
+    # The redelivery guard, and it is checked *before* spending anything. Pub/Sub is at-least-once,
+    # so a duplicate is expected rather than exceptional, and the cost of getting this wrong is a
+    # second full investigation billed for a case that already has one.
+    #
+    # `refusal` as well as `verdict`: a case refused at routing has no verdict and is nonetheless
+    # finished, and without it every redelivery would re-run triage -- a real model call.
+    if document.get("verdict") or document.get("refusal"):
+        logger.info("outcome=already_worked case=%s", case_id)
+        return
+
+    gateway.clear_decision_log()
+    try:
+        workflow.work_case(case_id, as_of)
+    except LookupError as gone:
+        # The case is not in this cycle, or its document vanished. Neither improves on a retry.
+        logger.error("outcome=undeliverable reason=not_in_cycle case=%s: %s", case_id, gone)
+        return
+    except ImmutableRecord as conflict:
+        # An append-only record already exists with different content -- a redelivery whose triage
+        # classified differently, most likely. The work is not repeatable, so retrying cannot help.
+        logger.error("outcome=undeliverable reason=immutable case=%s: %s", case_id, conflict)
+        return
+    except PolicyViolation as refused:
+        # A governance denial is a *result*. Retrying it would spend the same calls to be told the
+        # same thing, and the decision is already in the store.
+        logger.warning("outcome=refused case=%s: %s", case_id, refused)
+        return
+
+    telemetry.flush()
+    logger.info(
+        "outcome=investigated case=%s decisions=%d",
+        case_id, len(gateway.decision_log()),
+    )
+
+
 @app.post("/pubsub/exceptions", status_code=status.HTTP_204_NO_CONTENT)
 def handle_exception(envelope: PubSubEnvelope, claims: dict = Depends(verify_push)) -> None:
     """Work one exception delivered by Pub/Sub.
@@ -344,6 +422,24 @@ def handle_exception(envelope: PubSubEnvelope, claims: dict = Depends(verify_pus
         # The cycle ran and its effects are recorded elsewhere, so retrying would duplicate
         # work; the missing trace is a telemetry defect, surfaced loudly rather than hidden.
         logger.error("outcome=handled_untraced as_of=%s: audit spans were not exported", as_of)
+
+    # Fan out. Detection is arithmetic; this is the step that hands the cases to the fleet, and it
+    # is what makes one published event produce seven investigations with nobody driving them.
+    #
+    # Only the unworked ones. A redelivery of *this* message would otherwise re-publish seven cases
+    # that are already done, and each of those is a billed investigation on the other side. The
+    # per-case handler guards again for the same reason -- two guards because the cost of missing is
+    # money rather than a wrong pixel.
+    from nav_sentinel.webapp import dispatch, workflow
+
+    pending = [item.case_id for item in workflow.queue(as_of) if not item.worked]
+    if pending:
+        sent = dispatch.dispatch(pending, as_of)
+        logger.info(
+            "outcome=fanned_out as_of=%s cases=%d via=%s", as_of, sent["sent"], sent["via"]
+        )
+    else:
+        logger.info("outcome=nothing_to_fan_out as_of=%s", as_of)
     return
 
 

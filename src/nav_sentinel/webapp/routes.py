@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from nav_sentinel import composition
 from nav_sentinel.control_plane.approvals import Principal
-from nav_sentinel.webapp import identity, pages, session, workflow
+from nav_sentinel.webapp import dispatch, identity, pages, session, workflow
 
 logger = logging.getLogger("nav_sentinel.webapp")
 
@@ -154,6 +154,26 @@ def case(case_id: str, request: Request) -> str:
     if principal is None:
         return _signin_page()
     return pages.case(workflow.case_detail(case_id, AS_OF), principal=principal)
+
+
+@router.post("/app/investigate-all")
+def investigate_all(request: Request) -> RedirectResponse:
+    """Hand every unworked case to the fleet, then go and watch it.
+
+    The redirect is to the activity screen rather than back to the queue: the queue answers "what
+    is outstanding", and the question a moment after pressing this is "what is happening".
+    """
+    composition.configure()
+    if _who(request) is None:
+        return _to("/app")
+    pending = [
+        item.case_id
+        for item in workflow.queue(AS_OF)
+        if not item.worked
+    ]
+    if pending:
+        dispatch.dispatch(pending, AS_OF)
+    return _to("/app/live")
 
 
 @router.post("/app/case/{case_id}/work")

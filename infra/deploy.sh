@@ -22,6 +22,10 @@ RUNTIME_SA="nav-runtime@${PROJECT}.iam.gserviceaccount.com"
 PUSH_SA="nav-pubsub-push@${PROJECT}.iam.gserviceaccount.com"
 TOPIC="nav-exceptions"
 DLQ_TOPIC="nav-exceptions-dlq"
+# The fan-out topic: one message per case, so a slow investigation cannot fail a batch and a retry
+# cannot re-bill the cases that already succeeded.
+CASES_TOPIC="nav-cases"
+CASES_DLQ="nav-cases-dlq"
 # Signs the exception desk's session cookie. Generated per deploy rather than committed: a signing
 # key in a public repository is every session forgeable by anyone who reads it. Rotating it on each
 # deploy signs analysts out, which is the correct trade for a key nobody has to store.
@@ -77,7 +81,9 @@ done
 
 say "Runtime roles"
 # Only what the service uses: call Gemini, screen content, write traces, persist cases and
-# approvals. No Pub/Sub publish -- the service consumes, it does not produce.
+# approvals. It also publishes now -- "Investigate all" fans one message out per case -- but that
+# grant is on the fan-out topic alone, below, not on the project. A project-level publisher could
+# write to the dead-letter topic and to the exception topic that feeds itself.
 for role in roles/aiplatform.user roles/cloudtrace.agent roles/telemetry.tracesWriter \
             roles/datastore.user roles/modelarmor.user; do
   gcloud projects add-iam-policy-binding "$PROJECT" \
@@ -102,8 +108,9 @@ gcloud run deploy "$SERVICE" \
   --project "$PROJECT" \
   --service-account "$RUNTIME_SA" \
   ${ACCESS_FLAG} \
-  --update-env-vars "^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GOOGLE_CLOUD_LOCATION=global|NAV_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|NAV_APPROVALS=firestore|NAV_REPOSITORY=firestore|NAV_SESSION_SECRET=${SESSION_SECRET}|NAV_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}|NAV_ANALYSTS=${ANALYSTS}|NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
-  --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0 \
+  --update-env-vars "^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GOOGLE_CLOUD_LOCATION=global|NAV_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|NAV_APPROVALS=firestore|NAV_REPOSITORY=firestore|NAV_SESSION_SECRET=${SESSION_SECRET}|NAV_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}|NAV_ANALYSTS=${ANALYSTS}|NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}|NAV_CASES_TOPIC=${CASES_TOPIC}" \
+  --memory 2Gi --cpu 1 --timeout 300 --max-instances 8 --min-instances 0 \
+  --concurrency 2 \
   --startup-probe "httpGet.path=/readyz,initialDelaySeconds=10,periodSeconds=5,failureThreshold=6,timeoutSeconds=5"
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \
@@ -178,6 +185,49 @@ gcloud pubsub subscriptions add-iam-policy-binding nav-exceptions-push --project
 gcloud pubsub subscriptions describe nav-exceptions-dlq-hold --project "$PROJECT" >/dev/null 2>&1 \
   || gcloud pubsub subscriptions create nav-exceptions-dlq-hold \
        --topic "$DLQ_TOPIC" --project "$PROJECT" \
+       --message-retention-duration 7d --expiration-period never >/dev/null
+
+say "Fan-out topic and per-case subscription"
+gcloud pubsub topics describe "$CASES_TOPIC" --project "$PROJECT" >/dev/null 2>&1 \
+  || gcloud pubsub topics create "$CASES_TOPIC" --project "$PROJECT" >/dev/null
+gcloud pubsub topics describe "$CASES_DLQ" --project "$PROJECT" >/dev/null 2>&1 \
+  || gcloud pubsub topics create "$CASES_DLQ" --project "$PROJECT" >/dev/null
+
+# Publish scoped to this topic only.
+gcloud pubsub topics add-iam-policy-binding "$CASES_TOPIC" --project "$PROJECT" \
+  --member "serviceAccount:${RUNTIME_SA}" --role roles/pubsub.publisher >/dev/null
+gcloud pubsub topics add-iam-policy-binding "$CASES_DLQ" --project "$PROJECT" \
+  --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.publisher >/dev/null
+
+# --ack-deadline 300 is load-bearing and is stated rather than defaulted. gcloud's default for a
+# new subscription is 10 seconds; one investigation measures 24s warm and 74s cold, so the default
+# would redeliver every case mid-investigation up to the delivery limit -- turning ~28 Gemini calls
+# into ~140 and dead-lettering cases that had in fact succeeded.
+#
+# --max-delivery-attempts 3, not 5, for the same reason: each attempt on this subscription is a
+# billed investigation, so the retry budget is money and is set deliberately low.
+if gcloud pubsub subscriptions describe nav-cases-push --project "$PROJECT" >/dev/null 2>&1
+then
+  gcloud pubsub subscriptions update nav-cases-push --project "$PROJECT" \
+    --push-endpoint "${URL}/pubsub/case" \
+    --push-auth-service-account "$PUSH_SA" \
+    --push-auth-token-audience "$URL" \
+    --ack-deadline 300 \
+    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 3 >/dev/null
+else
+  gcloud pubsub subscriptions create nav-cases-push \
+    --topic "$CASES_TOPIC" --project "$PROJECT" \
+    --push-endpoint "${URL}/pubsub/case" \
+    --push-auth-service-account "$PUSH_SA" \
+    --push-auth-token-audience "$URL" \
+    --ack-deadline 300 \
+    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 3 >/dev/null
+fi
+gcloud pubsub subscriptions add-iam-policy-binding nav-cases-push --project "$PROJECT" \
+  --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.subscriber >/dev/null
+gcloud pubsub subscriptions describe nav-cases-dlq-hold --project "$PROJECT" >/dev/null 2>&1 \
+  || gcloud pubsub subscriptions create nav-cases-dlq-hold \
+       --topic "$CASES_DLQ" --project "$PROJECT" \
        --message-retention-duration 7d --expiration-period never >/dev/null
 
 say "Done"

@@ -327,16 +327,46 @@ class TestTheDeploymentPosture:
         assert "--push-auth-service-account" in DEPLOY
         assert "--push-auth-token-audience" in DEPLOY
 
-    def test_the_runtime_holds_no_publish_permission(self):
-        """The service consumes exceptions; it does not produce them.
+    def test_the_runtime_publishes_only_to_the_fan_out_topic(self):
+        """The runtime does produce now -- "Investigate all" fans one message out per case -- and
+        the invariant is narrower rather than gone.
 
-        Asserting the *string* `roles/pubsub.publisher` is absent stopped working once the
-        dead-letter policy required granting it to Pub/Sub's own service agent -- a different
-        principal entirely. The property is about who receives it."""
-        for line in DEPLOY.splitlines():
-            if "roles/pubsub.publisher" in line:
+        It used to be "the runtime holds no publish permission at all", which was true and simple.
+        The replacement has to be equally checkable: the grant exists, it is bound to a *topic*
+        rather than to the project, and it is not bound to the exception topic. A project-level
+        publisher could write to the dead-letter topic, and a grant on `nav-exceptions` would let
+        the service feed the subscription that drives it -- the unbounded loop this file already
+        records once.
+        """
+        binds = [
+            line for line in DEPLOY.splitlines() if "roles/pubsub.publisher" in line
+        ]
+        assert binds, "the publisher grant vanished; Investigate all cannot fan out"
+
+        source = DEPLOY.splitlines()
+        for index, line in enumerate(source):
+            if "roles/pubsub.publisher" not in line:
+                continue
+            # The command spans lines, so find the `add-iam-policy-binding` that owns this member.
+            head = next(
+                source[j]
+                for j in range(index, -1, -1)
+                if "add-iam-policy-binding" in source[j]
+            )
+            if "RUNTIME_SA" in line:
+                assert "pubsub topics add-iam-policy-binding" in head, (
+                    f"the runtime's publish grant is not topic-scoped: {head}"
+                )
+                assert "$CASES_TOPIC" in head, f"granted on the wrong topic: {head}"
+            else:
                 assert "gcp-sa-pubsub" in line or "PUBSUB_AGENT" in line, line
-                assert "nav-runtime" not in line, line
+
+    def test_the_runtime_cannot_publish_to_the_topic_that_drives_it(self):
+        """A grant on `nav-exceptions` would let the service publish into the subscription that
+        invokes it. That loop has happened once in this project, through the dead-letter policy."""
+        for line in DEPLOY.splitlines():
+            if "add-iam-policy-binding" in line and "$TOPIC" in line:
+                assert "RUNTIME_SA" not in line, line
 
     def test_the_dead_letter_topic_is_not_the_source_topic(self):
         """It was, so a message failing five attempts was republished to the topic it came from
@@ -945,3 +975,79 @@ class TestReadinessGatesTheRevision:
             probe["failureThreshold"]
         )
         assert budget >= 30, f"only {budget}s to become ready; cold start plus registry load"
+
+
+class TestTheFanOutSubscriptionCannotRedeliverMidInvestigation:
+    """The most expensive line in `deploy.sh`, and it is a default nobody would notice missing.
+
+    gcloud's ack deadline for a *new* subscription is 10 seconds. One investigation on this project
+    measures 24s warm and 74s cold (`docs/submission/recording-runbook.md`). Without an explicit
+    deadline every case is redelivered while still being investigated, up to the delivery limit --
+    turning roughly 28 Gemini calls into 140 and dead-lettering cases that had in fact succeeded.
+
+    Sabotaging it passed every other test in this file, which is why this one exists.
+    """
+
+    #: Cold start plus one investigation, from the project's own measurement, with headroom.
+    MINIMUM_ACK_SECONDS = 120
+
+    def _subscription_commands(self) -> list[str]:
+        """Each `gcloud pubsub subscriptions create/update` as one joined command."""
+        commands, current = [], ""
+        for line in DEPLOY.splitlines():
+            if "gcloud pubsub subscriptions" in line and (
+                "create" in line or "update" in line
+            ):
+                current = line
+            elif current:
+                current += " " + line.strip()
+            if current and not line.rstrip().endswith("\\"):
+                commands.append(current)
+                current = ""
+        return commands
+
+    def test_every_push_subscription_sets_an_explicit_ack_deadline(self):
+        import re
+
+        pushes = [c for c in self._subscription_commands() if "--push-endpoint" in c]
+        assert pushes, "no push subscriptions found; has deploy.sh changed shape?"
+        for command in pushes:
+            match = re.search(r"--ack-deadline (\d+)", command)
+            assert match, f"no explicit --ack-deadline: {command[:110]}"
+            assert int(match.group(1)) >= self.MINIMUM_ACK_SECONDS, (
+                f"--ack-deadline {match.group(1)}s is shorter than one investigation: "
+                f"{command[:110]}"
+            )
+
+    def test_the_per_case_subscription_exists_and_points_at_the_case_endpoint(self):
+        pushes = [c for c in self._subscription_commands() if "--push-endpoint" in c]
+        assert any("/pubsub/case" in c for c in pushes), (
+            "nothing delivers to the per-case handler, so the fan-out goes nowhere"
+        )
+
+    def test_the_retry_budget_on_billed_work_is_deliberately_low(self):
+        """Each attempt on the fan-out subscription is a billed investigation, so the retry budget
+        is money. The exception subscription's 5 is fine -- detection is arithmetic."""
+        import re
+
+        for command in self._subscription_commands():
+            if "/pubsub/case" not in command:
+                continue
+            match = re.search(r"--max-delivery-attempts (\d+)", command)
+            assert match, f"no dead-letter limit on billed work: {command[:110]}"
+            assert int(match.group(1)) <= 3, match.group(1)
+
+    def test_the_fan_out_dead_letter_is_not_its_own_source_topic(self):
+        """The loop this repo has already had once, via the other topic."""
+        assert 'CASES_DLQ="nav-cases-dlq"' in DEPLOY
+        assert '--dead-letter-topic "$CASES_TOPIC"' not in DEPLOY
+
+    def test_several_investigations_may_share_a_container_so_concurrency_is_bounded(self):
+        """Cloud Run's default concurrency is 80. Seven concurrent ADK investigations in one
+        container is an OOM candidate, and a Cloud Run OOM kills every in-flight push at once --
+        so all of them redeliver, and all of them re-bill."""
+        import re
+
+        match = re.search(r"--concurrency (\d+)", DEPLOY)
+        assert match, "concurrency is left at the default of 80"
+        assert int(match.group(1)) <= 4, match.group(1)

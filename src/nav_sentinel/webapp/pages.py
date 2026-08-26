@@ -325,6 +325,19 @@ ul.plain li{margin:3px 0}
 .sdot[data-s=refused]:after{content:"";position:absolute;left:3.5px;top:2.5px;width:5px;height:5px;
   border-top:2px solid #fff;transform:rotate(45deg)}
 .sdot[data-s=blocked]{border-style:dotted;border-color:var(--line);background:transparent}
+.handover{display:flex;align-items:center;gap:14px;padding:13px 16px;border-radius:9px;
+  border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--accent-wash);
+  margin-bottom:16px;font-size:13px;box-shadow:var(--shadow)}
+.handover.done{border-left-color:var(--cleared);background:var(--cleared-w)}
+.handover b{color:var(--ink)}
+.handover .hs{margin-left:auto;display:flex;gap:18px;white-space:nowrap;font-size:12px}
+.handover .hs span{color:var(--soft)}
+.handover .hs b{font-family:"JetBrains Mono",monospace;font-size:15px}
+.nx{font-size:11.5px;white-space:nowrap}
+.nx[data-k=sign]{color:var(--four);font-weight:600}
+.nx[data-k=human_investigation]{color:var(--escalate);font-weight:600}
+.nx[data-k=fleet]{color:var(--faint)}
+.nx[data-k=posted_by_ledger]{color:var(--cleared);font-weight:600}
 .feed{max-height:300px;overflow-y:auto;font-family:"JetBrains Mono",monospace;font-size:11.5px}
 .frow{display:grid;grid-template-columns:64px 54px 218px minmax(0,1fr);gap:12px;padding:5px 14px;
   border-bottom:1px solid var(--hair);white-space:nowrap;align-items:baseline}
@@ -485,6 +498,10 @@ _LIVE_SCRIPT = r"""<script>
   function paint(snap){
     Object.keys(snap.counters).forEach(function(k){ paintCounter(k, snap.counters[k]); });
 
+    paintCounter('hand_sign', snap.handover.sign);
+    paintCounter('hand_manual', snap.handover.human_investigation);
+    paintCounter('hand_working', snap.handover.fleet);
+
     snap.cases.forEach(function(c){
       var tr = rows.querySelector('[data-case="' + c.case_id + '"]');
       if (!tr) return;
@@ -492,6 +509,14 @@ _LIVE_SCRIPT = r"""<script>
       snap.stages.forEach(function(s, i){
         if (dots[i] && dots[i].dataset.s !== c.stages[s.key]) dots[i].dataset.s = c.stages[s.key];
       });
+      var agent = tr.children[2 + snap.stages.length];
+      if (agent && c.agent && agent.textContent.trim() !== c.agent) {
+        agent.innerHTML = '<span class="mono" style="font-size:11px">' + c.agent + '</span>';
+      }
+      var nx = tr.querySelector('.nx');
+      if (nx && nx.textContent !== c.next_step) {
+        nx.textContent = c.next_step; nx.dataset.k = c.next_kind;
+      }
     });
 
     var feed = document.getElementById('live-feed');
@@ -814,6 +839,7 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
         )
 
     worked = sum(1 for i in items if i.worked)
+    unworked = len(items) - worked
     approved = sum(1 for i in items if i.approved)
     escalations = sum(1 for i in items if i.band == "cio_escalation")
     total_bps = sum(_bps(i.impact_bps) for i in items)
@@ -844,7 +870,15 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
             "Impact is basis points of NAV; the band is derived by the control plane from that "
             "magnitude and decides who must sign.",
             actions='<form method="post" action="/app/cycle" onsubmit="var b=this.querySelector(\'button\');b.disabled=true;b.textContent=\'Running…\';">'
-            '<button class="btn ghost" type="submit">Re-run reconciliation</button></form>',
+            '<button class="btn ghost" type="submit">Re-run reconciliation</button></form>'
+            + (
+                '<form method="post" action="/app/investigate-all" '
+                'onsubmit="var b=this.querySelector(\'button\');b.disabled=true;'
+                'b.textContent=\'Dispatching…\';">'
+                f'<button class="btn" type="submit">Investigate all {unworked}</button></form>'
+                if unworked
+                else ""
+            ),
         )
         + tiles
         + '<div class="panel"><div class="panel-h"><b>Exception queue</b>'
@@ -1199,6 +1233,54 @@ def _actions(
     return blocks
 
 
+def _feed_line(line: dict[str, Any]) -> str:
+    """One governance decision, as the operator reads it."""
+    agent = f"  &middot;  {_e(line['agent'])}" if line.get("agent") else ""
+    return (
+        f'<div class="frow" data-e="{_e(line["effect"])}">'
+        f'<span class="fa">{_e(line["at"])}</span>'
+        f'<span class="fx">{_e(line["effect"].upper())}</span>'
+        f'<span>{_e(line["policy"])}</span>'
+        f'<span class="fr">{_e(line["reason"])}{agent}</span></div>'
+    )
+
+
+def _handover(snapshot: dict[str, Any]) -> str:
+    """What is now waiting on a person.
+
+    The band exists because four green ticks per row would otherwise read as "done". The fleet
+    finishing is a handover, not a completion -- and saying so is the claim this project is built
+    on, stated at the moment it becomes true rather than in a paragraph somewhere.
+    """
+    hand = snapshot.get("handover", {})
+    settled = snapshot.get("settled")
+    waiting = hand.get("sign", 0)
+    manual = hand.get("human_investigation", 0)
+    working = hand.get("fleet", 0)
+
+    if working and not settled:
+        lead = (
+            f"<b>The fleet is working.</b> {working} case"
+            f"{'s' if working != 1 else ''} still in flight — nobody is driving it."
+        )
+    elif waiting or manual:
+        lead = (
+            "<b>The fleet is done, and it cannot go further.</b> What is left is a person's "
+            "move: every correction is drafted and unposted."
+        )
+    else:
+        lead = "<b>Nothing is outstanding.</b>"
+
+    return (
+        f'<div class="handover{" done" if settled else ""}">{lead}'
+        '<div class="hs">'
+        f'<span><b data-counter="hand_sign">{waiting}</b> awaiting signature</span>'
+        f'<span><b data-counter="hand_manual">{manual}</b> need a human investigator</span>'
+        f'<span><b data-counter="hand_working">{working}</b> in flight</span>'
+        "</div></div>"
+    )
+
+
 def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
     """The fleet at work, read back from the store.
 
@@ -1250,18 +1332,14 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
             f'<a href="/app/case/{_e(case["case_id"])}" style="text-decoration:none;'
             f'font-weight:600">{_e(case["title"])}</a></td>'
             f'<td class="r num">{_e(case["impact_bps"]) or "—"}</td>'
-            f"{cells}<td>{trailing}</td></tr>"
+            f"{cells}<td>{trailing}</td>"
+            f'<td class="nx" data-k="{_e(case["next_kind"])}">{_e(case["next_step"])}</td></tr>'
         )
 
-    feed = "".join(
-        f'<div class="frow" data-e="{_e(line["effect"])}">'
-        f'<span class="fa">{_e(line["at"])}</span>'
-        f'<span class="fx">{_e(line["effect"].upper())}</span>'
-        f'<span>{_e(line["policy"])}</span>'
-        f'<span class="fr">{_e(line["reason"])}'
-        f'{f"  ·  {_e(line['agent'])}" if line["agent"] else ""}</span></div>'
-        for line in snapshot["feed"]
-    ) or '<div class="pad muted">Nothing yet. Publish an event and this fills as the fleet works.</div>'
+    feed = "".join(_feed_line(line) for line in snapshot["feed"]) or (
+        '<div class="pad muted">Nothing yet. Press <b>Investigate all</b> on the queue, or publish '
+        "an event, and this fills as the fleet works.</div>"
+    )
 
     window = (
         f"counting from {_e(snapshot['since'][11:19])}"
@@ -1279,10 +1357,12 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
         )
         + f'<div class="kpis" id="live-tiles" style="grid-template-columns:repeat(6,1fr)">{tiles}'
         "</div>"
-        '<div class="panel"><div class="panel-h"><b>Cases</b>'
+        + _handover(snapshot)
+        + '<div class="panel"><div class="panel-h"><b>Cases</b>'
         f'<span class="r" id="live-status"><span class="pulse"></span>watching · {window}</span>'
         '</div><div class="scroll"><table class="lgrid"><thead><tr><th>Exception</th>'
-        f'<th class="r">Impact</th>{head}<th>Authorised agent</th></tr></thead>'
+        f'<th class="r">Impact</th>{head}<th>Authorised agent</th>'
+        '<th>Next step</th></tr></thead>'
         f'<tbody id="live-rows">{rows}</tbody></table></div></div>'
         '<div class="panel"><div class="panel-h"><b>Governance feed</b>'
         '<span class="r">every line is a persisted policy decision</span></div>'
