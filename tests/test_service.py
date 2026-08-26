@@ -1025,9 +1025,15 @@ class TestTheFanOutSubscriptionCannotRedeliverMidInvestigation:
             "nothing delivers to the per-case handler, so the fan-out goes nowhere"
         )
 
-    def test_the_retry_budget_on_billed_work_is_deliberately_low(self):
-        """Each attempt on the fan-out subscription is a billed investigation, so the retry budget
-        is money. The exception subscription's 5 is fine -- detection is arithmetic."""
+    def test_billed_work_is_dead_lettered_at_the_platform_minimum(self):
+        """Each attempt on the fan-out subscription is a billed investigation.
+
+        The limit is 5 because Pub/Sub rejects anything lower -- the deploy said so when it refused
+        3, which is the useful kind of correction. So the limit is not what keeps five attempts from
+        costing five investigations; the handler's guard is, and it is tested in `test_fanout.py`:
+        a redelivered case with a verdict or a refusal is acknowledged without spending. This test
+        exists to stop the limit being *raised* and to keep the two facts next to each other.
+        """
         import re
 
         for command in self._subscription_commands():
@@ -1035,7 +1041,18 @@ class TestTheFanOutSubscriptionCannotRedeliverMidInvestigation:
                 continue
             match = re.search(r"--max-delivery-attempts (\d+)", command)
             assert match, f"no dead-letter limit on billed work: {command[:110]}"
-            assert int(match.group(1)) <= 3, match.group(1)
+            assert int(match.group(1)) == 5, match.group(1)
+
+    def test_the_reason_the_retry_limit_is_survivable_is_recorded_next_to_it(self):
+        """A number whose safety depends on something elsewhere needs the link written down."""
+        # Scoped to the fan-out section. The file's *first* `--max-delivery-attempts 5` belongs to
+        # the exception subscription, where detection is arithmetic and five retries cost nothing --
+        # so an unscoped search reads the wrong block and passes for the wrong reason.
+        start = DEPLOY.index("Fan-out topic and per-case subscription")
+        section = DEPLOY[start : DEPLOY.index('say "Done"', start)]
+        assert "--max-delivery-attempts 5" in section
+        assert "guard" in section, "the guard that makes five attempts cheap is not mentioned"
+        assert "platform minimum" in section, "why the limit is 5 and not lower is not stated"
 
     def test_the_fan_out_dead_letter_is_not_its_own_source_topic(self):
         """The loop this repo has already had once, via the other topic."""

@@ -204,8 +204,11 @@ gcloud pubsub topics add-iam-policy-binding "$CASES_DLQ" --project "$PROJECT" \
 # would redeliver every case mid-investigation up to the delivery limit -- turning ~28 Gemini calls
 # into ~140 and dead-lettering cases that had in fact succeeded.
 #
-# --max-delivery-attempts 3, not 5, for the same reason: each attempt on this subscription is a
-# billed investigation, so the retry budget is money and is set deliberately low.
+# --max-delivery-attempts 5 is the platform minimum -- Pub/Sub rejects anything lower, which the
+# deploy told me when it refused 3. Each attempt here is a *billed investigation*, so what keeps the
+# retry budget from being five times the cost is not the limit: it is the handler's guard, which
+# checks for a verdict or a refusal before spending and acknowledges a redelivery in milliseconds.
+# The limit only bounds the case where the first attempt genuinely failed part-way through.
 if gcloud pubsub subscriptions describe nav-cases-push --project "$PROJECT" >/dev/null 2>&1
 then
   gcloud pubsub subscriptions update nav-cases-push --project "$PROJECT" \
@@ -213,7 +216,7 @@ then
     --push-auth-service-account "$PUSH_SA" \
     --push-auth-token-audience "$URL" \
     --ack-deadline 300 \
-    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 3 >/dev/null
+    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 5 >/dev/null
 else
   gcloud pubsub subscriptions create nav-cases-push \
     --topic "$CASES_TOPIC" --project "$PROJECT" \
@@ -221,7 +224,7 @@ else
     --push-auth-service-account "$PUSH_SA" \
     --push-auth-token-audience "$URL" \
     --ack-deadline 300 \
-    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 3 >/dev/null
+    --dead-letter-topic "$CASES_DLQ" --max-delivery-attempts 5 >/dev/null
 fi
 gcloud pubsub subscriptions add-iam-policy-binding nav-cases-push --project "$PROJECT" \
   --member "serviceAccount:${PUBSUB_AGENT}" --role roles/pubsub.subscriber >/dev/null
