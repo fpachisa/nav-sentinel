@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -28,7 +29,7 @@ from nav_sentinel.webapp import pages
 
 
 def _blocks(html: str) -> list[str]:
-    return re.findall(r"<script>(.*?)</script>", html, re.S)
+    return re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
 
 
 class TestTheDeliveredScriptParses:
@@ -93,3 +94,69 @@ class TestTheScriptAnnouncesThatItRan:
         action = re.search(r'<form[^>]*\saction="([^"]+)"', html).group(1)
         assert action.endswith("/work"), action
         assert not action.endswith("/work/stream")
+
+
+HARNESS = Path(__file__).parent / "js" / "harness.js"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+class TestWhatTheClientDoesWithTheLinesItReceives:
+    """The last unguarded layer.
+
+    Python tests check what is served, `node --check` checks that it parses, and a headless browser
+    proves it attaches. None of them exercises what the handler *does* with the stream -- which is
+    the whole demo, and forty lines of code that has already been broken once.
+
+    Driven through `tests/js/harness.js`, which answers exactly the DOM queries the script makes and
+    delivers the NDJSON in two chunks **with a line split across the boundary** -- because that is
+    what a real stream does, and a reader that assumes whole lines per chunk works until it does
+    not.
+    """
+
+    @pytest.fixture(scope="class")
+    def result(self, tmp_path_factory) -> dict:
+        import json
+
+        script = tmp_path_factory.mktemp("js") / "client.js"
+        script.write_text(_blocks(pages._WORK_SCRIPT)[0])
+        run = subprocess.run(
+            ["node", str(HARNESS), str(script)], capture_output=True, text=True, check=False
+        )
+        assert run.returncode == 0, run.stderr
+        return json.loads(run.stdout)
+
+    def test_it_takes_over_the_submit_instead_of_letting_the_form_navigate(self, result):
+        assert result["navigated"] is False
+        assert result["enhanced"] == "1"
+        assert result["disabled"] is True
+
+    def test_every_stage_is_marked_running_then_done_in_order(self, result):
+        marks = [(stage, state) for stage, state, _note in result["marks"]]
+        # `triage running` twice: once client-side the moment the button is clicked, once when the
+        # server confirms it. On a cold instance those are ten seconds apart.
+        assert marks[0] == ("triage", "running")
+        collapsed = [m for i, m in enumerate(marks) if i == 0 or m != marks[i - 1]]
+        assert collapsed == [
+            ("triage", "running"),
+            ("triage", "done"),
+            ("routing", "running"),
+            ("routing", "done"),
+            ("investigation", "running"),
+            ("investigation", "done"),
+            ("proposal", "running"),
+            ("proposal", "done"),
+        ], collapsed
+
+    def test_each_section_is_appended_once_and_empty_ones_are_not(self, result):
+        """Routing sends no HTML when it succeeds -- only a refusal has a panel -- so an empty
+        string must not append a blank card."""
+        assert result["appended"] == [
+            "<div>TRIAGE</div>",
+            "<div>CAUSE</div><div>EVIDENCE</div>",
+            "<div>PROPOSAL</div>",
+        ]
+
+    def test_the_final_line_replaces_the_progress_rail_with_the_approval_panel(self, result):
+        assert result["railSwapped"] == "<div>APPROVAL RAIL</div>"
+        assert result["status"] == "complete"
+        assert result["finishedClass"] is True

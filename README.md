@@ -218,7 +218,7 @@ evaluation can be scored automatically.
 make verify
 ```
 
-Lint, the diagram geometry checks, then **913 invariant tests** in about five seconds. These are
+Lint, the diagram geometry checks, then **917 invariant tests** in about five seconds. These are
 not smoke tests — they assert properties like *no agent in the fleet may post a journal entry*,
 *a units magnitude bands through the same policy as a basis-point one*, and *the transfer-agency
 package imports no fund-accounting module*.
