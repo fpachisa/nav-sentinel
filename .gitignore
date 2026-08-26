@@ -15,3 +15,9 @@ build/
 # golden file and no closure proof. `make fixtures` regenerates it byte-identically offline.
 .cache/
 out/
+
+# OAuth client files. The download contains a client *secret*, and this repository is public.
+# Only the client id is ever needed here, and it is passed as an environment variable at deploy
+# time rather than living in the tree.
+client_secret_*.json
+*.client_secret.json

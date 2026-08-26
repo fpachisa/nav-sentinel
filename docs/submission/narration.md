@@ -16,12 +16,12 @@ voice says what it means. Numbers are written the way they should be said.
 
 ## 1 · The problem — 0:00–0:32 · 78 words
 
-> A fund publishes a price for itself every day. Investors buy and sell at that price, so a wrong
-> one means compensating investors and explaining yourself to a regulator.
+> A fund publishes a price for itself every day. Investors deal at that price, so a wrong one means
+> compensating them and explaining yourself to a regulator.
 >
-> Every morning the fund's books disagree with the custodian's in a few places, and someone has to
-> find out why before the deadline. This is that desk. Seven differences today. The column on the
-> right isn't a priority — it's who is legally required to sign.
+> Every morning the fund's books disagree with the custodian's somewhere, and someone has to find
+> out why before the deadline. I sign in with Google. This is that desk: seven differences today, and
+> the column on the right is who is legally required to sign.
 
 *Silence: 3s on the queue.*
 
@@ -41,9 +41,8 @@ voice says what it means. Numbers are written the way they should be said.
 
 ## 3 · Before any model — 0:55–1:18 · 55 words
 
-> Open one. Before a single model call: quantity agrees, market value differs by eighty-six
-> thousand euros, price agrees — and the exchange rate applied differs. One point one five six
-> seven, against one point one five nine three.
+> Open one. Before a single model call: quantity agrees, price agrees, market value differs by
+> eighty-six thousand euros — and the exchange rate applied differs.
 >
 > That's arithmetic over two books. A model here would be spending a request to be told what the
 > numbers already say.
@@ -69,14 +68,14 @@ voice says what it means. Numbers are written the way they should be said.
 
 ## 5 · Where it says no — 2:05–2:45 · 96 words · **the centre of the video**
 
-> I'm signed in as a reviewer. Approve.
+> I'm signed in with Google, and this deployment has me down as a controller. Approve.
 >
-> Refused. A four-eyes correction can only be signed by a controller or the chief investment
-> officer. And nothing was recorded — an ineligible signature isn't a partial signature.
+> Refused — a controller can't clear an escalation; only the chief investment officer can. And
+> nothing was recorded: an ineligible signature isn't a partial signature.
 >
-> First controller. Refused again: four eyes means two *different* people.
+> Now a four-eyes case. Signed. Refused again — four eyes means two *different* people.
 >
-> Second controller. Granted.
+> Second controller, a different Google account. Granted.
 >
 > And now the part that matters. With a valid approval in hand, posting is still refused. No agent
 > in this fleet holds posting authority, and the policy that says so is enforced at the gateway, not
@@ -87,11 +86,11 @@ voice says what it means. Numbers are written the way they should be said.
 ## 6 · Multi-week, multi-department — 2:45–3:05 · 71 words
 
 > A published error runs for weeks. Fund accounting quantifies it. Transfer agency is asked, through
-> the gateway and under its own identity, who dealt at the wrong price. The remediation office
-> judges a repeat more harshly than a first.
+> the gateway and under its own identity, who dealt at the wrong price. A repeat is judged more
+> harshly than a first.
 >
-> Twenty-eight business days, four departments. A payment file arrived before approval: refused, and
-> recorded. The wall clock here is compressed. The business dates are not.
+> Four departments, twenty-eight business days. A payment file arrived before approval: refused, and
+> recorded. The wall clock is compressed; the business dates are not.
 
 ---
 
@@ -99,9 +98,9 @@ voice says what it means. Numbers are written the way they should be said.
 
 > This runs on Cloud Run, in us-central1, as its own service account.
 >
-> An anonymous request: four oh three. With an identity token: ready — and it reports that it's
-> persisting to Firestore rather than to memory, because a service holding its audit trail in memory
-> looks identical to a healthy one from the outside.
+> Sign-in is public; the endpoints that do work are not. Asking it to run a reconciliation without
+> a session: four oh one. And it reports that it's persisting to Firestore rather than to memory,
+> because a service holding its audit trail in memory looks identical to a healthy one from outside.
 >
 > Here are the stage transitions and the policy decisions in Firestore. And here are the traces, one
 > per delivered event.
@@ -112,8 +111,8 @@ voice says what it means. Numbers are written the way they should be said.
 
 ## 8 · Close — 3:38–3:50 · 48 words
 
-> Adding a second business process — a share register, in units instead of currency — changed five
-> lines and nothing in the registry.
+> A second business process — a share register, in units instead of currency — cost five lines and
+> no change to the registry.
 >
 > The agents never get the authority. They gather evidence, they propose, and a person signs.
 

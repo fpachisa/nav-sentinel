@@ -11,12 +11,16 @@ because four-eyes has to count people and a service token carries none.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from nav_sentinel import composition
 from nav_sentinel.control_plane.approvals import Principal
-from nav_sentinel.webapp import pages, session, workflow
+from nav_sentinel.webapp import identity, pages, session, workflow
+
+logger = logging.getLogger("nav_sentinel.webapp")
 
 router = APIRouter()
 
@@ -25,6 +29,13 @@ AS_OF = workflow.DEFAULT_AS_OF
 
 def _who(request: Request) -> Principal | None:
     return session.verify(request.cookies.get(session.COOKIE))
+
+
+def _signin_page() -> str:
+    """Google sign-in when this deployment has a client id; the roster otherwise, labelled."""
+    if identity.uses_google():
+        return pages.signin_google(AS_OF.isoformat(), identity.client_id())
+    return pages.signin(AS_OF.isoformat())
 
 
 def _to(path: str) -> RedirectResponse:
@@ -37,7 +48,7 @@ def desk(request: Request) -> str:
     composition.configure()
     principal = _who(request)
     if principal is None:
-        return pages.signin(AS_OF.isoformat())
+        return _signin_page()
     return pages.queue(
         workflow.queue(AS_OF), principal=principal, as_of=AS_OF.isoformat()
     )
@@ -56,6 +67,26 @@ def signin(subject: str = Form(...)) -> RedirectResponse:
         response.set_cookie(
             session.COOKIE, session.sign(known.subject), httponly=True, samesite="lax"
         )
+    return response
+
+
+@router.post("/app/auth/google")
+def auth_google(credential: str = Form(...)) -> RedirectResponse:
+    """Verify a Google ID token and start a session, or refuse without one.
+
+    A refusal sets no cookie and says nothing about *why* on the page beyond "not authorised" --
+    telling an unauthenticated caller whether an address is on the analyst list would turn the
+    sign-in screen into a directory of who can approve this fund's corrections.
+    """
+    response = _to("/app")
+    try:
+        principal = identity.principal_for(identity.verify_google_credential(credential))
+    except (ValueError, identity.UnknownAnalyst) as refused:
+        logger.warning("outcome=signin_refused reason=%s", type(refused).__name__)
+        return response
+    response.set_cookie(
+        session.COOKIE, session.sign(principal.subject), httponly=True, samesite="lax", secure=True
+    )
     return response
 
 
@@ -79,7 +110,7 @@ def case(case_id: str, request: Request) -> str:
     composition.configure()
     principal = _who(request)
     if principal is None:
-        return pages.signin(AS_OF.isoformat())
+        return _signin_page()
     return pages.case(workflow.case_detail(case_id, AS_OF), principal=principal)
 
 
@@ -115,7 +146,7 @@ def fleet(request: Request) -> str:
     composition.configure()
     principal = _who(request)
     if principal is None:
-        return pages.signin(AS_OF.isoformat())
+        return _signin_page()
     return pages.fleet(principal=principal)
 
 
@@ -124,7 +155,7 @@ def remediation(request: Request, case_id: str = "") -> str:
     composition.configure()
     principal = _who(request)
     if principal is None:
-        return pages.signin(AS_OF.isoformat())
+        return _signin_page()
     return pages.remediation(
         composition.store(), case_id or _default_remediation_case(), principal=principal
     )

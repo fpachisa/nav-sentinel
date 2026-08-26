@@ -234,14 +234,38 @@ class TestUndeliverableMessagesAreNotRetriedForever:
 
 
 class TestTheDeploymentPosture:
-    def test_the_service_is_not_publicly_invokable(self):
-        """Checking that `--allow-unauthenticated` is absent is not the property: the script could
-        grant `allUsers` the invoker role with a separate `add-iam-policy-binding`, which it
-        already uses that exact command shape for elsewhere."""
-        assert "--no-allow-unauthenticated" in DEPLOY
-        assert "--allow-unauthenticated" not in DEPLOY.replace("--no-allow-unauthenticated", "")
+    def test_ingress_opens_only_when_the_application_can_authenticate(self):
+        """The property is no longer "never public" -- the desk is meant to be reachable by people.
+        It is that there is **no configuration in which the service is open and authenticates
+        nobody**, which is what "--allow-unauthenticated just for the demo" reliably becomes.
+
+        So `--allow-unauthenticated` is reachable only inside the branch that requires both an OAuth
+        client id and an analyst table.
+        """
+        assert "ACCESS_FLAG" in DEPLOY
+        branch = DEPLOY[DEPLOY.index("if [ -n \"$OAUTH_CLIENT_ID\" ]"):]
+        opened = branch[: branch.index("else")]
+        assert "--allow-unauthenticated" in opened
+        assert "NAV_OAUTH_CLIENT_ID" in DEPLOY and "NAV_ANALYSTS" in DEPLOY
+        # And the closed default is still the closed one.
+        assert "--no-allow-unauthenticated" in branch[branch.index("else"):]
+
+    def test_no_principal_is_granted_the_invoker_role_directly(self):
+        """Separate from the flag: the script could grant `allUsers` the invoker role with an
+        `add-iam-policy-binding`, which it already uses that exact command shape for elsewhere."""
         for principal in ("allUsers", "allAuthenticatedUsers"):
             assert principal not in DEPLOY, f"{principal} is granted access"
+
+    def test_every_route_that_does_work_requires_an_analyst(self):
+        """Cloud Run's IAM layer used to protect these by itself. With ingress open, a route that
+        runs a reconciliation or reports internals needs a check of its own."""
+        import inspect
+
+        from nav_sentinel import server
+
+        for name in ("operations_console", "cycle", "selftest"):
+            source = inspect.getsource(getattr(server, name))
+            assert "_require_analyst(request)" in source, name
 
     def test_it_runs_as_a_dedicated_service_account(self):
         assert "--service-account" in DEPLOY
@@ -313,6 +337,20 @@ class TestTheDeploymentPosture:
             assert kept not in teardown, f"teardown removes {kept}, making deploy unreproducible"
 
 
+def _analyst_client():
+    """A client with a signed-in analyst.
+
+    `/cycle` and `/selftest` do real work and report internals, so they stopped relying on Cloud
+    Run's IAM layer alone when ingress became openable. Without a session they now answer 401,
+    which is the point.
+    """
+    from nav_sentinel.webapp import session
+
+    client = TestClient(server.app)
+    client.cookies.set(session.COOKIE, session.sign(session.ROSTER[1].subject))
+    return client
+
+
 class TestSpansAreExportedBeforeTheResponse:
     """Cloud Run throttles CPU when a request ends, so a background flush never runs. These pin
     the in-request flush that replaced it, and the fact that its failure cannot fail the request."""
@@ -343,7 +381,7 @@ class TestSpansAreExportedBeforeTheResponse:
         from nav_sentinel.control_plane import telemetry
 
         monkeypatch.setattr(telemetry, "flush", lambda *a, **k: False)
-        body = TestClient(server.app).get("/cycle/2026-08-17").json()
+        body = _analyst_client().get("/cycle/2026-08-17").json()
         assert body["spans_exported"] is False
 
     def test_the_push_handler_flushes_its_audit_spans(self, monkeypatch):
@@ -460,7 +498,7 @@ class TestTheSelfTestProvesReachabilityHonestly:
         monkeypatch.setattr(server.gateway, "admit_untrusted_content", fake_admit)
         monkeypatch.setattr(telemetry, "flush", lambda *a, **k: flush_ok)
         monkeypatch.setattr(telemetry, "export_target", lambda: "cloud-trace")
-        return TestClient(server.app).get("/selftest").json()
+        return _analyst_client().get("/selftest").json()
 
     def test_healthy_when_both_services_answer_and_the_filter_denies(self, monkeypatch):
         body = self._run(monkeypatch)
@@ -557,7 +595,7 @@ class TestTheSelfTestProvesReachabilityHonestly:
 
         monkeypatch.setattr(compliance, "probe_async", fake_probe)
 
-        body = TestClient(server.app).get("/selftest").json()
+        body = _analyst_client().get("/selftest").json()
         assert body["model_armor"]["injection_denied"] is True, "the probe never ran"
         assert gw.decision_log() == before, "the self-test left fabricated governance records"
 
@@ -744,3 +782,65 @@ class TestTheGovernanceLogSurvivesConcurrency:
 
         gateway.restore_decision_log(snapshot)
         assert gateway.decision_log() == snapshot
+
+
+class TestOpeningIngressDoesNotOpenTheseRoutes:
+    """Written when the service became browsable. Every route below does work or reports internals,
+    and each was protected only by Cloud Run's IAM layer until then."""
+
+    @pytest.mark.parametrize("path", ["/cycle/2026-08-17", "/selftest", "/console"])
+    def test_an_unauthenticated_caller_is_refused(self, path):
+        assert TestClient(server.app).get(path).status_code == 401
+
+    @pytest.mark.parametrize("path", ["/health", "/readyz"])
+    def test_the_liveness_probes_stay_open(self, path):
+        """Cloud Run calls these itself; requiring a session would fail every health check."""
+        assert TestClient(server.app).get(path).status_code == 200
+
+    def test_a_forged_session_cookie_does_not_open_them(self):
+        from nav_sentinel.webapp import session
+
+        client = TestClient(server.app)
+        client.cookies.set(session.COOKIE, "s.raghunathan@merian.example|deadbeef")
+        assert client.get("/console").status_code == 401
+
+
+class TestTheDeployPassesValuesThatContainSpecialCharacters:
+    """`--update-env-vars` splits on commas, and `NAV_ANALYSTS` is a comma-separated list of email
+    addresses. Three deploys failed on this: the default comma split parsed the second analyst as a
+    separate variable, and the first custom delimiter chosen was `@`, which is in every email
+    address on the list."""
+
+    def test_a_custom_delimiter_is_used(self):
+        assert "^|^" in DEPLOY, "the default comma split breaks NAV_ANALYSTS"
+
+    def test_the_delimiter_appears_in_none_of_the_values_it_separates(self):
+        """The actual property. `@` satisfied "a custom delimiter is used" and still failed."""
+        delimiter = "|"
+        for value in (
+            "fpachisa@gmail.com:controller,farhat@homecampus.ai:controller",   # NAV_ANALYSTS
+            "523099900380-qccq1vb0vi88uf0qofk0263p5u4gf7gs.apps.googleusercontent.com",
+            "https://nav-sentinel-rwkxhtvoeq-uc.a.run.app",                   # push audience
+            "nav-pubsub-push@all-things-agentic-hack-fp.iam.gserviceaccount.com",
+        ):
+            assert delimiter not in value, value
+
+    def test_the_analyst_table_round_trips_through_the_parser(self):
+        """End to end: the string the deploy sets is the string the parser reads."""
+        import os
+
+        from nav_sentinel.webapp import identity
+
+        raw = "fpachisa@gmail.com:controller,farhat@homecampus.ai:controller"
+        previous = os.environ.get("NAV_ANALYSTS")
+        os.environ["NAV_ANALYSTS"] = raw
+        try:
+            assert identity.authorised() == {
+                "fpachisa@gmail.com": "controller",
+                "farhat@homecampus.ai": "controller",
+            }
+        finally:
+            if previous is None:
+                os.environ.pop("NAV_ANALYSTS", None)
+            else:
+                os.environ["NAV_ANALYSTS"] = previous

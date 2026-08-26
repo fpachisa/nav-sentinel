@@ -173,6 +173,32 @@ def shell(title: str, body: str, *, principal: Principal | None, active: str = "
     )
 
 
+def signin_google(as_of: str, client: str) -> str:
+    """Real Google sign-in. The button is Google's own, and the token it returns is verified
+    server-side before a single claim in it is believed."""
+    return shell(
+        "Sign in — NAV Sentinel",
+        "<h1>Exception desk</h1>"
+        f'<p class="lede">Valuation point {_e(as_of)}. Sign in with Google to work the queue.</p>'
+        '<div class="card pad">'
+        f'<div id="g_id_onload" data-client_id="{_e(client)}" '
+        'data-callback="onCredential" data-auto_prompt="false"></div>'
+        '<div class="g_id_signin" data-type="standard" data-size="large" '
+        'data-text="signin_with" data-shape="rectangular"></div>'
+        '<form id="credform" method="post" action="/app/auth/google">'
+        '<input type="hidden" name="credential" id="credential"></form>'
+        "<script>function onCredential(r){"
+        "document.getElementById('credential').value=r.credential;"
+        "document.getElementById('credform').submit();}</script>"
+        '<script src="https://accounts.google.com/gsi/client" async defer></script>'
+        '<p class="muted" style="font-size:13px;margin:14px 0 0">Signing in proves who you are. '
+        "It grants nothing: the role that decides what you may sign comes from this deployment's "
+        "list of authorised analysts, and an address that is not on it can sign in and approve "
+        "nothing.</p></div>",
+        principal=None,
+    )
+
+
 def signin(as_of: str) -> str:
     """Choose an analyst. No password, and the page says why."""
     rows = "".join(
@@ -192,7 +218,11 @@ def signin(as_of: str) -> str:
         "correction at all, and two different controllers are needed for one.</p>"
         f'<div class="card scroll"><table><thead><tr><th>Analyst</th><th>Role</th>'
         f"<th>What the role may sign</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>"
-        '<p class="note" style="margin-top:16px">There is no password here, and nothing is '
+        '<p class="note deny" style="margin-top:16px"><b>Local mode — identities are not '
+        "verified.</b> No OAuth client is configured, so this deployment falls back to a fixed "
+        "roster. The deployed service uses Google sign-in and checks the token before believing "
+        "any claim in it.</p>"
+        '<p class="note" style="margin-top:12px">There is no password here, and nothing is '
         "collected. Identity in front of this service is the deployment's job — Cloud Run refuses "
         "anonymous callers before a request reaches this code. What a service token cannot carry is "
         "<em>which analyst</em> is acting, and four-eyes has to count people, so the roster is "

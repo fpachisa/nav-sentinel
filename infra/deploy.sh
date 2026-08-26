@@ -26,11 +26,40 @@ DLQ_TOPIC="nav-exceptions-dlq"
 # key in a public repository is every session forgeable by anyone who reads it. Rotating it on each
 # deploy signs analysts out, which is the correct trade for a key nobody has to store.
 SESSION_SECRET="$(openssl rand -hex 32)"
+
+# Google sign-in for the exception desk. Set both to make the service browsable by real people:
+#   NAV_OAUTH_CLIENT_ID  the Web OAuth client id, created in the Console
+#   NAV_ANALYSTS         who may sign, and as what: "a@x.com:controller,b@y.com:controller"
+#
+# With them set, the service is deployed --allow-unauthenticated and the *application* authenticates,
+# verifying a Google ID token before believing any claim in it. Without them it stays IAM-locked and
+# the desk falls back to a labelled local roster.
+#
+# The Pub/Sub handler is unaffected either way: it verifies the push token's audience itself and
+# fails closed, so machine ingress never depended on the Cloud Run layer alone.
+# `--update-env-vars` splits on commas by default, and `NAV_ANALYSTS` is a comma-separated list --
+# so a second analyst was parsed as a separate variable and the deploy failed with "Bad syntax for
+# dict arg". The `^|^` prefix is gcloud's own escaping: it sets the separator for that flag.
+# `|` and not `@`, which was the first attempt and is in every email address on the list.
+OAUTH_CLIENT_ID="${NAV_OAUTH_CLIENT_ID:-}"
+ANALYSTS="${NAV_ANALYSTS:-}"
+
 # `NAV_REPOSITORY` stated explicitly even though the server derives it from `NAV_APPROVALS`: a
 # deployment writing its audit trail to memory looks identical to a healthy one from outside, so the
 # intent is named rather than inferred. `/readyz` now refuses to report ready unless it is durable.
 
 say() { printf "\n\033[1m== %s\033[0m\n" "$1"; }
+
+# Only open the door when the application can actually check who walks through it. Tying the two
+# together means there is no configuration in which the service is reachable by anyone *and*
+# authenticates nobody -- which is what "--allow-unauthenticated for the demo" usually becomes.
+if [ -n "$OAUTH_CLIENT_ID" ] && [ -n "$ANALYSTS" ]; then
+  ACCESS_FLAG="--allow-unauthenticated"
+  say "Access : public ingress, Google sign-in enforced by the application"
+else
+  ACCESS_FLAG="--no-allow-unauthenticated"
+  say "Access : IAM-locked (set NAV_OAUTH_CLIENT_ID and NAV_ANALYSTS for browser sign-in)"
+fi
 
 if [[ "$(gcloud config get-value project 2>/dev/null)" != "$PROJECT" ]]; then
   echo "gcloud is pointed at $(gcloud config get-value project 2>/dev/null), not $PROJECT." >&2
@@ -67,8 +96,8 @@ gcloud run deploy "$SERVICE" \
   --region "$REGION" \
   --project "$PROJECT" \
   --service-account "$RUNTIME_SA" \
-  --no-allow-unauthenticated \
-  --update-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,NAV_REGION=${REGION},GOOGLE_GENAI_USE_VERTEXAI=true,NAV_APPROVALS=firestore,NAV_REPOSITORY=firestore,NAV_SESSION_SECRET=${SESSION_SECRET},NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
+  ${ACCESS_FLAG} \
+  --update-env-vars "^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GOOGLE_CLOUD_LOCATION=global|NAV_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|NAV_APPROVALS=firestore|NAV_REPOSITORY=firestore|NAV_SESSION_SECRET=${SESSION_SECRET}|NAV_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}|NAV_ANALYSTS=${ANALYSTS}|NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
   --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \

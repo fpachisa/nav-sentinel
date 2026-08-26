@@ -16,21 +16,22 @@ gcloud pubsub topics publish nav-exceptions --message '{"as_of":"2026-08-17"}' \
 # 2. Clean opening state. Safe to re-run between takes; it never touches the audit trail.
 NAV_REPOSITORY=firestore make demo-reset
 
-# 3. Serve the desk locally for shots 1–6 (the deployed one needs a token per request in a browser).
-NAV_REPOSITORY=firestore make app     # http://127.0.0.1:8080/app
 ```
 
 Then wait a minute before filming shot 7 so the traces have indexed.
 
-**Why local for shots 1–6 and deployed for shot 7.** The Cloud Run service runs
-`--no-allow-unauthenticated`, so a browser hitting it gets a 403 — which is correct, and is itself
-shot 7's opening beat. Driving the *interface* through `gcloud run services proxy` works but puts
-`localhost` in the address bar anyway, so it buys nothing. Film the interaction locally against the
-same Firestore, and prove the deployment separately and explicitly.
+**Film everything on the deployed URL.**
 
-Say that out loud if you want to be beyond reproach: *"the interface is running locally against the
-same Firestore; here is the same service on Cloud Run."* A judge who spots `127.0.0.1` unremarked
-will assume it is all local.
+    https://nav-sentinel-rwkxhtvoeq-uc.a.run.app/app
+
+The service is public *ingress* with Google sign-in enforced by the application, so a browser reaches
+the sign-in page and a real Google account signs in. Nothing needs to run locally, and the address
+bar carries the `.run.app` URL through every shot — which is the required proof, obtained for free
+rather than staged at the end.
+
+**Before you record, sign in once with both accounts.** The consent screen is in testing mode, so
+both addresses have to be listed as *Test users*, and `farhat@homecampus.ai` is a Workspace account
+whose admin may block third-party apps. Find that out now rather than on camera.
 
 ## Capture
 
@@ -43,6 +44,7 @@ continuous track you cut to anyway.
 
 | Clip | What is on screen | Live? |
 | --- | --- | --- |
+| 0 | The sign-in page, then signing in with Google | — |
 | 1 | Queue, seven rows | — |
 | 2 | Fleet page, then `make registry` in a terminal | — |
 | 3 | Case page, the "what the numbers say" panel | — |
@@ -58,17 +60,25 @@ and trim words elsewhere.
 **Clip 5 is the video.** Three refusals and a grant, in that order, with the red panel at the end.
 Do it slowly enough to read.
 
-## The two curls, shot 7
+## Shot 7, the Google Cloud proof
 
-Have these ready in a large-font terminal:
+The address bar has already been showing `.run.app` for six shots, so this shot is about the
+*infrastructure* rather than the URL:
+
+1. **Cloud Console → Cloud Run → `nav-sentinel`** — region, live revision, the `nav-runtime` service
+   account, the request graph.
+2. **Cloud Console → Firestore** — the `nav_stages` and `nav_decisions` collections.
+3. **Cloud Console → Trace** — the per-case traces.
+4. A terminal, to show that opening the door did not open everything:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' $URL/app                                 # 403
-curl -s -H "Authorization: Bearer $TOKEN" $URL/readyz | python3 -m json.tool      # 200
+curl -s -o /dev/null -w '%{http_code}\n' $URL/cycle/2026-08-17    # 401 — needs an analyst
+curl -s $URL/readyz -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
-The second prints `"repository": "FirestoreRepository"` — which is the line to linger on, because it
-is the service telling you it is persisting rather than you asserting it.
+`/readyz` prints `"repository": "FirestoreRepository"` — the line to linger on, because it is the
+service telling you it persists rather than you asserting it. And the 401 on `/cycle` is worth a
+sentence: ingress is public, that route still refuses, and the two are not the same thing.
 
 ## Assemble
 

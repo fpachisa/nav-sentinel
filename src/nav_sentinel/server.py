@@ -320,12 +320,14 @@ def handle_exception(envelope: PubSubEnvelope, claims: dict = Depends(verify_pus
 
 
 @app.get("/cycle/{as_of}")
-def cycle(as_of: str) -> dict:
-    """Run one cycle and return its summary. Authenticated by Cloud Run IAM.
+def cycle(as_of: str, request: Request) -> dict:
+    """Run one cycle and return its summary. **Requires a signed-in analyst.**
 
-    This is the endpoint the demo drives, and it returns trace ids so a reviewer can open the
-    reasoning chain in Cloud Trace rather than taking the summary on trust.
+    It returns trace ids so a reviewer can open the reasoning chain in Cloud Trace rather than
+    taking the summary on trust. It also *does work*, which is why it no longer leans on the Cloud
+    Run IAM layer alone: this route became reachable by anyone the moment ingress opened.
     """
+    _require_analyst(request)
     try:
         day = date.fromisoformat(as_of)
     except ValueError as exc:
@@ -380,8 +382,22 @@ from nav_sentinel.webapp.routes import router as _app_router  # noqa: E402
 app.include_router(_app_router)
 
 
+def _require_analyst(request: Request) -> None:
+    """Refuse anyone who is not a signed-in analyst.
+
+    Needed the moment ingress opens. Cloud Run's IAM layer used to protect every route by itself,
+    so routes that do real work carried no check of their own -- and `--allow-unauthenticated`
+    would have published `/cycle`, which *runs a reconciliation*, and `/selftest`, to the internet.
+    "Allow unauthenticated for the demo" is usually exactly this, unnoticed.
+    """
+    from nav_sentinel.webapp import session
+
+    if session.verify(request.cookies.get(session.COOKIE)) is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "sign in at /app")
+
+
 @app.get("/console", response_class=HTMLResponse)
-def operations_console(case_id: str = "") -> str:
+def operations_console(request: Request, case_id: str = "") -> str:
     """The operations console: the fleet, one case, its evidence, its governance log.
 
     **Read-only, and that is a governance decision rather than a limitation.** Approval stays behind
@@ -394,6 +410,7 @@ def operations_console(case_id: str = "") -> str:
     its own data would need an identity token per fetch and would fail looking like an empty system
     rather than an auth problem -- so the whole page is rendered in one GET.
     """
+    _require_analyst(request)
     from nav_sentinel import composition, console
 
     composition.configure()
@@ -425,7 +442,7 @@ def _default_case() -> str:
 
 
 @app.get("/selftest")
-async def selftest() -> dict:
+async def selftest(request: Request) -> dict:
     """Prove, from inside Cloud Run, that this service can reach the two managed services it
     depends on -- and that one of them denies.
 
@@ -438,6 +455,7 @@ async def selftest() -> dict:
 
     Authenticated by Cloud Run IAM, like every other endpoint here.
     """
+    _require_analyst(request)
     from nav_sentinel import compliance
     from nav_sentinel.control_plane import identity
 
