@@ -5,17 +5,19 @@ An approval in this system is a **signature by a named principal holding a role*
 identity is not decoration here: it is the input to the control the whole project is about. A page
 that let an operator approve as "the user" would make four-eyes uncountable.
 
-**This is demo authentication and says so.** A fixed roster, no passwords, nothing to collect. Real
-deployments put an identity provider in front (Cloud Run IAM or IAP already refuses anonymous
-callers before a request reaches this code, and the handler verifies the OIDC audience for Pub/Sub);
-what this module adds is *which analyst* is acting, which a service-to-service token does not carry.
-Choosing from a roster is honest about that. Prompting for a password would not be: it would collect
-a credential nothing verifies.
+This module is the *cookie*: it decides who the current request belongs to. Where the subject came
+from is `identity`'s problem -- a verified Google account when this deployment has an OAuth client,
+a fixed roster when it does not, and the sign-in page says which is in force.
 
-The session is a cookie carrying the chosen subject, signed with HMAC-SHA256. Signed rather than
-plain because an unsigned cookie is an identity anyone can type -- and an application about
-zero-trust access that let a viewer edit their own role in devtools would be making the opposite
-point.
+The cookie carries the subject and nothing else, signed with HMAC-SHA256. Signed rather than plain
+because an unsigned cookie is an identity anyone can type, and an application about zero-trust access
+that let a viewer edit their own role in devtools would be making the opposite point.
+
+**The role is deliberately not in the cookie.** It is looked up on every request, so removing someone
+from `NAV_ANALYSTS` ends their session at the next click rather than whenever the cookie happens to
+expire, and demoting a CIO to reviewer takes effect immediately. A role baked in at sign-in would be
+an authority that outlives the decision to grant it -- the session equivalent of a stale access
+badge. It costs an environment-variable parse per request and buys revocation.
 """
 
 from __future__ import annotations
@@ -28,12 +30,14 @@ from dataclasses import dataclass
 
 from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS, Principal
 from nav_sentinel.control_plane.governance import ApprovalClass
+from nav_sentinel.webapp import identity
 
 COOKIE = "nav_analyst"
 
-#: The roster. Fixed, server-side, and chosen so every band in `BAND_REQUIREMENTS` is reachable and
-#: every refusal is demonstrable: a reviewer cannot sign four-eyes at all, one controller cannot sign
-#: it alone, two can, and only the CIO can clear an escalation.
+#: The roster, used **only** when no OAuth client is configured. Chosen so every band in
+#: `BAND_REQUIREMENTS` is reachable and every refusal is demonstrable: a reviewer cannot sign
+#: four-eyes at all, one controller cannot sign it alone, two can, and only the CIO can clear an
+#: escalation. A deployment that verifies Google identities ignores this entirely -- see `verify`.
 ROSTER: tuple[Principal, ...] = (
     Principal(subject="a.okafor@merian.example", role="reviewer"),
     Principal(subject="j.laurent@merian.example", role="controller"),
@@ -80,6 +84,15 @@ def verify(cookie: str | None) -> Principal | None:
 
     `compare_digest`, not `==`: comparing MACs with a short-circuiting equality leaks their contents
     through timing, which is a real attack on a real signature and a free fix.
+
+    A valid signature proves only that *this deployment issued this subject*. The role is resolved
+    afterwards, and from the source this deployment actually trusts: the analyst table when Google
+    sign-in is configured, the roster when it is not. The two never both apply. A real deployment
+    must not also honour the demo roster, whose subjects are published in this repository -- that is
+    the shape of back door that gets left in because it was convenient during development.
+
+    Resolving here rather than at sign-in is what makes removal work: the table is read on every
+    request, so an analyst taken off it stops being able to act immediately.
     """
     if not cookie or "|" not in cookie:
         return None
@@ -87,6 +100,9 @@ def verify(cookie: str | None) -> Principal | None:
     expected = hmac.new(_secret(), subject.encode(), hashlib.sha256).hexdigest()[:32]
     if not hmac.compare_digest(mac, expected):
         return None
+    if identity.uses_google():
+        role = identity.authorised().get(subject)
+        return Principal(subject=subject, role=role) if role else None
     return next((p for p in ROSTER if p.subject == subject), None)
 
 

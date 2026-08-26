@@ -208,6 +208,7 @@ def readyz() -> dict:
     from nav_sentinel import composition
     from nav_sentinel.control_plane import packs
     from nav_sentinel.registry import discover
+    from nav_sentinel.webapp import identity
 
     processes = [p.key for p in packs.registered()]
     agents = len(discover.all_agents())
@@ -229,12 +230,26 @@ def readyz() -> dict:
             f"configured for firestore and running {backend}: this service would write its audit "
             f"trail to memory and lose it when the instance scales down",
         )
+    # The analyst table is parsed here so a typo in `NAV_ANALYSTS` fails readiness rather than every
+    # page. The role is resolved per request, which means a malformed table would otherwise surface
+    # as a 500 on whatever an analyst happened to click -- a configuration error reported as a
+    # service fault, in the one place nobody would look for it.
+    try:
+        signatories = len(identity.authorised())
+    except ValueError as malformed:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, f"NAV_ANALYSTS is unusable: {malformed}"
+        ) from malformed
+    # Public ingress with an empty table is a deployment nobody can sign into. Reported, not
+    # refused: it is a legitimate state for a service that only takes Pub/Sub traffic.
     return {
         "status": "ready",
         "processes": processes,
         "agents": agents,
         "repository": backend,
         "capabilities": len(discover.coverage()),
+        "identity": "google" if identity.uses_google() else "roster",
+        "signatories": signatories,
     }
 
 
