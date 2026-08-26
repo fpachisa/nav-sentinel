@@ -19,23 +19,35 @@ voice says what it means. Numbers are written the way they should be said.
 > A fund publishes a price for itself every day. Investors deal at that price, so a wrong one means
 > compensating them and explaining yourself to a regulator.
 >
-> Every morning the fund's books disagree with the custodian's somewhere, and someone has to find
-> out why before the deadline. I sign in with Google. This is that desk: seven differences today, and
+> Every morning the books disagree with the custodian's somewhere, and someone must find out why
+> before the deadline. I sign in with Google. This is that desk: seven differences today, and
 > the column on the right is who is legally required to sign.
 
 *Silence: 3s on the queue.*
 
 ---
 
-## 2 · The stack — 0:35–0:55 · 52 words
+## 2 · The stack — 0:35–0:58 · 68 words
 
-> Eight agents, built on Google's Agent Development Kit version two, running Gemini three-point-seven
-> Flash for reasoning and three-point-five Flash Lite for classification, served by Vertex AI.
+> Eight agents on Google's Agent Development Kit version two, running Gemini three-point-seven Flash
+> for reasoning and three-point-five Flash Lite for classification, on Vertex AI.
 >
-> None of them is named in the application code. They're discovered from the registry by the
-> capability they declare — and five capabilities here resolve to nobody.
+> None is named in the application code — each is discovered from the registry by the capability it
+> declares. Four capabilities have no authorised agent, so a break classified as one of those is
+> refused at routing. No agent runs. It stays in the queue as human work.
 
-*On screen while this is said: the Fleet page, `gemini-3.7-flash` visible per agent.*
+*On screen while this is said: the Fleet page, `gemini-3.7-flash` visible per agent, and the routing
+table showing `NO PUBLISHED AGENT` against four capabilities.*
+
+**Say four, not seven.** The page reports fourteen declared capabilities: seven routed, four with
+nobody published to handle them, and three `.unclassified` sentinels — the value triage returns when
+no root-cause family fits, which must never have an agent. Those three are not gaps, and the Fleet
+page labels them separately so the screen and the narration agree.
+
+**Why this line is in the video at all.** It is the difference between this fleet and a demo. The
+tempting alternative is to hand an unroutable break to whichever agent looks closest, which returns
+a confident, wrong root cause with real citations attached — and an audit trail saying a specialist
+established it. Refusing is the harder behaviour and the only defensible one.
 
 ---
 
@@ -44,8 +56,8 @@ voice says what it means. Numbers are written the way they should be said.
 > Open one. Before a single model call: quantity agrees, price agrees, market value differs by
 > eighty-six thousand euros — and the exchange rate applied differs.
 >
-> That's arithmetic over two books. A model here would be spending a request to be told what the
-> numbers already say.
+> That's arithmetic. A model here would be spending a request to be told what the numbers already
+> say.
 
 ---
 
@@ -56,7 +68,7 @@ voice says what it means. Numbers are written the way they should be said.
 *Silence: 12–20s while it actually runs. Do not cut this — a visible wait is evidence.*
 
 > Triage classified it, the registry chose the agent authorised for that capability, and that agent
-> investigated using only the tools its own manifest allows.
+> investigated using only the tools its manifest allows.
 >
 > It found the stale rate and cited the European Central Bank data it read, with a digest of the
 > response — so the citation can be checked, not trusted. The correction balances: two legs, residual
@@ -89,7 +101,7 @@ voice says what it means. Numbers are written the way they should be said.
 > the gateway and under its own identity, who dealt at the wrong price. A repeat is judged more
 > harshly than a first.
 >
-> Four departments, twenty-eight business days. A payment file arrived before approval: refused, and
+> Three departments, twenty-eight business days. A payment file arrived before approval: refused, and
 > recorded. The wall clock is compressed; the business dates are not.
 
 ---
@@ -102,8 +114,8 @@ voice says what it means. Numbers are written the way they should be said.
 > a session: four oh one. And it reports that it's persisting to Firestore rather than to memory,
 > because a service holding its audit trail in memory looks identical to a healthy one from outside.
 >
-> Here are the stage transitions and the policy decisions in Firestore. And here are the traces, one
-> per delivered event.
+> Here are the stage transitions and policy decisions in Firestore, and the traces, one per
+> delivered event.
 
 *Fire the traffic before this shot — Cloud Trace indexes with about forty-five seconds of lag.*
 

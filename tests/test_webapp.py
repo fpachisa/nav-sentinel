@@ -328,3 +328,48 @@ class TestTheRemediationPageFindsTheCaseTheStoreActuallyHolds:
 
         monkeypatch.setattr(composition, "store", unreachable)
         assert routes._default_remediation_case().startswith("CASE-REM-")
+
+
+class TestTheFleetPageDoesNotCountASentinelAsAGap:
+    """`nav.unclassified` is the value triage returns when no root-cause family fits, and it must
+    never have an agent -- routing it would be routing "I do not know" to a specialist. Counting
+    the three `.unclassified` capabilities alongside the real gaps reported seven where there are
+    four, and put two different things under one label on the page a judge reads."""
+
+    def _page(self):
+        from nav_sentinel.control_plane.approvals import Principal
+        from nav_sentinel.webapp import pages
+
+        composition.configure()
+        return pages.fleet(principal=Principal(subject="a@b.example", role="controller"))
+
+    def test_a_sentinel_is_labelled_as_one_rather_than_as_an_unhandled_capability(self):
+        html = self._page()
+        assert "sentinel &mdash; always a human" in html
+        # The genuine gaps keep the loud treatment; the sentinels must not have it.
+        assert html.count("NO PUBLISHED AGENT") == 4, (
+            "the count of loudly-unhandled capabilities changed; if a manifest was published or "
+            "a capability declared, the narration and README say four"
+        )
+
+    def test_the_counts_add_up_to_every_declared_capability(self):
+        from nav_sentinel.registry import discover
+
+        composition.configure()
+        coverage = discover.coverage()
+        sentinels = [c for c, r in coverage.items() if r is None and c.endswith(".unclassified")]
+        gaps = [c for c, r in coverage.items() if r is None and c not in sentinels]
+        routed = [c for c, r in coverage.items() if r is not None]
+        assert len(routed) + len(gaps) + len(sentinels) == len(coverage)
+        assert (len(routed), len(gaps), len(sentinels)) == (7, 4, 3), (
+            f"routed={len(routed)} gaps={len(gaps)} sentinels={len(sentinels)}; the narration "
+            f"says four capabilities have no authorised agent"
+        )
+
+    def test_the_page_says_what_happens_to_a_refused_capability(self):
+        """The old copy said gaps "escalate loudly", which names no consequence. A viewer asked
+        what actually happens to them, and the page could not answer."""
+        html = self._page()
+        assert "refused at routing" in html
+        assert "no agent is invoked" in html
+        assert "stays in the queue as human work" in html

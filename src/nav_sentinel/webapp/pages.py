@@ -933,17 +933,29 @@ def fleet(*, principal: Principal) -> str:
         )
 
     coverage = discover.coverage()
-    gaps = sum(1 for ref in coverage.values() if ref is None)
+    # Two different things, and counting them together overstated the gaps by three. A `.unclassified`
+    # capability is the value triage returns when no root-cause family fits, and it must *never*
+    # have an agent -- routing it would be routing "I do not know" to a specialist. A genuine gap is
+    # a declared family that simply has nobody published to handle it.
+    sentinels = {c for c, ref in coverage.items() if ref is None and c.endswith(".unclassified")}
+    gaps = sum(1 for c, ref in coverage.items() if ref is None and c not in sentinels)
     rows = ""
     for capability, ref in sorted(coverage.items()):
         owner = packs.process_of(capability)
-        routed = (
-            f'<span class="mono" style="font-size:11.5px">{_e(ref)}</span>'
-            if ref
-            else '<span class="none">NO PUBLISHED AGENT</span>'
-        )
+        if ref:
+            routed, rail = (
+                f'<span class="mono" style="font-size:11.5px">{_e(ref)}</span>',
+                "single_reviewer",
+            )
+        elif capability in sentinels:
+            routed, rail = (
+                '<span class="muted" style="font-size:11.5px">sentinel &mdash; always a human</span>',
+                "auto_clear",
+            )
+        else:
+            routed, rail = '<span class="none">NO PUBLISHED AGENT</span>', "cio_escalation"
         rows += (
-            f'<tr><td class="rail r-{"single_reviewer" if ref else "cio_escalation"}">'
+            f'<tr><td class="rail r-{rail}">'
             f"<code>{_e(capability)}</code></td>"
             f"<td>{_e(owner.name if owner else '—')}</td><td>{routed}</td></tr>"
         )
@@ -958,7 +970,7 @@ def fleet(*, principal: Principal) -> str:
         f'<div class="sub">across {len(packs.registered())} departments</div></div>'
         f'<div class="tile t-esc"><div class="lbl">Coverage gaps</div>'
         f'<div class="big">{gaps}</div>'
-        '<div class="sub">escalate rather than misroute</div></div>'
+        f'<div class="sub">declared, with nobody published to handle them</div></div>'
         '<div class="tile t-four"><div class="lbl">Posting authority</div>'
         '<div class="big">0</div>'
         '<div class="sub">no agent holds it, at any size</div></div>'
@@ -977,12 +989,17 @@ def fleet(*, principal: Principal) -> str:
         + f'<h2>Published agents</h2><div class="cards">{cards}</div>'
         + '<h2>Capability coverage</h2>'
         + f'<div class="panel"><div class="panel-h"><b>Routing table</b>'
-        f'<span class="r">{gaps} of {len(coverage)} published by nobody</span></div>'
+        f'<span class="r">{len(coverage) - gaps - len(sentinels)} routed &middot; {gaps} unhandled '
+        f'&middot; {len(sentinels)} sentinels</span></div>'
         '<div class="scroll"><table><thead><tr><th>Capability</th><th>Owning process</th>'
         f"<th>Authorised agent</th></tr></thead><tbody>{rows}</tbody></table></div></div>"
-        '<div class="note" style="margin-top:14px">A capability with no published agent is '
-        "<b>refused</b>, not routed to whichever agent looks closest. A fleet's coverage gaps are "
-        "a fact about it, and the honest behaviour is to escalate loudly.</div>",
+        '<div class="note" style="margin-top:14px">A break classified into a capability with no '
+        "published agent is <b>refused at routing</b>: no agent is invoked, no cause is asserted, "
+        "and the case stays in the queue as human work with the refusal recorded against it. The "
+        "alternative is what a naive fleet does &mdash; hand it to whichever agent looks closest, "
+        "which returns a confident and wrong root cause with real citations attached. A "
+        "<code>.unclassified</code> capability is different again: it is the value triage returns "
+        "when no family fits, so it must never have an agent at all.</div>",
         principal=principal,
         active="fleet",
     )

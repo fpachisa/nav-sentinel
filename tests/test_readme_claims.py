@@ -221,3 +221,46 @@ class TestTheSubmissionCopyIsTrue:
         assert signed_in_host in DEVPOST
         assert signed_in_host in runbook
         assert "nav-sentinel-523099900380.us-central1.run.app/app" not in DEVPOST
+
+
+class TestTheDepartmentCountIsTheRegisteredOne:
+    """The README and the narration both said "four departments" while three processes are
+    registered and the Fleet page renders "across 3 departments". A number that contradicts the
+    screen behind it is worse in a video than a vaguer claim would have been."""
+
+    def test_no_document_claims_more_departments_than_the_seam_hosts(self):
+        from nav_sentinel import composition
+        from nav_sentinel.control_plane import packs
+
+        composition.configure()
+        hosted = len(packs.registered())
+        words = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+        narration = (ROOT / "docs" / "submission" / "narration.md").read_text()
+
+        for name, text in (("README.md", README), ("devpost.md", DEVPOST),
+                           ("narration.md", narration)):
+            for count, word in words.items():
+                if count == hosted:
+                    continue
+                for phrase in (f"{word} departments", f"{count} departments"):
+                    assert phrase not in text.lower(), (
+                        f"{name} says {phrase!r}; the seam hosts {hosted} processes"
+                    )
+
+    def test_the_narration_and_the_fleet_page_agree_on_unhandled_capabilities(self):
+        """Scene 2 names a number that is on screen while it is said."""
+        from nav_sentinel import composition
+        from nav_sentinel.registry import discover
+
+        composition.configure()
+        coverage = discover.coverage()
+        gaps = sum(
+            1
+            for c, ref in coverage.items()
+            if ref is None and not c.endswith(".unclassified")
+        )
+        narration = (ROOT / "docs" / "submission" / "narration.md").read_text()
+        words = {3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven"}
+        assert f"{words[gaps]} capabilities have no authorised agent" in narration, (
+            f"there are {gaps} unhandled capabilities; the narration names a different number"
+        )

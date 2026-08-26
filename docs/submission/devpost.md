@@ -142,7 +142,7 @@ authenticates nobody.
   a fresh process from Firestore — not a session, not a cache.
 - The audit trail records refusals, not just actions. You can ask what the fleet was prevented
   from doing.
-- 891 offline tests that run in about eight seconds and need no cloud credentials, plus a
+- 896 offline tests that run in about eight seconds and need no cloud credentials, plus a
   documented list of the project's **known defects** in the README. The honest ones are the
   useful ones.
 - The control plane is genuinely process-agnostic, proven by three processes rather than
