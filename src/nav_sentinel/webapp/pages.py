@@ -281,6 +281,34 @@ ul.plain li{margin:3px 0}
   background:var(--bg);border:1px solid var(--hair);border-radius:4px;padding:1.5px 6px;
   margin:0 3px 3px 0;color:var(--soft)}
 
+/* ---- progress ----------------------------------------------------------------------------- */
+.pstep{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--hair);
+  font-size:12.5px;color:var(--faint)}
+.pstep:last-of-type{border-bottom:0}
+.pdot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);flex:none;
+  position:relative}
+.plabel{min-width:0}
+.pnote{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.pstep[data-state=running]{color:var(--ink);font-weight:600}
+.pstep[data-state=running] .pdot{border-color:var(--accent);border-right-color:transparent;
+  animation:spin .8s linear infinite}
+.pstep[data-state=done]{color:var(--soft)}
+.pstep[data-state=done] .pdot{border-color:var(--cleared);background:var(--cleared)}
+.pstep[data-state=done] .pdot:after{content:"";position:absolute;left:3px;top:1px;width:4px;
+  height:7px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(40deg)}
+.pstep[data-state=refused]{color:var(--escalate);font-weight:600}
+.pstep[data-state=refused] .pdot{border-color:var(--escalate);background:var(--escalate)}
+.pstep[data-state=skipped]{color:var(--faint);text-decoration:line-through}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bar{height:4px;border-radius:3px;background:var(--hair);overflow:hidden;margin-top:12px}
+.bar i{display:block;height:100%;width:30%;border-radius:3px;background:var(--accent);
+  animation:slide 1.5s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
+#work-progress.finished .bar{display:none}
+.reveal{animation:reveal .45s ease-out}
+@keyframes reveal{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
 /* ---- sign in ------------------------------------------------------------------------------ */
 .auth{min-height:100vh;display:grid;grid-template-columns:1.05fr .95fr}
 @media (max-width:940px){.auth{grid-template-columns:1fr}.auth-l{display:none}}
@@ -327,6 +355,74 @@ ul.plain li{margin:3px 0}
 .empty{text-align:center;padding:48px 20px}
 .empty .mark{width:34px;height:34px;color:var(--line);margin-bottom:12px}
 """
+
+
+#: Streams the investigation into the page. Progressive enhancement: the plain form POST below is
+#: what runs without JavaScript, and it is the path the tests drive -- so the fallback cannot rot
+#: into something that only works because nobody uses it.
+#:
+#: `fetch` with a POST rather than `EventSource`, which can only issue a GET. A GET that spends
+#: money on model calls is one a link preview or a prefetch can trigger, and this endpoint bills
+#: Vertex AI per click.
+_WORK_SCRIPT = """<script>
+(function(){
+  var form = document.getElementById('work-form');
+  if (!form || !window.fetch) return;                 // no JS, or no fetch: the form POST stands
+  form.addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var btn = form.querySelector('button');
+    btn.disabled = true;                              // one click is one investigation
+    var rail = document.getElementById('case-rail');
+    var host = document.getElementById('case-sections');
+    rail.innerHTML = form.dataset.progress;
+    var steps = {};
+    rail.querySelectorAll('.pstep').forEach(function(el){ steps[el.dataset.stage] = el; });
+
+    function mark(stage, state, note){
+      var el = steps[stage];
+      if (!el) return;
+      el.dataset.state = state;
+      if (note) el.querySelector('.pnote').textContent = note;
+    }
+
+    fetch(form.dataset.stream, {method:'POST', headers:{'Accept':'application/x-ndjson'}})
+      .then(function(res){
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+        function pump(){
+          return reader.read().then(function(r){
+            if (r.done) return;
+            buf += dec.decode(r.value, {stream:true});
+            var lines = buf.split('\n');
+            buf = lines.pop();
+            lines.forEach(function(line){
+              if (!line) return;
+              var ev = JSON.parse(line);
+              if (ev.stage) mark(ev.stage, ev.state, ev.detail);
+              if (ev.html) {
+                var box = document.createElement('div');
+                box.className = 'reveal';
+                box.innerHTML = ev.html;
+                host.appendChild(box);
+              }
+              if (ev.state === 'finished') {
+                document.getElementById('work-progress').classList.add('finished');
+                document.getElementById('work-status').textContent = 'complete';
+                rail.innerHTML = ev.rail;
+              }
+              if (ev.state === 'failed') {
+                document.getElementById('work-status').textContent = 'failed';
+                mark(ev.stage || 'triage', 'refused', ev.detail || 'failed');
+              }
+            });
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function(){ location.reload(); });       // whatever happened, the store is the truth
+  });
+})();
+</script>"""
 
 
 def _e(value: Any) -> str:
@@ -580,7 +676,7 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
             "No model is called to find a break. Comparing two books is arithmetic, and asking a "
             "model to do subtraction would be spending a request to be told what the numbers "
             "already say.</p>"
-            '<form method="post" action="/app/cycle">'
+            '<form method="post" action="/app/cycle" onsubmit="var b=this.querySelector(\'button\');b.disabled=true;b.textContent=\'Running…\';">'
             '<button class="btn" type="submit">Run reconciliation</button></form>'
             "</div></div>"
         )
@@ -640,7 +736,7 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
             f"{len(items)} differences at the {_e(as_of)} valuation point, {worked} investigated. "
             "Impact is basis points of NAV; the band is derived by the control plane from that "
             "magnitude and decides who must sign.",
-            actions='<form method="post" action="/app/cycle">'
+            actions='<form method="post" action="/app/cycle" onsubmit="var b=this.querySelector(\'button\');b.disabled=true;b.textContent=\'Running…\';">'
             '<button class="btn ghost" type="submit">Re-run reconciliation</button></form>',
         )
         + tiles
@@ -720,18 +816,11 @@ def _proposal(proposal: dict[str, Any] | None) -> str:
     )
 
 
-def case(detail: dict[str, Any], *, principal: Principal) -> str:
-    """One exception, from the numbers through the reasoning to the signature."""
-    document = detail["document"]
-    case_id = str(document.get("case_id", ""))
-    band = str(document.get("approval_band", "single_reviewer"))
-    triage = document.get("triage")
-    verdict = document.get("verdict")
-    signed = list(document.get("signed_by", []))
-
-    left = (
+def _case_header(document: dict[str, Any], band: str) -> str:
+    return (
         '<div class="panel"><div class="panel-h"><b>Case</b>'
-        f'<span class="r mono">{_e(case_id)}</span></div><div class="pad"><dl class="kv">'
+        f'<span class="r mono">{_e(document.get("case_id", ""))}</span></div>'
+        '<div class="pad"><dl class="kv">'
         f'<dt>Valuation point</dt><dd class="num">{_e(document.get("as_of"))}</dd>'
         f'<dt>NAV impact</dt><dd class="num" style="font-weight:600">'
         f'{_e(document.get("impact_bps"))} bps</dd>'
@@ -739,57 +828,138 @@ def case(detail: dict[str, Any], *, principal: Principal) -> str:
         f"<dt>Classification</dt><dd>{classification(document)}</dd></dl></div></div>"
     )
 
-    if detail["signals"]:
-        left += (
-            '<div class="panel"><div class="panel-h"><b>What the numbers say</b>'
-            '<span class="r">computed from the books, before any model ran</span></div>'
-            '<div class="pad"><ul class="plain">'
-            + "".join(f"<li>{_e(s)}</li>" for s in detail["signals"])
-            + "</ul></div></div>"
-        )
 
-    if triage:
-        override = (
-            '<div class="note deny" style="margin-top:12px">Model answered '
-            f'<code>{_e(triage["overridden_from"])}</code>, below the confidence floor, so it was '
-            "escalated instead of routed.</div>"
-            if triage.get("overridden_from")
-            else ""
-        )
-        left += (
-            '<div class="panel"><div class="panel-h"><b>Triage</b>'
-            '<span class="r">gemini-3.5-flash-lite</span></div><div class="pad">'
-            f'<dl class="kv"><dt>Capability</dt><dd><code>{_e(triage["capability"])}</code></dd>'
-            f'<dt>Confidence</dt><dd class="num">{_e(f"{triage["confidence"]:.2f}")}</dd>'
-            f'<dt>Reasoning</dt><dd>{_e(triage["reasoning"])}</dd></dl>'
-            f"{override}</div></div>"
-        )
+def _signals_panel(signals: list[Any]) -> str:
+    if not signals:
+        return ""
+    return (
+        '<div class="panel"><div class="panel-h"><b>What the numbers say</b>'
+        '<span class="r">computed from the books, before any model ran</span></div>'
+        '<div class="pad"><ul class="plain">'
+        + "".join(f"<li>{_e(s)}</li>" for s in signals)
+        + "</ul></div></div>"
+    )
 
-    if document.get("routed") is False:
-        left += (
-            '<div class="panel"><div class="panel-h"><b>Routing</b></div>'
-            f'<div class="pad"><div class="note deny">{_e(document.get("refusal"))}</div>'
-            "</div></div>"
-        )
 
-    if verdict:
-        left += (
-            '<div class="panel"><div class="panel-h"><b>Established cause</b>'
-            f'<span class="r mono">{_e(verdict["agent"])}</span></div><div class="pad">'
-            f'<p style="margin:0 0 14px;font-size:14px">{_e(verdict["root_cause"])}</p>'
-            f'<dl class="kv"><dt>Confidence</dt><dd class="num">'
-            f'{_e(f"{verdict["confidence"]:.2f}")}</dd>'
-            f'<dt>Citations</dt><dd class="num">{len(verdict.get("citations", []))}</dd>'
-            "</dl></div></div>"
-            '<div class="panel"><div class="panel-h"><b>Evidence cited</b>'
-            '<span class="r">every fact carries its source and a digest</span></div>'
-            + _evidence(detail["observations"])
-            + "</div>"
-            '<div class="panel"><div class="panel-h"><b>Proposed correction</b>'
-            '<span class="r">drafted, never posted</span></div>'
-            + _proposal(document.get("proposal"))
-            + "</div>"
-        )
+def _triage_panel(document: dict[str, Any]) -> str:
+    triage = document.get("triage")
+    if not triage:
+        return ""
+    override = (
+        '<div class="note deny" style="margin-top:12px">Model answered '
+        f'<code>{_e(triage["overridden_from"])}</code>, below the confidence floor, so it was '
+        "escalated instead of routed.</div>"
+        if triage.get("overridden_from")
+        else ""
+    )
+    return (
+        '<div class="panel"><div class="panel-h"><b>Triage</b>'
+        '<span class="r">gemini-3.5-flash-lite</span></div><div class="pad">'
+        f'<dl class="kv"><dt>Capability</dt><dd><code>{_e(triage["capability"])}</code></dd>'
+        f'<dt>Confidence</dt><dd class="num">{_e(f"{triage["confidence"]:.2f}")}</dd>'
+        f'<dt>Reasoning</dt><dd>{_e(triage["reasoning"])}</dd></dl>'
+        f"{override}</div></div>"
+    )
+
+
+def _routing_panel(document: dict[str, Any]) -> str:
+    if document.get("routed") is not False:
+        return ""
+    return (
+        '<div class="panel"><div class="panel-h"><b>Routing</b></div>'
+        f'<div class="pad"><div class="note deny">{_e(document.get("refusal"))}</div>'
+        "<p class=\"muted\" style=\"font-size:11.5px;margin:10px 0 0\">No agent was invoked and "
+        "no cause is asserted. The case stays in the queue as human work.</p></div></div>"
+    )
+
+
+def _cause_panel(document: dict[str, Any]) -> str:
+    verdict = document.get("verdict")
+    if not verdict:
+        return ""
+    return (
+        '<div class="panel"><div class="panel-h"><b>Established cause</b>'
+        f'<span class="r mono">{_e(verdict["agent"])}</span></div><div class="pad">'
+        f'<p style="margin:0 0 14px;font-size:14px">{_e(verdict["root_cause"])}</p>'
+        f'<dl class="kv"><dt>Confidence</dt><dd class="num">'
+        f'{_e(f"{verdict["confidence"]:.2f}")}</dd>'
+        f'<dt>Citations</dt><dd class="num">{len(verdict.get("citations", []))}</dd>'
+        "</dl></div></div>"
+    )
+
+
+def _evidence_panel(observations: list[Any]) -> str:
+    if not observations:
+        return ""
+    return (
+        '<div class="panel"><div class="panel-h"><b>Evidence cited</b>'
+        '<span class="r">every fact carries its source and a digest</span></div>'
+        + _evidence(observations)
+        + "</div>"
+    )
+
+
+def _proposal_panel(document: dict[str, Any]) -> str:
+    if not document.get("proposal"):
+        return ""
+    return (
+        '<div class="panel"><div class="panel-h"><b>Proposed correction</b>'
+        '<span class="r">drafted, never posted</span></div>'
+        + _proposal(document.get("proposal"))
+        + "</div>"
+    )
+
+
+#: Which renderer draws the result of each stage, so the stream and the full page cannot disagree
+#: about what a finished stage looks like. Keyed by the stage names in `workflow.WORK_STAGES`.
+STAGE_PANELS = {
+    "triage": _triage_panel,
+    "routing": _routing_panel,
+    "investigation": _cause_panel,
+    "proposal": _proposal_panel,
+}
+
+
+def progress(stages: list[tuple[str, str]]) -> str:
+    """The rail while the fleet is running.
+
+    Drawn complete-but-pending up front, because a progress list that grows as it goes cannot say
+    how much is left -- and the honest answer to "why is this screen still" is "it is on step two of
+    four, calling a model".
+    """
+    rows = "".join(
+        f'<div class="pstep" data-stage="{_e(key)}">'
+        f'<span class="pdot"></span><span class="plabel">{_e(label)}</span>'
+        f'<span class="pnote"></span></div>'
+        for key, label in stages
+    )
+    return (
+        '<div class="panel" id="work-progress"><div class="panel-h"><b>Running the fleet</b>'
+        '<span class="r" id="work-status">working</span></div>'
+        f'<div class="pad">{rows}'
+        '<div class="bar"><i></i></div>'
+        '<p class="muted" style="font-size:11.5px;margin:10px 0 0">Each step is a real model call '
+        "on Vertex AI. Results are saved as they land, so a refresh shows the same thing.</p>"
+        "</div></div>"
+    )
+
+
+def case(detail: dict[str, Any], *, principal: Principal) -> str:
+    """One exception, from the numbers through the reasoning to the signature."""
+    document = detail["document"]
+    case_id = str(document.get("case_id", ""))
+    band = str(document.get("approval_band", "single_reviewer"))
+    signed = list(document.get("signed_by", []))
+    worked = bool(document.get("verdict"))
+
+    left = _case_header(document, band) + _signals_panel(detail["signals"])
+    sections = (
+        _triage_panel(document)
+        + _routing_panel(document)
+        + _cause_panel(document)
+        + _evidence_panel(detail["observations"])
+        + _proposal_panel(document)
+    )
 
     return shell(
         f"{case_id} — NAV Sentinel",
@@ -798,9 +968,11 @@ def case(detail: dict[str, Any], *, principal: Principal) -> str:
             _e(document.get("note")),
             back="Back to exceptions",
         )
-        + f'<div class="grid"><div>{left}</div>'
-        f'<div class="stick">{_actions(document, principal, band, signed, bool(verdict))}</div>'
-        "</div>",
+        + f'<div class="grid"><div>{left}<div id="case-sections">{sections}</div></div>'
+        f'<div class="stick" id="case-rail">'
+        f"{_actions(document, principal, band, signed, worked)}</div>"
+        "</div>"
+        + _WORK_SCRIPT,
         principal=principal,
         active="queue",
     )
@@ -822,12 +994,21 @@ def _actions(
     blocks = ""
 
     if not worked:
+        from nav_sentinel.webapp.workflow import WORK_STAGES
+
+        # The progress rail is carried on the form as data, so the streaming client can swap it in
+        # without a round trip -- and so the markup for it lives in one place, next to its CSS.
+        rail = escape(progress(list(WORK_STAGES)), quote=True)
         return (
             '<div class="panel"><div class="panel-h"><b>Investigate</b></div><div class="pad">'
             '<p class="muted" style="font-size:12.5px;margin:0 0 14px">Triage classifies the '
             "difference, the registry decides which agent is authorised for it, and that agent "
             "investigates using only the tools its manifest allows.</p>"
-            f'<form class="block" method="post" action="/app/case/{_e(case_id)}/work">'
+            f'<form class="block" id="work-form" method="post" data-progress="{rail}" '
+            f'data-stream="/app/case/{_e(case_id)}/work/stream" '
+            f'action="/app/case/{_e(case_id)}/work" '
+            "onsubmit=\"var b=this.querySelector('button');"
+            "b.disabled=true;b.textContent='Running…';\">"
             '<button class="btn wide" type="submit">Run the fleet</button></form>'
             '<p class="muted" style="font-size:11px;margin:10px 0 0;text-align:center">'
             "Calls Gemini on Vertex AI</p></div></div>"
@@ -869,6 +1050,8 @@ def _actions(
         blocks += f'<div class="note deny" style="margin:12px 0 0">{_e(why)}</div>'
     blocks += (
         f'<form class="block" method="post" action="/app/case/{_e(case_id)}/approve" '
+        "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
+        "b.textContent='Signing…';\" "
         'style="margin-top:12px">'
         f'<button class="btn wide" type="submit"'
         f'{" disabled" if (already and not approved) or approved else ""}>'

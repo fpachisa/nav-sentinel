@@ -20,6 +20,7 @@ counts.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -147,97 +148,167 @@ def case_detail(case_id: str, as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
     return detail
 
 
-def work_case(case_id: str, as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
-    """Triage, route, investigate and draft. **This is the step that calls models.**
+@dataclass(frozen=True)
+class WorkEvent:
+    """One step of the investigation, as it happens.
+
+    The desk streams these so an analyst watching a case being worked sees triage land, then the
+    routing decision, then the cause, then the draft -- rather than a frozen page and then
+    everything at once. Each stage also **persists as it completes**, so what the stream showed and
+    what a refresh shows cannot disagree, and a dropped connection leaves the work done so far
+    recorded rather than lost.
+    """
+
+    stage: str
+    state: str
+    document: dict[str, Any]
+    detail: str = ""
+
+
+#: The stages, in order, with the label an analyst reads. Declared rather than inferred so the
+#: progress list can be drawn complete-but-pending before any of it has happened -- a progress
+#: indicator that grows as it goes cannot show how much is left.
+WORK_STAGES: tuple[tuple[str, str], ...] = (
+    ("triage", "Classify the difference"),
+    ("routing", "Find the authorised agent"),
+    ("investigation", "Investigate and cite evidence"),
+    ("proposal", "Draft the correcting entry"),
+)
+
+
+def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[WorkEvent]:
+    """Triage, route, investigate and draft, yielding after each stage. **This calls models.**
 
     Sequenced exactly as `make investigate` does, including the outcomes that are not successes: an
     unrouted capability stops here and a verdict that establishes no cause is not drafted against.
+
+    `work_case` drives this same generator to completion, so the streaming desk and every
+    non-streaming caller run one implementation. Two would drift, and the one that drifted would be
+    the one nothing watches.
     """
     store = composition.store()
     case = next((c for c in _cases(as_of) if c.case_id == case_id), None)
     if case is None:
         raise LookupError(f"{case_id} is not a case in the {as_of.isoformat()} cycle")
 
+    def patch(**fields: Any) -> dict[str, Any]:
+        """Merge fields into the stored document atomically and return what is now stored.
+
+        `update_case` rather than a whole-document write: an analyst may be signing this case while
+        it is being re-worked, and a blind `set()` would drop their signature.
+        """
+        return store.update_case(case_id, lambda document: {**document, **fields})
+
+    yield WorkEvent("triage", "running", store.load_case(case_id) or {})
     classification = asyncio.run(triage.classify(case, discover.get("triage-agent")))
     case.category = contract.category_for(classification.capability)
     facts = case.to_facts()
+    document = patch(
+        capability=facts.capability,
+        triage={
+            "capability": classification.capability,
+            "confidence": classification.confidence,
+            "reasoning": classification.reasoning,
+            "overridden_from": classification.overridden_from,
+        },
+    )
+    yield WorkEvent("triage", "done", document)
 
-    document = dict(store.load_case(case_id) or {})
-    document["capability"] = facts.capability
-    document["triage"] = {
-        "capability": classification.capability,
-        "confidence": classification.confidence,
-        "reasoning": classification.reasoning,
-        "overridden_from": classification.overridden_from,
-    }
-
+    yield WorkEvent("routing", "running", document)
     agent = (
         discover.discover_for_capability(facts.capability)
         if classification.classified
         else None
     )
     if agent is None:
-        document["routed"] = False
-        document["refusal"] = (
+        refusal = (
             f"no published agent handles {facts.capability}, so this case escalates to a human"
         )
-        store.save_case(case_id, document)
-        return document
+        document = patch(routed=False, refusal=refusal)
+        yield WorkEvent("routing", "refused", document, detail=refusal)
+        return
 
-    document["routed"] = True
-    document["investigator"] = agent.ref
+    document = patch(routed=True, investigator=agent.ref)
+    yield WorkEvent("routing", "done", document, detail=agent.ref)
 
     with audit.case_trace(facts) as (_span, trace_id, band):
-        verdict, observations = asyncio.run(
-            investigate(case.to_brief(), agent, trace_id=trace_id)
-        )
-        for observation in observations.as_mapping().values():
-            store.record_observation(observation)
-        document["verdict"] = {
-            "root_cause": verdict.root_cause,
-            "confidence": verdict.confidence,
-            "citations": [c.observation_id for c in verdict.citations],
-            "unresolved": verdict.unresolved,
-            "agent": agent.ref,
-        }
-        document["approval_band"] = band
+        try:
+            yield WorkEvent("investigation", "running", document)
+            verdict, observations = asyncio.run(
+                investigate(case.to_brief(), agent, trace_id=trace_id)
+            )
+            for observation in observations.as_mapping().values():
+                store.record_observation(observation)
+            document = patch(
+                verdict={
+                    "root_cause": verdict.root_cause,
+                    "confidence": verdict.confidence,
+                    "citations": [c.observation_id for c in verdict.citations],
+                    "unresolved": verdict.unresolved,
+                    "agent": agent.ref,
+                },
+                approval_band=band,
+            )
+            yield WorkEvent("investigation", "done", document, detail=agent.ref)
 
-        if verdict.asserts_a_cause:
+            if not verdict.asserts_a_cause:
+                yield WorkEvent(
+                    "proposal",
+                    "skipped",
+                    document,
+                    detail="no cause was established, so nothing is drafted against it",
+                )
+                return
+
+            yield WorkEvent("proposal", "running", document)
             proposal = asyncio.run(
                 remediation.draft(
                     case, verdict, discover.get("remediation-agent"), trace_id=trace_id
                 )
             )
-            document["proposal"] = {
-                "proposal_id": proposal.proposal_id,
-                "outcome": proposal.outcome.value,
-                "rationale": proposal.rationale,
-                "expected_residual": str(proposal.expected_residual),
-                "requires": proposal.requires.value,
-                "lines": [
-                    {
-                        "account": line.account,
-                        "currency": line.currency,
-                        "debit": str(line.debit) if line.debit else "",
-                        "credit": str(line.credit) if line.credit else "",
-                        "narrative": line.narrative,
-                    }
-                    for line in proposal.lines
-                ],
-                "quantity_lines": [
-                    {
-                        "account": q.account,
-                        "isin": q.isin,
-                        "from_quantity": str(q.from_quantity),
-                        "to_quantity": str(q.to_quantity),
-                    }
-                    for q in proposal.quantity_lines
-                ],
-            }
-        for sequence, decision in enumerate(gateway.decisions_since(case_id)):
-            store.record_decision(case_id, trace_id, sequence, decision)
+            document = patch(
+                proposal={
+                    "proposal_id": proposal.proposal_id,
+                    "outcome": proposal.outcome.value,
+                    "rationale": proposal.rationale,
+                    "expected_residual": str(proposal.expected_residual),
+                    "requires": proposal.requires.value,
+                    "lines": [
+                        {
+                            "account": line.account,
+                            "currency": line.currency,
+                            "debit": str(line.debit) if line.debit else "",
+                            "credit": str(line.credit) if line.credit else "",
+                            "narrative": line.narrative,
+                        }
+                        for line in proposal.lines
+                    ],
+                    "quantity_lines": [
+                        {
+                            "account": q.account,
+                            "isin": q.isin,
+                            "from_quantity": str(q.from_quantity),
+                            "to_quantity": str(q.to_quantity),
+                        }
+                        for q in proposal.quantity_lines
+                    ],
+                }
+            )
+            yield WorkEvent("proposal", "done", document)
+        finally:
+            # In a `finally` because the consumer can abandon this generator -- a closed browser
+            # tab closes the stream, which throws `GeneratorExit` in here. The gateway's decisions
+            # are the record of what was allowed and refused on the way, and they must survive a
+            # disconnect: a governance trail that only persists on the happy path is not one.
+            for sequence, decision in enumerate(gateway.decisions_since(case_id)):
+                store.record_decision(case_id, trace_id, sequence, decision)
 
-    store.save_case(case_id, document)
+
+def work_case(case_id: str, as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
+    """Work a case to completion and return the final document. Drives `work_case_events`."""
+    document: dict[str, Any] = {}
+    for event in work_case_events(case_id, as_of):
+        document = event.document
     return document
 
 

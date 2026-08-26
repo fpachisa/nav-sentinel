@@ -11,10 +11,12 @@ because four-eyes has to count people and a service token carries none.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from nav_sentinel import composition
 from nav_sentinel.control_plane.approvals import Principal
@@ -159,6 +161,77 @@ def work(case_id: str, request: Request) -> RedirectResponse:
     if _who(request) is not None:
         workflow.work_case(case_id, AS_OF)
     return _to(f"/app/case/{case_id}")
+
+
+@router.post("/app/case/{case_id}/work/stream")
+def work_stream(case_id: str, request: Request) -> StreamingResponse:
+    """The same investigation, reported as it happens.
+
+    Newline-delimited JSON rather than server-sent events, because `EventSource` can only issue a
+    GET and a GET that spends money on model calls is one a prefetch or a link preview can trigger.
+    This is a POST for the same reason the plain form is.
+
+    Every stage renders through `pages.STAGE_PANELS`, the same functions the full page uses, so the
+    progressive reveal and a refresh cannot show different things. And each stage has already been
+    persisted by the time its line goes out -- the stream reports what is stored, it is not the
+    thing being stored.
+    """
+    composition.configure()
+    if _who(request) is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+
+    def lines() -> Iterator[str]:
+        try:
+            for event in workflow.work_case_events(case_id, AS_OF):
+                payload: dict[str, object] = {
+                    "stage": event.stage,
+                    "state": event.state,
+                    "detail": event.detail,
+                }
+                if event.state in ("done", "refused"):
+                    render = pages.STAGE_PANELS.get(event.stage)
+                    html = render(event.document) if render else ""
+                    if event.stage == "investigation" and html:
+                        # The cause and the evidence it cites arrive together: the observations are
+                        # written during the same call, and a cause with no visible citations is
+                        # the half of this screen that would invite being taken on trust.
+                        html += pages._evidence_panel(
+                            composition.store().observations_for(case_id)
+                        )
+                    payload["html"] = html
+                yield json.dumps(payload) + "\n"
+        except Exception as failed:  # noqa: BLE001
+            # Reported into the stream rather than raised: the response has already begun, so an
+            # exception here would truncate the body and the page would sit on a spinner forever.
+            logger.exception("outcome=work_failed case=%s", case_id)
+            yield json.dumps(
+                {"state": "failed", "detail": type(failed).__name__}
+            ) + "\n"
+            return
+
+        detail = workflow.case_detail(case_id, AS_OF)
+        document = detail["document"]
+        principal = _who(request)
+        yield json.dumps(
+            {
+                "state": "finished",
+                "rail": pages._actions(
+                    document,
+                    principal,
+                    str(document.get("approval_band", "single_reviewer")),
+                    list(document.get("signed_by", [])),
+                    bool(document.get("verdict")),
+                ),
+            }
+        ) + "\n"
+
+    # `no-store` and `X-Accel-Buffering: no`: a proxy that buffers this response would hold every
+    # line until the last one, which is exactly the frozen screen the stream exists to avoid.
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/app/case/{case_id}/approve")
