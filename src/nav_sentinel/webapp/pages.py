@@ -364,10 +364,11 @@ ul.plain li{margin:3px 0}
 #: `fetch` with a POST rather than `EventSource`, which can only issue a GET. A GET that spends
 #: money on model calls is one a link preview or a prefetch can trigger, and this endpoint bills
 #: Vertex AI per click.
-_WORK_SCRIPT = """<script>
+_WORK_SCRIPT = r"""<script>
 (function(){
   var form = document.getElementById('work-form');
   if (!form || !window.fetch) return;                 // no JS, or no fetch: the form POST stands
+  form.dataset.enhanced = '1';
   form.addEventListener('submit', function(ev){
     ev.preventDefault();
     var btn = form.querySelector('button');
