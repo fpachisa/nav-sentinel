@@ -483,7 +483,7 @@ _LIVE_SCRIPT = r"""<script>
 (function(){
   var rows = document.getElementById('live-rows');
   if (!rows || !window.fetch) return;
-  var since = '', stopped = false;
+  var stopped = false;
 
   function paintCounter(key, value){
     var el = document.querySelector('[data-counter="' + key + '"]');
@@ -539,13 +539,11 @@ _LIVE_SCRIPT = r"""<script>
   }
 
   function tick(){
-    fetch('/app/live.json' + (since ? '?since=' + encodeURIComponent(since) : ''))
+    // No window passed from here. The server reads it off the cases, because the browser is
+    // not the authority on when a run started and may not have existed when it did.
+    fetch('/app/live.json')
       .then(function(r){ return r.json(); })
       .then(function(snap){
-        // The server hands back the window it counted from on the first response, and every later
-        // poll passes it back -- so the counters climb from zero for *this* run instead of opening
-        // at the accumulated total of every rehearsal.
-        if (!since && snap.now) since = snap.now;
         paint(snap);
         if (!stopped) setTimeout(tick, 1200);
       })

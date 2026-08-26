@@ -43,9 +43,34 @@ def project() -> str:
 
 def dispatch(case_ids: list[str], as_of: date) -> dict[str, Any]:
     """Send each case to the fleet. Returns how it was sent, for the page to state."""
+    _stamp_start(case_ids)
     if topic() and project():
         return _publish(case_ids, as_of)
     return _run_locally(case_ids, as_of)
+
+
+def _stamp_start(case_ids: list[str]) -> None:
+    """Record when this run began, on the cases it covers.
+
+    The activity screen scopes its counters to "this run", and the window has to be *the moment the
+    work started* rather than the moment a browser happened to open. It was the latter, pinned
+    client-side on the first poll -- so the fan-out, which starts before the redirect completes,
+    fell outside its own window: the page showed the true totals once and then dropped every
+    counter to zero.
+
+    Persisted, because the browser is not the authority on when a run began and may not have
+    existed yet.
+    """
+    from nav_sentinel import composition
+    from nav_sentinel.control_plane.observations import utcnow
+
+    store = composition.store()
+    started = utcnow().isoformat()
+    for case_id in case_ids:
+        try:
+            store.update_case(case_id, lambda d: {**d, "dispatched_at": started})
+        except LookupError:  # noqa: PERF203 -- a missing case is not a reason to abandon the rest
+            logger.warning("outcome=stamp_skipped case=%s reason=absent", case_id)
 
 
 def _publish(case_ids: list[str], as_of: date) -> dict[str, Any]:

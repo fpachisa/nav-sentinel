@@ -32,7 +32,8 @@ def cases() -> list[str]:
     ids = [item.case_id for item in workflow.queue(workflow.DEFAULT_AS_OF)]
     for case_id in ids:
         document = store.load_case(case_id) or {}
-        for field in ("triage", "routed", "refusal", "verdict", "proposal", "investigator"):
+        for field in ("triage", "routed", "refusal", "verdict", "proposal", "investigator",
+                      "drafted", "draft_skipped", "dispatched_at"):
             document.pop(field, None)
         store.save_case(case_id, document)
     return ids

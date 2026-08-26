@@ -36,7 +36,7 @@ def cycled() -> list[str]:
     for case_id in ids:
         document = store.load_case(case_id) or {}
         for field in ("triage", "routed", "refusal", "investigator", "verdict", "proposal",
-                      "drafted", "draft_skipped", "signed_by", "signed_roles", "approval_ref",
+                      "drafted", "draft_skipped", "dispatched_at", "signed_by", "signed_roles", "approval_ref",
                       "last_outcome"):
             document.pop(field, None)
         store.save_case(case_id, document)
@@ -113,6 +113,52 @@ class TestTheWindowIsHonest:
         assert "counting from 09:00:00" in scoped
 
 
+class TestTheWindowIsTheRunNotThePageLoad:
+    """The counters showed real totals once and then dropped to zero.
+
+    The window was pinned client-side on the page's first poll, and the fan-out starts *before* the
+    redirect to this page lands -- so a run fell outside its own window and every scoped counter
+    read zero from the second poll onward. The browser is not the authority on when a run began,
+    and may not have existed when it did.
+    """
+
+    def test_the_window_comes_from_when_the_cases_were_dispatched(self, cycled):
+        store = composition.store()
+        for case_id in cycled:
+            document = store.load_case(case_id)
+            document["dispatched_at"] = "2026-08-17T09:00:00+00:00"
+            store.save_case(case_id, document)
+
+        assert workflow.live_snapshot()["since"] == "2026-08-17T09:00:00+00:00"
+
+    def test_the_earliest_dispatch_wins_so_nothing_in_the_run_is_excluded(self, cycled):
+        """A fan-out stamps each case as it hands it over, so the stamps differ by milliseconds.
+        Taking the latest would drop the earliest case's work out of its own run."""
+        store = composition.store()
+        for offset, case_id in enumerate(cycled):
+            document = store.load_case(case_id)
+            document["dispatched_at"] = f"2026-08-17T09:00:{offset:02d}+00:00"
+            store.save_case(case_id, document)
+
+        assert workflow.live_snapshot()["since"] == "2026-08-17T09:00:00+00:00"
+
+    def test_dispatching_stamps_the_cases(self, cycled, monkeypatch):
+        from nav_sentinel.webapp import dispatch
+
+        monkeypatch.delenv("NAV_CASES_TOPIC", raising=False)
+        monkeypatch.setattr(workflow, "work_case", lambda *_a, **_k: None)
+        dispatch.dispatch(cycled[:2], workflow.DEFAULT_AS_OF)
+
+        store = composition.store()
+        assert all(store.load_case(c).get("dispatched_at") for c in cycled[:2])
+        assert workflow.live_snapshot()["since"]
+
+    def test_the_page_no_longer_sends_a_window_of_its_own(self):
+        """The client used to pin it, which is the bug. It must not do that again."""
+        assert "?since=" not in pages._LIVE_SCRIPT
+        assert "snap.now" not in pages._LIVE_SCRIPT
+
+
 class TestTheStagesComeFromTheDocument:
     def test_a_refused_case_shows_route_refused_and_the_rest_blocked(self, cycled):
         store = composition.store()
@@ -161,7 +207,8 @@ class TestTheScreenIsGated:
         client = TestClient(app)
         client.post("/app/signin", data={"subject": session.ROSTER[1].subject})
         body = client.get("/app/live.json", params={"since": "not-a-timestamp'; DROP"}).json()
-        assert body["since"] == "", "an unparseable window was forwarded to the query"
+        # Rejected, so the snapshot falls back to the window it derives from the cases themselves.
+        assert body["since"] != "not-a-timestamp'; DROP"
         assert body["counters"]["cases"] == len(cycled)
 
 
@@ -212,7 +259,7 @@ class TestResetClearsEverythingTheFleetWrites:
 
         written = {
             "triage", "routed", "refusal", "investigator", "verdict", "proposal",
-            "drafted", "draft_skipped", "signed_by", "signed_roles", "approval_ref",
+            "drafted", "draft_skipped", "dispatched_at", "signed_by", "signed_roles", "approval_ref",
             "last_outcome", "signed_for",
         }
         missed = written - set(demo_reset.WORKING) - {"signed_for"}

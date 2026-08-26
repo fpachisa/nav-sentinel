@@ -244,6 +244,13 @@ def _work(
         """
         return store.update_case(case_id, lambda document: {**document, **fields})
 
+    # Stamped here too, so working one case from its own page also opens a window. Only if absent:
+    # a fan-out already stamped the whole batch and the earliest of those is the run's start.
+    if not (store.load_case(case_id) or {}).get("dispatched_at"):
+        from nav_sentinel.control_plane.observations import utcnow
+
+        patch(dispatched_at=utcnow().isoformat())
+
     emit(WorkEvent("triage", "running", store.load_case(case_id) or {}))
     classification = asyncio.run(triage.classify(case, discover.get("triage-agent")))
     case.category = contract.category_for(classification.capability)
@@ -557,6 +564,13 @@ def live_snapshot(
     """
     store = composition.store()
     documents = [store.load_case(case.case_id) or {} for case in _cases(as_of)]
+
+    # The window is when the *run* started, read from the cases themselves. Passing it in from the
+    # browser meant the page pinned it to its own load time, and the fan-out begins before the
+    # redirect lands -- so a run fell outside its own window and every scoped counter read zero
+    # after the first poll. `since` remains an override for a caller that wants a narrower view.
+    stamps = sorted(str(d["dispatched_at"]) for d in documents if d.get("dispatched_at"))
+    since = since or (stamps[0] if stamps else "")
 
     rows: list[dict[str, Any]] = []
     agents: set[str] = set()
