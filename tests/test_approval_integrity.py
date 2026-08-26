@@ -214,3 +214,88 @@ class TestInvestigatingTheSameCaseTwiceIsNotTampering:
                     observation_id="OBS-cafecafecafecafe", observed={"rate": "9.9999"}
                 )
             )
+
+
+class TestDetectionDoesNotDestroyWorkAlreadyDone:
+    """Re-running detection erased every worked case.
+
+    `cycle_runner._persist` wrote the case with a blind whole-document `set()`, so a second
+    detection pass deleted the verdict, the drafted correction, the signatures and the approval
+    reference of every case an analyst had already worked and signed. The desk's own "Re-run
+    reconciliation" button was safe because `workflow.run_cycle` merges; the Pub/Sub path and
+    `make demo` were not.
+
+    The worst kind of quiet write: it costs nothing, reports success, and the queue afterwards looks
+    like a clean starting state rather than a loss. One stray `gcloud pubsub topics publish` during
+    a rehearsal would have wiped the take.
+    """
+
+    def _worked(self, store, case_id: str) -> None:
+        document = store.load_case(case_id)
+        document.update(
+            {
+                "verdict": {"root_cause": "a stale rate", "confidence": 0.93, "agent": "fx@1"},
+                "proposal": {"proposal_id": "PROP-original"},
+                "signed_by": ["a.controller@merian.example"],
+                "signed_roles": ["controller"],
+                "approval_ref": "APPR-abcdef0123456789",
+            }
+        )
+        store.save_case(case_id, document)
+
+    def test_a_second_detection_pass_keeps_the_verdict_and_the_signatures(self):
+        from datetime import date
+
+        from nav_sentinel.pipeline import cycle_runner
+        from nav_sentinel.webapp import workflow
+
+        composition.configure()
+        as_of = date(2026, 8, 17)
+        workflow.run_cycle(as_of)
+        store = composition.store()
+        case_id = workflow.queue(as_of)[0].case_id
+        self._worked(store, case_id)
+
+        cycle_runner.run(as_of)  # arithmetic only; no model is called
+
+        after = store.load_case(case_id)
+        assert after["verdict"]["root_cause"] == "a stale rate"
+        assert after["proposal"]["proposal_id"] == "PROP-original"
+        assert after["signed_by"] == ["a.controller@merian.example"]
+        assert after["approval_ref"] == "APPR-abcdef0123456789"
+
+    def test_detection_still_refreshes_the_fields_it_owns(self):
+        """Merging must not turn the write into a no-op: a re-scored band has to land."""
+        from datetime import date
+
+        from nav_sentinel.pipeline import cycle_runner
+        from nav_sentinel.webapp import workflow
+
+        composition.configure()
+        as_of = date(2026, 8, 17)
+        workflow.run_cycle(as_of)
+        store = composition.store()
+        case_id = workflow.queue(as_of)[0].case_id
+
+        document = store.load_case(case_id)
+        document["approval_band"] = "auto_clear"
+        document["break_ids"] = []
+        store.save_case(case_id, document)
+
+        cycle_runner.run(as_of)
+
+        after = store.load_case(case_id)
+        assert after["approval_band"] != "auto_clear", "detection did not re-score the band"
+        assert after["break_ids"], "detection did not rewrite the breaks it found"
+
+    def test_a_first_detection_pass_still_creates_the_case(self):
+        """`update_case` raises when there is no document, which is the normal first run."""
+        from datetime import date
+
+        from nav_sentinel.control_plane.repository import InMemoryRepository
+        from nav_sentinel.pipeline import cycle_runner
+
+        composition.configure()
+        composition._repository = InMemoryRepository()
+        cycle_runner.run(date(2026, 8, 17))
+        assert composition.store().cases_for("MERID-GEF", "2026-08-17"), "no cases were created"

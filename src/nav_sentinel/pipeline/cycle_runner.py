@@ -121,9 +121,7 @@ def _persist(case, facts, band: str, agent, trace_id: str | None) -> None:
     from nav_sentinel import composition
 
     store = composition.store()
-    store.save_case(
-        case.case_id,
-        {
+    detected = {
             "case_id": case.case_id,
             "subject_id": facts.subject_id,
             "as_of": facts.as_of.isoformat(),
@@ -135,8 +133,19 @@ def _persist(case, facts, band: str, agent, trace_id: str | None) -> None:
             "authorised_agent": agent.ref if agent else None,
             "trace_id": trace_id,
             "break_ids": [b.break_id for b in case.breaks],
-        },
-    )
+    }
+    # Merged, not written over. Detection re-runs -- Pub/Sub is at-least-once, `make demo` is run
+    # repeatedly, and a stray publish is one keystroke -- and a blind `set()` here deleted the
+    # verdict, the drafted correction, the signatures and the approval reference of every case that
+    # had already been worked. Arithmetic that erases an approval is the worst kind of quiet write:
+    # it costs nothing, reports success, and the queue afterwards looks like a clean starting state.
+    #
+    # `update_case` raises `LookupError` when there is no document yet, which is the normal case on
+    # a first run, so a first write still goes through `save_case`.
+    try:
+        store.update_case(case.case_id, lambda existing: {**existing, **detected})
+    except LookupError:
+        store.save_case(case.case_id, detected)
     for sequence, decision in enumerate(gateway.decisions_since(case.case_id)):
         store.record_decision(case.case_id, trace_id, sequence, decision)
 
