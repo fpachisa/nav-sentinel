@@ -81,6 +81,11 @@ class TestTheCountersAreCountedFromTheStore:
 
     def test_denials_count_only_denials(self, cycled):
         store = composition.store()
+        # A run has to exist for a scoped counter to be a number at all -- absent is not zero.
+        for case_id in cycled:
+            document = store.load_case(case_id)
+            document["dispatched_at"] = "2020-01-01T00:00:00+00:00"
+            store.save_case(case_id, document)
         before = workflow.live_snapshot()["counters"]["denials"]
         store.record_decision(
             cycled[0], "t-x", 5001,
@@ -98,19 +103,42 @@ class TestTheWindowIsHonest:
     def test_since_excludes_decisions_written_before_it(self, cycled):
         """`demo-reset` preserves decisions on purpose, so an unscoped count opens at the total of
         every rehearsal — a true number answering a question nobody asked."""
-        assert workflow.live_snapshot()["counters"]["decisions"] > 0
+        wide = workflow.live_snapshot(since="2020-01-01T00:00:00+00:00")["counters"]["decisions"]
+        assert wide > 0
         assert workflow.live_snapshot(since="2099-01-01T00:00:00+00:00")["counters"][
             "decisions"
         ] == 0
 
+    def test_with_no_run_a_scoped_counter_is_absent_rather_than_zero(self, cycled):
+        """Zero is a claim -- "the fleet did nothing" -- when the truth is "no run has started".
+
+        Reporting the cumulative total instead is what made the numbers appear on the first poll
+        and then drop, which is how this was found.
+        """
+        snapshot = workflow.live_snapshot()
+        assert snapshot["running"] is False
+        assert snapshot["counters"]["decisions"] is None
+        assert snapshot["counters"]["tool_calls"] is None
+        assert snapshot["counters"]["denials"] is None
+        # Case-scoped counters are exact without a window, so they stay numbers.
+        assert snapshot["counters"]["cases"] == len(cycled)
+        assert snapshot["counters"]["evidence"] >= 0
+
+    def test_a_dash_is_rendered_for_an_absent_counter(self, cycled):
+        assert "&mdash;" in pages.live(workflow.live_snapshot(), principal=ANALYST)
+
+    def test_the_poller_never_repaints_a_number_back_to_a_dash(self):
+        """Mid-run the window exists, so a `None` arriving later would be a regression, not news."""
+        assert "value === null || value === undefined) return" in pages._LIVE_SCRIPT
+
     def test_the_page_says_which_window_it_counted(self, cycled):
         unscoped = pages.live(workflow.live_snapshot(), principal=ANALYST)
-        assert "counting everything this store holds" in unscoped
+        assert "no run in progress" in unscoped
 
         scoped = pages.live(
             workflow.live_snapshot(since="2026-08-17T09:00:00+00:00"), principal=ANALYST
         )
-        assert "counting from 09:00:00" in scoped
+        assert "counting this run, from 09:00:00" in scoped
 
 
 class TestTheWindowIsTheRunNotThePageLoad:

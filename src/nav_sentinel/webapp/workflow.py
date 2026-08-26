@@ -580,11 +580,12 @@ def live_snapshot(
         agent = document.get("investigator") or (document.get("verdict") or {}).get("agent")
         if agent:
             agents.add(str(agent))
-        observations = [
-            observation
-            for observation in store.observations_for(case_id)
-            if not since or observation.retrieved_at.isoformat() >= since
-        ]
+        # Not filtered by time. Observation ids are content-derived and first-write-wins, so a
+        # re-run reuses the existing record with its original `retrieved_at` -- which is correct
+        # (a cited timestamp is when the data was obtained) and made this counter read ~0 on every
+        # repeat while tool calls read 16. The honest scope for evidence is *these cases*: exact,
+        # and not inflated by another valuation date.
+        observations = store.observations_for(case_id)
         evidence += len(observations)
         rows.append(
             {
@@ -611,6 +612,10 @@ def live_snapshot(
         "since": since,
         "stages": [{"key": key, "label": label} for key, label in LIVE_STAGES],
         "cases": rows,
+        # `None` where a scoped counter has no run to count. Zero would be a claim -- "the fleet
+        # did nothing" -- when the truth is "no run has started", and showing the cumulative total
+        # instead is what made the numbers appear and then drop.
+        "running": bool(since),
         "counters": {
             "cases": len(rows),
             "investigated": investigated,
@@ -618,10 +623,14 @@ def live_snapshot(
             "agents": len(agents),
             "tool_calls": sum(
                 1 for d in decisions if str(d.get("nav.policy.id", "")).startswith("P-001")
-            ),
+            )
+            if since
+            else None,
             "evidence": evidence,
-            "decisions": len(decisions),
-            "denials": sum(1 for d in decisions if d.get("nav.policy.effect") == "deny"),
+            "decisions": len(decisions) if since else None,
+            "denials": sum(1 for d in decisions if d.get("nav.policy.effect") == "deny")
+            if since
+            else None,
         },
         # Terminal means nothing more will change without someone acting. The page stops polling
         # then and says so, rather than asking Firestore the same question every second forever.

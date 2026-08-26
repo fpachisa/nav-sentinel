@@ -490,6 +490,7 @@ _LIVE_SCRIPT = r"""<script>
     if (!el) return;
     var suffix = el.querySelector('span');
     var shown = suffix ? el.firstChild : el;
+    if (value === null || value === undefined) return;   // absent, not zero: leave the dash
     if (String(shown.textContent).trim() === String(value)) return;
     shown.textContent = value;
     el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
@@ -1295,7 +1296,8 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
 
     tiles = "".join(
         f'<div class="tile {cls}"><div class="lbl">{_e(label)}</div>'
-        f'<div class="big" data-counter="{_e(key)}">{_e(counters.get(key, 0))}'
+        f'<div class="big" data-counter="{_e(key)}">'
+        f'{"&mdash;" if counters.get(key) is None else _e(counters.get(key, 0))}'
         f'{suffix}</div><div class="sub">{_e(note)}</div></div>'
         for key, label, cls, suffix, note in (
             ("investigated", "Cases investigated", "t-ok",
@@ -1340,9 +1342,9 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
     )
 
     window = (
-        f"counting from {_e(snapshot['since'][11:19])}"
+        f"counting this run, from {_e(snapshot['since'][11:19])}"
         if snapshot.get("since")
-        else "counting everything this store holds"
+        else "no run in progress"
     )
     return shell(
         "Fleet activity — NAV Sentinel",
