@@ -264,3 +264,61 @@ class TestTheDepartmentCountIsTheRegisteredOne:
         assert f"{words[gaps]} capabilities have no authorised agent" in narration, (
             f"there are {gaps} unhandled capabilities; the narration names a different number"
         )
+
+
+class TestTheTaggedNarrationSaysTheSameThing:
+    """`narration-tts.md` is the script with TTS style tags in it, and it is the file that will
+    actually be pasted into a voice. Two copies of the same words drift, and the copy that drifts
+    is the one nobody re-measures -- so the words are compared, and the tags are required to be
+    tags rather than words that will be read aloud.
+    """
+
+    TAG = re.compile(r"\[[a-z-]+\]")
+
+    def _spoken(self, path: Path, fenced: bool) -> list[str]:
+        text = path.read_text()
+        if fenced:
+            blocks = re.findall(r"^```\n(.*?)^```", text, re.MULTILINE | re.DOTALL)
+            body = "\n".join(blocks)
+        else:
+            body = "\n".join(
+                line[2:] for line in text.splitlines() if line.startswith("> ")
+            )
+        body = self.TAG.sub(" ", body).replace("&mdash;", "—").replace("*", "")
+        return re.findall(r"[\w'’-]+", body.lower())
+
+    def test_the_words_are_identical_once_the_tags_are_removed(self):
+        plain = self._spoken(ROOT / "docs" / "submission" / "narration.md", fenced=False)
+        tagged = self._spoken(ROOT / "docs" / "submission" / "narration-tts.md", fenced=True)
+        assert tagged, "no fenced blocks found in narration-tts.md"
+        if plain != tagged:
+            for index, (a, b) in enumerate(zip(plain, tagged, strict=False)):
+                if a != b:
+                    raise AssertionError(
+                        f"the two scripts diverge at word {index}: "
+                        f"narration.md has {' '.join(plain[index:index + 8])!r}, "
+                        f"narration-tts.md has {' '.join(tagged[index:index + 8])!r}"
+                    )
+            raise AssertionError(
+                f"lengths differ: narration.md {len(plain)} words, "
+                f"narration-tts.md {len(tagged)} words"
+            )
+
+    def test_every_tag_is_one_the_voice_will_treat_as_a_tag(self):
+        """A typo'd or invented tag is read out loud. `[emphatic]` becomes the word "emphatic"."""
+        allowed = {
+            "serious", "explanation", "informative", "neutral", "emphatic", "calm",
+            "instruction", "matter-of-fact", "approval", "reminder",
+        }
+        text = (ROOT / "docs" / "submission" / "narration-tts.md").read_text()
+        blocks = re.findall(r"^```\n(.*?)^```", text, re.MULTILINE | re.DOTALL)
+        used = {tag.strip("[]") for block in blocks for tag in self.TAG.findall(block)}
+        assert used, "no tags found"
+        assert used <= allowed, f"unrecognised tags: {sorted(used - allowed)}"
+
+    def test_the_measured_script_carries_no_tags(self):
+        """`make narration` speaks `narration.md` with `say`, which would read a tag aloud and
+        inflate every measurement by a word it will never say."""
+        plain = (ROOT / "docs" / "submission" / "narration.md").read_text()
+        spoken = "\n".join(line for line in plain.splitlines() if line.startswith("> "))
+        assert not self.TAG.search(spoken), self.TAG.findall(spoken)
