@@ -75,7 +75,7 @@ voice says what it means. Numbers are written the way they should be said.
 >
 > Now a four-eyes case. Signed. Refused again — four eyes means two *different* people.
 >
-> Second controller, a different Google account. Granted.
+> Second account, the CIO. Granted.
 >
 > And now the part that matters. With a valid approval in hand, posting is still refused. No agent
 > in this fleet holds posting authority, and the policy that says so is enforced at the gateway, not
