@@ -20,9 +20,11 @@ counts.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from queue import Queue
 from typing import Any
 
 from nav_sentinel import composition
@@ -177,15 +179,51 @@ WORK_STAGES: tuple[tuple[str, str], ...] = (
 
 
 def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[WorkEvent]:
-    """Triage, route, investigate and draft, yielding after each stage. **This calls models.**
+    """Triage, route, investigate and draft, reporting after each stage. **This calls models.**
 
     Sequenced exactly as `make investigate` does, including the outcomes that are not successes: an
     unrouted capability stops here and a verdict that establishes no cause is not drafted against.
 
-    `work_case` drives this same generator to completion, so the streaming desk and every
+    `work_case` drives this same function to completion, so the streaming desk and every
     non-streaming caller run one implementation. Two would drift, and the one that drifted would be
     the one nothing watches.
+
+    **The work runs on its own thread and the events arrive over a queue.** The obvious shape --
+    one generator that holds the trace span open across its `yield`s -- does not survive contact
+    with the server: Starlette drives a sync generator through a thread pool, so each `next()` can
+    land on a different thread with a different context, and OpenTelemetry then cannot detach the
+    span token it attached (`Token was created in a different Context`). Confirmed on the deployed
+    service, in the logs, on the first real run. Keeping the span inside one thread fixes that, and
+    has a second property worth having: a model call already in flight and already billed finishes
+    and is recorded even if the analyst closes the tab.
     """
+    # `Queue`, not `import queue`: this module already exports a function called `queue`, and
+    # importing the stdlib module of that name shadowed it.
+    events: Queue[WorkEvent | None | BaseException] = Queue()
+
+    def run() -> None:
+        try:
+            _work(case_id, as_of, events.put)
+        except BaseException as failed:  # noqa: BLE001 -- handed to the consumer, not swallowed
+            events.put(failed)
+        finally:
+            events.put(None)
+
+    worker = threading.Thread(target=run, name=f"work-{case_id}", daemon=True)
+    worker.start()
+    while True:
+        item = events.get()
+        if item is None:
+            return
+        if isinstance(item, BaseException):
+            raise item
+        yield item
+
+
+def _work(
+    case_id: str, as_of: date, emit: Callable[[WorkEvent], None]
+) -> None:
+    """The staged investigation itself, on one thread, reporting through `emit`."""
     store = composition.store()
     case = next((c for c in _cases(as_of) if c.case_id == case_id), None)
     if case is None:
@@ -199,7 +237,7 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
         """
         return store.update_case(case_id, lambda document: {**document, **fields})
 
-    yield WorkEvent("triage", "running", store.load_case(case_id) or {})
+    emit(WorkEvent("triage", "running", store.load_case(case_id) or {}))
     classification = asyncio.run(triage.classify(case, discover.get("triage-agent")))
     case.category = contract.category_for(classification.capability)
     facts = case.to_facts()
@@ -212,9 +250,9 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
             "overridden_from": classification.overridden_from,
         },
     )
-    yield WorkEvent("triage", "done", document)
+    emit(WorkEvent("triage", "done", document))
 
-    yield WorkEvent("routing", "running", document)
+    emit(WorkEvent("routing", "running", document))
     agent = (
         discover.discover_for_capability(facts.capability)
         if classification.classified
@@ -225,15 +263,15 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
             f"no published agent handles {facts.capability}, so this case escalates to a human"
         )
         document = patch(routed=False, refusal=refusal)
-        yield WorkEvent("routing", "refused", document, detail=refusal)
+        emit(WorkEvent("routing", "refused", document, detail=refusal))
         return
 
     document = patch(routed=True, investigator=agent.ref)
-    yield WorkEvent("routing", "done", document, detail=agent.ref)
+    emit(WorkEvent("routing", "done", document, detail=agent.ref))
 
     with audit.case_trace(facts) as (_span, trace_id, band):
         try:
-            yield WorkEvent("investigation", "running", document)
+            emit(WorkEvent("investigation", "running", document))
             verdict, observations = asyncio.run(
                 investigate(case.to_brief(), agent, trace_id=trace_id)
             )
@@ -249,18 +287,18 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
                 },
                 approval_band=band,
             )
-            yield WorkEvent("investigation", "done", document, detail=agent.ref)
+            emit(WorkEvent("investigation", "done", document, detail=agent.ref))
 
             if not verdict.asserts_a_cause:
-                yield WorkEvent(
+                emit(WorkEvent(
                     "proposal",
                     "skipped",
                     document,
                     detail="no cause was established, so nothing is drafted against it",
-                )
+                ))
                 return
 
-            yield WorkEvent("proposal", "running", document)
+            emit(WorkEvent("proposal", "running", document))
             proposal = asyncio.run(
                 remediation.draft(
                     case, verdict, discover.get("remediation-agent"), trace_id=trace_id
@@ -294,7 +332,7 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
                     ],
                 }
             )
-            yield WorkEvent("proposal", "done", document)
+            emit(WorkEvent("proposal", "done", document))
         finally:
             # In a `finally` because the consumer can abandon this generator -- a closed browser
             # tab closes the stream, which throws `GeneratorExit` in here. The gateway's decisions
@@ -305,10 +343,19 @@ def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[Work
 
 
 def work_case(case_id: str, as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
-    """Work a case to completion and return the final document. Drives `work_case_events`."""
+    """Work a case to completion and return the final document.
+
+    Calls `_work` directly rather than draining `work_case_events`: there is no consumer to report
+    to, so the thread and the queue would be a hop that buys nothing -- and this keeps the trace
+    span on the calling thread, which is where every non-streaming caller already expects it.
+    """
     document: dict[str, Any] = {}
-    for event in work_case_events(case_id, as_of):
+
+    def keep(event: WorkEvent) -> None:
+        nonlocal document
         document = event.document
+
+    _work(case_id, as_of, keep)
     return document
 
 

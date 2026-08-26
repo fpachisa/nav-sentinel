@@ -13,6 +13,7 @@ the sequencing, the persistence and the failure handling -- not what Gemini says
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -172,13 +173,16 @@ class TestFailuresDoNotLeaveTheScreenSpinning:
     def test_abandoning_the_stream_still_persists_the_governance_decisions(
         self, stubbed, client, case_id, monkeypatch
     ):
-        """A closed tab closes the stream, which throws `GeneratorExit` into the generator. The
-        record of what the gateway allowed and refused on the way must survive that: a trail that
-        only persists on the happy path is not a trail.
+        """A closed tab stops the consumer, not the work.
 
-        The first version of this test asserted the *verdict* was stored, which `patch()` had
-        already done before the abandon -- so it passed with the `finally` deleted, and its name
-        described a property it never checked.
+        The investigation runs on its own thread, so abandoning the stream leaves a model call that
+        is already in flight -- and already billed -- to finish and be recorded. The record of what
+        the gateway allowed and refused on the way has to survive that: a trail that only persists
+        when someone is watching is not a trail.
+
+        The first version of this test asserted the *verdict* was stored, which had already happened
+        before the abandon, so it passed with the `finally` deleted and its name described a
+        property it never checked.
         """
         from nav_sentinel.control_plane.governance import PolicyDecision
 
@@ -203,6 +207,14 @@ class TestFailuresDoNotLeaveTheScreenSpinning:
             if event.stage == "investigation" and event.state == "done":
                 break
         events.close()  # the consumer walks away mid-investigation
+
+        # Bounded wait, because the worker outlives the consumer by design. A bare assertion here
+        # would be a race that passes on a fast machine and blames the code on a slow one.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if len(store.decisions_for(case_id)) > before:
+                break
+            time.sleep(0.02)
 
         assert len(store.decisions_for(case_id)) > before, (
             "the gateway's decisions were lost when the client disconnected"

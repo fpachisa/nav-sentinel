@@ -147,3 +147,70 @@ class TestACaseWrittenByAnOlderDeployStillOpens:
 
         outcome = workflow.approve(case, CONTROLLER_A)
         assert not outcome.granted  # one eligible signature of two, which is the honest answer
+
+
+class TestInvestigatingTheSameCaseTwiceIsNotTampering:
+    """Re-working a case crashed against Firestore with `ImmutableRecord`.
+
+    An observation's id is derived from `(case_id, tool, args, digest)` -- deliberately not from
+    `retrieved_at` or `trace_id`, because a citation has to be reproducible to be checkable. But
+    the immutability check compared the *whole* record, so a second investigation that re-made the
+    same call derived the same id, presented a record differing only in when it happened and which
+    run it belonged to, and was rejected as a changed audit record.
+
+    It could not be caught offline: an offline run begins with an empty store, so the second write
+    never happens. The in-memory backend claims in its own docstring to enforce "the same
+    append-only rules as Firestore" and was in fact stricter in a way nothing exercised.
+    """
+
+    def _observation(self, **overrides):
+        from datetime import UTC, datetime
+
+        from nav_sentinel.control_plane.observations import Observation
+
+        base = {
+            "observation_id": "OBS-deadbeefdeadbeef",
+            "case_id": "CASE-x",
+            "trace_id": "trace-one",
+            "agent_ref": "fx-rates-investigator@1.3.0",
+            "tool": "ecb_fx.rate_on",
+            "args": "on=2026-08-17,pair=USDEUR",
+            "digest": "abc123",
+            "retrieved_at": datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
+            "source": "ECB",
+            "observed": {"rate": "1.1489"},
+        }
+        return Observation(**{**base, **overrides})
+
+    def test_the_same_call_in_a_later_run_is_accepted_and_the_first_record_stands(self):
+        from datetime import UTC, datetime
+
+        store = composition.store()
+        first = self._observation()
+        store.record_observation(first)
+
+        # A second investigation: same call, same result, new run, later clock.
+        store.record_observation(
+            self._observation(
+                trace_id="trace-two", retrieved_at=datetime(2026, 9, 1, 14, 30, tzinfo=UTC)
+            )
+        )
+
+        held = [o for o in store.observations_for("CASE-x") if o.observation_id == first.observation_id]
+        assert len(held) == 1
+        assert held[0].retrieved_at == first.retrieved_at, (
+            "a cited retrieved_at should be when the data was obtained, not when it was re-read"
+        )
+
+    def test_a_genuinely_different_body_under_the_same_id_is_still_refused(self):
+        """The guard still guards. Same id, different facts, means the derivation changed."""
+        from nav_sentinel.control_plane.repository import ImmutableRecord
+
+        store = composition.store()
+        store.record_observation(self._observation(observation_id="OBS-cafecafecafecafe"))
+        with pytest.raises(ImmutableRecord):
+            store.record_observation(
+                self._observation(
+                    observation_id="OBS-cafecafecafecafe", observed={"rate": "9.9999"}
+                )
+            )

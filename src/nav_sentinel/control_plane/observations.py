@@ -18,6 +18,7 @@ type in a platform record, and the audit trail wants the text anyway.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -25,7 +26,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:  # pragma: no cover
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterable, Iterator
 
 
 class Observation(BaseModel):
@@ -146,6 +147,25 @@ def digest_of(value: object) -> str:
     why citations resolve by `observation_id` instead.
     """
     return hashlib.sha256(canonical(value).encode()).hexdigest()[:16]
+
+
+#: Fields that say *when this particular call happened and which run it belonged to*, rather than
+#: what was observed. They are deliberately not in the id material either -- an id has to be
+#: reproducible for a citation to be checkable -- and that asymmetry was a bug: a second
+#: investigation of the same case re-made the same call, derived the same id, and presented a record
+#: differing only in these, which the append-only guard read as tampering. It is not tampering. It
+#: is the same evidence, obtained again.
+INCIDENTAL_FIELDS = frozenset({"retrieved_at", "trace_id"})
+
+
+def evidence_of(record: Mapping[str, object]) -> dict[str, object]:
+    """What an observation asserts, with the incidentals removed.
+
+    The comparison that decides whether two records of one id are the same evidence. Reaching for
+    full equality made a re-run a conflict, and it did so only against Firestore: an offline run
+    starts with an empty store, so the state that exposes it is one no offline test can reach.
+    """
+    return {key: value for key, value in record.items() if key not in INCIDENTAL_FIELDS}
 
 
 def observation_id(case_id: str, tool: str, args: str, digest: str) -> str:

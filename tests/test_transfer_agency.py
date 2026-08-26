@@ -364,6 +364,13 @@ class TestThePlatformWasNotTouched:
         # impossible.
         "src/nav_sentinel/control_plane/policies.py",
         "src/nav_sentinel/control_plane/gateway.py",
+        # `evidence_of`: which fields of an observation are *the evidence* and which are incidental
+        # to a particular run. Not a process concern -- a citation has to stay checkable across
+        # re-runs whoever declared the tool -- and it fixed a real defect: `retrieved_at` and
+        # `trace_id` were outside the id material and inside the equality check, so investigating
+        # the same case twice looked like tampering. Against Firestore only, which is why no
+        # offline test could reach it.
+        "src/nav_sentinel/control_plane/observations.py",
     }
 
     def test_no_platform_file_changed_without_a_recorded_reason(self):

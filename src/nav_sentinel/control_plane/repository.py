@@ -31,7 +31,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from nav_sentinel.config import settings
-from nav_sentinel.control_plane.observations import Observation
+from nav_sentinel.control_plane.observations import Observation, evidence_of
 
 if TYPE_CHECKING:  # pragma: no cover
 
@@ -230,12 +230,20 @@ class InMemoryRepository(Repository):
     def record_observation(self, observation: Observation) -> None:
         existing = self._observations.get(observation.observation_id)
         if existing is not None:
-            if existing != observation:
+            # Compared on the evidence, exactly as the Firestore backend does. This class claims in
+            # its own docstring to enforce the same rules; comparing whole records here while
+            # Firestore did too meant both were wrong in the same way, and only Firestore could
+            # ever reach the state that showed it.
+            if evidence_of(existing.model_dump(mode="json")) != evidence_of(
+                observation.model_dump(mode="json")
+            ):
                 raise ImmutableRecord(
                     f"observation {observation.observation_id} already exists with different "
                     f"content. Ids are content-derived, so this means the derivation changed."
                 )
-            return  # the same call recorded twice is one observation, not an error
+            # First write wins, which keeps the original `retrieved_at`: a cited timestamp should
+            # be when the data was obtained, not when it was read again.
+            return
         self._observations[observation.observation_id] = observation
 
     def observations_for(self, case_id: str) -> list[Observation]:
@@ -391,7 +399,13 @@ class FirestoreRepository(Repository):
         if snapshot.exists:
             # Content-derived ids mean a repeat is the same observation. Only a *different* body
             # under the same id is a real conflict, and that means the derivation changed.
-            if snapshot.to_dict() != observation.model_dump(mode="json"):
+            # Compared on the evidence, not the whole record: `retrieved_at` and `trace_id` say
+            # when this call happened and which run it belonged to, and a second investigation of
+            # the same case legitimately differs in both. Comparing everything made re-working a
+            # case raise -- against Firestore only, so no offline test could reach it.
+            if evidence_of(snapshot.to_dict() or {}) != evidence_of(
+                observation.model_dump(mode="json")
+            ):
                 raise ImmutableRecord(
                     f"observation {observation.observation_id} already exists with different "
                     f"content"
