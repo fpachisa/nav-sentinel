@@ -138,7 +138,7 @@ class TestTheWindowIsHonest:
         scoped = pages.live(
             workflow.live_snapshot(since="2026-08-17T09:00:00+00:00"), principal=ANALYST
         )
-        assert "counting this run, from 09:00:00" in scoped
+        assert "this run started 09:00:00" in scoped
 
 
 class TestTheWindowIsTheRunNotThePageLoad:
@@ -292,3 +292,28 @@ class TestResetClearsEverythingTheFleetWrites:
         }
         missed = written - set(demo_reset.WORKING) - {"signed_for"}
         assert not missed, f"demo-reset would leave these behind: {sorted(missed)}"
+
+
+class TestOperatorTextIsNotHtmlSource:
+    """Every string that reaches the page is HTML-escaped, so an entity written into one arrives on
+    screen as its own source text. `Needs 1 more signature &mdash; cio` shipped exactly like that."""
+
+    def test_no_next_step_string_contains_an_html_entity(self, cycled):
+        import re
+
+        store = composition.store()
+        for band, signed in (("four_eyes", []), ("four_eyes", ["a@x.com"]),
+                             ("cio_escalation", []), ("single_reviewer", [])):
+            document = store.load_case(cycled[0])
+            document.update({
+                "approval_band": band, "routed": True, "signed_by": signed,
+                "signed_roles": ["controller"] * len(signed),
+                "verdict": {"root_cause": "x", "agent": "a@1"},
+                "proposal": {"proposal_id": "P"},
+            })
+            store.save_case(cycled[0], document)
+            step = workflow.live_snapshot()["cases"][0]["next_step"]
+            assert not re.search(r"&[a-z]+;", step), f"{band}: {step!r}"
+
+    def test_the_rendered_page_shows_no_escaped_entity(self, cycled):
+        assert "&amp;mdash;" not in pages.live(workflow.live_snapshot(), principal=ANALYST)

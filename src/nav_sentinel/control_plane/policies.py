@@ -360,9 +360,10 @@ def capability_routing(case_id: str, capability: str, agent_ref: str | None) -> 
         effect=Effect.ALLOW if agent_ref else Effect.DENY,
         policy_id="P-010-CAPABILITY-ROUTING",
         reason=(
-            f"{agent_ref} is the published agent for {capability}"
+            f"{agent_ref} is authorised to investigate {capability}"
             if agent_ref
-            else f"no published agent handles {capability}; the case escalates to a human"
+            else f"no specialist is authorised to investigate {capability}; this case needs "
+            f"an analyst"
         ),
         agent_ref=agent_ref,
         resource=case_id,

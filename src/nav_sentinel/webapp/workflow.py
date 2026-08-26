@@ -485,10 +485,10 @@ def approve(
 #: with Pub/Sub fan-out the browser is not talking to that instance, and Firestore is the only
 #: thing both of them can see.
 LIVE_STAGES: tuple[tuple[str, str], ...] = (
-    ("triage", "Triage"),
-    ("routing", "Route"),
+    ("triage", "Classify"),
+    ("routing", "Assign"),
     ("investigation", "Investigate"),
-    ("draft", "Draft"),
+    ("draft", "Draft entry"),
 )
 
 
@@ -503,13 +503,13 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     from nav_sentinel.control_plane.governance import ApprovalClass
 
     if document.get("approval_ref"):
-        return "posted_by_ledger", "Cleared — release to the ledger"
+        return "posted_by_ledger", "Approved — release to the ledger"
     if document.get("routed") is False:
-        return "human_investigation", "No authorised agent — investigate by hand"
+        return "human_investigation", "No specialist authorised — needs an analyst"
     if not document.get("verdict"):
-        return "fleet", "Fleet working"
+        return "fleet", "In progress"
     if not document.get("proposal"):
-        return "human_investigation", "No cause established — investigate by hand"
+        return "human_investigation", "Cause not established — needs an analyst"
 
     band = str(document.get("approval_band", "single_reviewer"))
     try:
@@ -523,7 +523,9 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     names = sorted(allowed)
     who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" or {names[-1]}"
     return "sign", (
-        f"Needs {outstanding} more signature{'s' if outstanding > 1 else ''} from {who}"
+        # A literal em dash, not `&mdash;`. This string is HTML-escaped on the way out, so an
+        # entity arrives on screen as its own source text -- which it did.
+        f"Needs {outstanding} more signature{'s' if outstanding > 1 else ''} \u2014 {who}"
     )
 
 

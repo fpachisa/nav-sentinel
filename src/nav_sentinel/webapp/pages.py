@@ -535,7 +535,7 @@ _LIVE_SCRIPT = r"""<script>
     if (snap.settled && !stopped) {
       stopped = true;
       document.getElementById('live-status').innerHTML =
-        'settled &middot; every case is at a point where only a person can move it';
+'complete &middot; awaiting sign-off';
     }
   }
 
@@ -795,18 +795,17 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
     if not items:
         body = _head(
             "Exceptions",
-            f"Nothing detected for {_e(as_of)} yet. Running the cycle compares the fund's own "
-            "books against the custodian's, scores each difference in basis points of NAV, and "
-            "derives who must approve a correction.",
+            f"No reconciliation has been run for {_e(as_of)}. The run compares the fund's books "
+            "against the custodian's, sizes each difference against NAV, and sets the approval "
+            "level each one requires.",
         ) + (
             '<div class="panel"><div class="empty">'
             f"{MARK}"
             '<div style="font-size:15px;font-weight:600;margin-bottom:5px">No exceptions '
             "detected</div>"
             '<p class="muted" style="max-width:52ch;margin:0 auto 18px;font-size:13px">'
-            "No model is called to find a break. Comparing two books is arithmetic, and asking a "
-            "model to do subtraction would be spending a request to be told what the numbers "
-            "already say.</p>"
+            "Differences are found by tolerance rules over both books, not by a model. The "
+            "specialists are engaged afterwards, to explain what caused each one.</p>"
             '<form method="post" action="/app/cycle" onsubmit="var b=this.querySelector(\'button\');b.disabled=true;b.textContent=\'Running…\';">'
             '<button class="btn" type="submit">Run reconciliation</button></form>'
             "</div></div>"
@@ -865,9 +864,9 @@ def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:
     body = (
         _head(
             "Exceptions",
-            f"{len(items)} differences at the {_e(as_of)} valuation point, {worked} investigated. "
-            "Impact is basis points of NAV; the band is derived by the control plane from that "
-            "magnitude and decides who must sign.",
+            f"{len(items)} differences between the fund's books and the custodian's at the "
+            f"{_e(as_of)} valuation point, {worked} investigated. Impact is stated in basis points "
+            "of NAV, and it determines who is required to sign the correction.",
             actions='<form method="post" action="/app/cycle" onsubmit="var b=this.querySelector(\'button\');b.disabled=true;b.textContent=\'Running…\';">'
             '<button class="btn ghost" type="submit">Re-run reconciliation</button></form>'
             + (
@@ -974,7 +973,7 @@ def _signals_panel(signals: list[Any]) -> str:
         return ""
     return (
         '<div class="panel"><div class="panel-h"><b>What the numbers say</b>'
-        '<span class="r">computed from the books, before any model ran</span></div>'
+        '<span class="r">from both books, before any model was consulted</span></div>'
         '<div class="pad"><ul class="plain">'
         + "".join(f"<li>{_e(s)}</li>" for s in signals)
         + "</ul></div></div>"
@@ -1008,8 +1007,9 @@ def _routing_panel(document: dict[str, Any]) -> str:
     return (
         '<div class="panel"><div class="panel-h"><b>Routing</b></div>'
         f'<div class="pad"><div class="note deny">{_e(document.get("refusal"))}</div>'
-        "<p class=\"muted\" style=\"font-size:11.5px;margin:10px 0 0\">No agent was invoked and "
-        "no cause is asserted. The case stays in the queue as human work.</p></div></div>"
+        "<p class=\"muted\" style=\"font-size:11.5px;margin:10px 0 0\">No specialist is authorised "
+        "for this kind of break, so none was engaged and no cause is claimed. This case needs a "
+        "manual investigation.</p></div></div>"
     )
 
 
@@ -1033,7 +1033,7 @@ def _evidence_panel(observations: list[Any]) -> str:
         return ""
     return (
         '<div class="panel"><div class="panel-h"><b>Evidence cited</b>'
-        '<span class="r">every fact carries its source and a digest</span></div>'
+        '<span class="r">each figure traceable to the source it came from</span></div>'
         + _evidence(observations)
         + "</div>"
     )
@@ -1044,7 +1044,7 @@ def _proposal_panel(document: dict[str, Any]) -> str:
         return ""
     return (
         '<div class="panel"><div class="panel-h"><b>Proposed correction</b>'
-        '<span class="r">drafted, never posted</span></div>'
+        '<span class="r">for your review &middot; not posted</span></div>'
         + _proposal(document.get("proposal"))
         + "</div>"
     )
@@ -1141,9 +1141,10 @@ def _actions(
         rail = escape(progress(list(WORK_STAGES)), quote=True)
         return (
             '<div class="panel"><div class="panel-h"><b>Investigate</b></div><div class="pad">'
-            '<p class="muted" style="font-size:12.5px;margin:0 0 14px">Triage classifies the '
-            "difference, the registry decides which agent is authorised for it, and that agent "
-            "investigates using only the tools its manifest allows.</p>"
+            '<p class="muted" style="font-size:12.5px;margin:0 0 14px">The difference is '
+            "classified, handed to the specialist authorised for that kind of break, and "
+            "investigated against source data. You get a cause, the evidence behind it, and a "
+            "correcting entry to review.</p>"
             f'<form class="block" id="work-form" method="post" data-progress="{rail}" '
             f'data-stream="/app/case/{_e(case_id)}/work/stream" '
             f'action="/app/case/{_e(case_id)}/work" '
@@ -1151,7 +1152,7 @@ def _actions(
             "b.disabled=true;b.textContent='Running…';\">"
             '<button class="btn wide" type="submit">Run the fleet</button></form>'
             '<p class="muted" style="font-size:11px;margin:10px 0 0;text-align:center">'
-            "Calls Gemini on Vertex AI</p></div></div>"
+            "Gemini on Vertex AI &middot; about 20 seconds</p></div></div>"
         )
 
     eligible, why = session.may_sign(principal, ApprovalClass(band))
@@ -1218,15 +1219,15 @@ def _actions(
             '<b style="color:var(--cleared)">Cleared for posting</b>'
             '<span class="r" style="color:var(--cleared)">signed</span></div><div class="pad">'
             '<p style="margin:0 0 12px;font-size:13px">The correcting entry is authorised and '
-            "leaves the fleet here. It is released to the general ledger by the posting system, "
-            "under a human's hand &mdash; <b>no agent in NAV Sentinel can post it</b>.</p>"
-            '<div class="note" style="font-size:11.5px">Checked at approval, not asserted: the '
-            "gateway was asked to post this entry under an agent's identity, with this "
-            "signature attached, and refused.<br>"
+            "now leaves this system. It is released to the general ledger by your posting "
+            "process &mdash; <b>no agent in NAV Sentinel can post it</b>, at any value.</p>"
+            '<div class="note" style="font-size:11.5px">Verified rather than assumed: an attempt '
+            "was made to post this entry as one of the specialists, carrying your signature, and "
+            "it was blocked.<br>"
             f'<span class="mono" style="font-size:10.5px;color:var(--faint)">'
             f'{_e(outcome["agent_posting_blocked"])}</span></div>'
-            '<p class="muted" style="font-size:11.5px;margin:12px 0 0">An approval authorises '
-            "a correction. It does not grant anything the authority to make it.</p>"
+            '<p class="muted" style="font-size:11.5px;margin:12px 0 0">Your signature authorises '
+            "the correction. It does not give any agent the authority to make it.</p>"
             "</div></div>"
         )
     return blocks
@@ -1259,23 +1260,23 @@ def _handover(snapshot: dict[str, Any]) -> str:
 
     if working and not settled:
         lead = (
-            f"<b>The fleet is working.</b> {working} case"
-            f"{'s' if working != 1 else ''} still in flight — nobody is driving it."
+            f"<b>Investigation in progress.</b> {working} case"
+            f"{'s' if working != 1 else ''} still being worked. No action needed from you yet."
         )
     elif waiting or manual:
         lead = (
-            "<b>The fleet is done, and it cannot go further.</b> What is left is a person's "
-            "move: every correction is drafted and unposted."
+            "<b>Ready for your review.</b> Every correction is drafted and none is posted. "
+            "Nothing moves further without a signature."
         )
     else:
-        lead = "<b>Nothing is outstanding.</b>"
+        lead = "<b>Nothing outstanding.</b> Every exception at this valuation point is closed."
 
     return (
         f'<div class="handover{" done" if settled else ""}">{lead}'
         '<div class="hs">'
-        f'<span><b data-counter="hand_sign">{waiting}</b> awaiting signature</span>'
-        f'<span><b data-counter="hand_manual">{manual}</b> need a human investigator</span>'
-        f'<span><b data-counter="hand_working">{working}</b> in flight</span>'
+        f'<span><b data-counter="hand_sign">{waiting}</b> awaiting your signature</span>'
+        f'<span><b data-counter="hand_manual">{manual}</b> for manual review</span>'
+        f'<span><b data-counter="hand_working">{working}</b> in progress</span>'
         "</div></div>"
     )
 
@@ -1302,12 +1303,12 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
         for key, label, cls, suffix, note in (
             ("investigated", "Cases investigated", "t-ok",
              f'<span style="font-size:15px;color:var(--faint)">/{counters["cases"]}</span>',
-             "unattended, by the fleet"),
-            ("agents", "Specialists engaged", "", "", "each under its own identity"),
-            ("tool_calls", "Tool calls policed", "", "", "every one through the gateway"),
-            ("evidence", "Evidence records", "", "", "each with a source and a digest"),
-            ("decisions", "Policy decisions", "t-four", "", "persisted, not just traced"),
-            ("denials", "Refusals", "t-esc", "", "what the fleet was stopped from doing"),
+             "cause established and correction drafted"),
+            ("agents", "Specialists engaged", "", "", "FX, corporate actions, settlement, pricing"),
+            ("tool_calls", "Source lookups", "", "", "each one checked against this fund's mandate"),
+            ("evidence", "Evidence on file", "", "", "citable, and traceable to its source"),
+            ("decisions", "Controls applied", "t-four", "", "recorded against each case"),
+            ("denials", "Actions blocked", "t-esc", "", "the fleet was not permitted to proceed"),
         )
     )
 
@@ -1337,35 +1338,37 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
         )
 
     feed = "".join(_feed_line(line) for line in snapshot["feed"]) or (
-        '<div class="pad muted">Nothing yet. Press <b>Investigate all</b> on the queue, or publish '
-        "an event, and this fills as the fleet works.</div>"
+        '<div class="pad muted">No activity yet. Start the fleet from the exception queue and '
+        "each control decision will appear here as it is made.</div>"
     )
 
     window = (
-        f"counting this run, from {_e(snapshot['since'][11:19])}"
+        f"live · this run started {_e(snapshot['since'][11:19])}"
         if snapshot.get("since")
-        else "no run in progress"
+        else "idle · no run in progress"
     )
     return shell(
         "Fleet activity — NAV Sentinel",
         _head(
             "Fleet activity",
-            f"What the fleet is doing at the {_e(snapshot['as_of'])} valuation point, read back "
-            "from Firestore. Nothing here is a live stream from a worker: with events fanned out "
-            "across instances, the store is the only thing the browser and the worker both see.",
+            f"Every exception at the {_e(snapshot['as_of'])} valuation point, and how far the "
+            "specialists have got with it. Each one is classified, handed to the specialist "
+            "authorised for that kind of break, investigated against source data, and drafted into "
+            "a correcting entry. Nothing is posted, and nothing is cleared without a signature.",
             actions='<a class="btn ghost" href="/app">Exception queue</a>',
         )
         + f'<div class="kpis" id="live-tiles" style="grid-template-columns:repeat(6,1fr)">{tiles}'
         "</div>"
         + _handover(snapshot)
         + '<div class="panel"><div class="panel-h"><b>Cases</b>'
-        f'<span class="r" id="live-status"><span class="pulse"></span>watching · {window}</span>'
+        f'<span class="r" id="live-status"><span class="pulse"></span>{window}</span>'
         '</div><div class="scroll"><table class="lgrid"><thead><tr><th>Exception</th>'
-        f'<th class="r">Impact</th>{head}<th>Authorised agent</th>'
+        f'<th class="r">Impact</th>{head}<th>Investigated by</th>'
         '<th>Next step</th></tr></thead>'
         f'<tbody id="live-rows">{rows}</tbody></table></div></div>'
-        '<div class="panel"><div class="panel-h"><b>Governance feed</b>'
-        '<span class="r">every line is a persisted policy decision</span></div>'
+        '<div class="panel"><div class="panel-h"><b>Control log</b>'
+        '<span class="r">what each specialist was permitted to do, and where it was stopped</span>'
+        "</div>"
         f'<div class="feed" id="live-feed">{feed}</div></div>' + _LIVE_SCRIPT,
         principal=principal,
         active="live",
@@ -1385,19 +1388,19 @@ def fleet(*, principal: Principal) -> str:
     cards = ""
     for m in sorted(discover.all_agents(), key=lambda m: m.agent_id):
         authority = (
-            '<span class="chip b-four_eyes">may draft</span>'
+            '<span class="chip b-four_eyes">drafts corrections</span>'
             if m.authority.may_propose_remediation
-            else '<span class="chip b-single_reviewer">reports only</span>'
+            else '<span class="chip b-single_reviewer">reports findings only</span>'
         )
         armor = (
-            ' <span class="chip b-cio_escalation">untrusted input</span>'
+            ' <span class="chip b-cio_escalation">reads outside data</span>'
             if m.untrusted_inputs
             else ""
         )
         tools = "".join(f'<span class="tag">{_e(t)}</span>' for t in m.allowed_tools) or "&mdash;"
         handles = (
             "".join(f'<span class="tag">{_e(c)}</span>' for c in m.handles_capabilities)
-            or '<span class="muted">orchestration only</span>'
+            or '<span class="muted">coordination only</span>'
         )
         cards += (
             f'<div class="acard"><h3>{_e(m.display_name)}</h3>'
@@ -1405,9 +1408,10 @@ def fleet(*, principal: Principal) -> str:
             f'<div style="margin-top:10px">{authority}{armor}</div>'
             f'<div class="row"><div class="k">Model</div><div class="v">'
             f"<code>{_e(m.model)}</code></div></div>"
-            f'<div class="row"><div class="k">Handles</div><div class="v">{handles}</div></div>'
-            f'<div class="row"><div class="k">Tools</div><div class="v">{tools}</div></div>'
-            f'<div class="row"><div class="k">Reads</div><div class="v">'
+            f'<div class="row"><div class="k">Investigates</div><div class="v">{handles}</div>'
+            "</div>"
+            f'<div class="row"><div class="k">May call</div><div class="v">{tools}</div></div>'
+            f'<div class="row"><div class="k">May read</div><div class="v">'
             f"{_e(', '.join(m.data_scopes.read) or '—')}</div></div></div>"
         )
 
@@ -1441,18 +1445,19 @@ def fleet(*, principal: Principal) -> str:
 
     tiles = (
         '<div class="kpis">'
-        f'<div class="tile"><div class="lbl">Published agents</div>'
+        f'<div class="tile"><div class="lbl">Specialists available</div>'
         f'<div class="big">{len(discover.all_agents())}</div>'
-        '<div class="sub">each with its own identity</div></div>'
+        '<div class="sub">each with its own access rights</div></div>'
         f'<div class="tile t-ok"><div class="lbl">Capabilities</div>'
         f'<div class="big">{len(coverage)}</div>'
-        f'<div class="sub">across {len(packs.registered())} departments</div></div>'
+        f'<div class="sub">kinds of break, across {len(packs.registered())} departments</div>'
+        "</div>"
         f'<div class="tile t-esc"><div class="lbl">Coverage gaps</div>'
         f'<div class="big">{gaps}</div>'
         f'<div class="sub">declared, with nobody published to handle them</div></div>'
         '<div class="tile t-four"><div class="lbl">Posting authority</div>'
         '<div class="big">0</div>'
-        '<div class="sub">no agent holds it, at any size</div></div>'
+        '<div class="sub">no agent holds it, at any value</div></div>'
         "</div>"
     )
 
@@ -1460,25 +1465,25 @@ def fleet(*, principal: Principal) -> str:
         "Fleet — NAV Sentinel",
         _head(
             "Fleet",
-            "Every agent is discovered from the registry by the capability it declares. No agent "
-            "is named in application code, so publishing one is a registry change rather than a "
-            "deployment.",
+            "The specialists available to this fund, what each may look at, and which "
+            "kinds of break each is authorised to investigate. A specialist can be added or "
+            "withdrawn without changing the desk.",
         )
         + tiles
-        + f'<h2>Published agents</h2><div class="cards">{cards}</div>'
-        + '<h2>Capability coverage</h2>'
-        + f'<div class="panel"><div class="panel-h"><b>Routing table</b>'
+        + f'<h2>The specialists</h2><div class="cards">{cards}</div>'
+        + '<h2>Who investigates what</h2>'
+        + f'<div class="panel"><div class="panel-h"><b>Who investigates what</b>'
         f'<span class="r">{len(coverage) - gaps - len(sentinels)} routed &middot; {gaps} unhandled '
         f'&middot; {len(sentinels)} sentinels</span></div>'
-        '<div class="scroll"><table><thead><tr><th>Capability</th><th>Owning process</th>'
-        f"<th>Authorised agent</th></tr></thead><tbody>{rows}</tbody></table></div></div>"
-        '<div class="note" style="margin-top:14px">A break classified into a capability with no '
-        "published agent is <b>refused at routing</b>: no agent is invoked, no cause is asserted, "
-        "and the case stays in the queue as human work with the refusal recorded against it. The "
-        "alternative is what a naive fleet does &mdash; hand it to whichever agent looks closest, "
-        "which returns a confident and wrong root cause with real citations attached. A "
-        "<code>.unclassified</code> capability is different again: it is the value triage returns "
-        "when no family fits, so it must never have an agent at all.</div>",
+        '<div class="scroll"><table><thead><tr><th>Kind of break</th><th>Department</th>'
+        f"<th>Authorised specialist</th></tr></thead><tbody>{rows}</tbody></table></div></div>"
+        '<div class="note" style="margin-top:14px">Where no specialist is authorised for a kind '
+        "of break, the case is <b>refused at routing</b>: no agent is invoked, no cause is "
+        "asserted, and it stays in the queue as human work with the refusal recorded against it. "
+        "It is not handed to whichever specialist looks closest &mdash; that returns a confident "
+        "wrong answer with real citations attached, which is worse than no answer. "
+        "<code>unclassified</code> means the break fitted no known family, and always goes to a "
+        "person.</div>",
         principal=principal,
         active="fleet",
     )
@@ -1540,17 +1545,17 @@ def remediation(store: Any, case_id: str, *, principal: Principal) -> str:
         '<div class="kpis">'
         f'<div class="tile"><div class="lbl">Recorded transitions</div>'
         f'<div class="big">{len(history)}</div>'
-        '<div class="sub">each in its own invocation</div></div>'
+        '<div class="sub">each one recorded when it happened</div></div>'
         f'<div class="tile t-four"><div class="lbl">Elapsed business dates</div>'
         f'<div class="big">{_e(span.split()[0]) if span else "—"}'
         '<span style="font-size:13px;color:var(--faint)"> days</span></div>'
         '<div class="sub">wall-clock is compressed; these are not</div></div>'
         f'<div class="tile t-ok"><div class="lbl">Policy decisions</div>'
         f'<div class="big">{len(decisions)}</div>'
-        '<div class="sub">persisted, not just traced</div></div>'
+        '<div class="sub">recorded against this case</div></div>'
         f'<div class="tile t-esc"><div class="lbl">Refusals</div>'
         f'<div class="big">{len(denials)}</div>'
-        '<div class="sub">what the fleet was stopped from doing</div></div>'
+        '<div class="sub">steps that were not permitted</div></div>'
         "</div>"
     )
 
@@ -1558,9 +1563,10 @@ def remediation(store: Any, case_id: str, *, principal: Principal) -> str:
         "Remediation — NAV Sentinel",
         _head(
             "Remediation",
-            f'<span class="mono">{_e(case_id)}</span> &mdash; a NAV error case spanning three '
-            "departments. Each event was applied in its own invocation and read back from the "
-            "store, so the sequence survives the process that recorded it.",
+            f'<span class="mono">{_e(case_id)}</span> &mdash; a published NAV error, from '
+            "detection through investor compensation. Fund accounting sizes it, transfer agency "
+            "establishes who dealt at the wrong price, and compliance decides what must be "
+            "reported. Business dates are real; the elapsed wall-clock is compressed.",
         )
         + tiles
         + '<div class="grid"><div>'
@@ -1576,9 +1582,9 @@ def remediation(store: Any, case_id: str, *, principal: Principal) -> str:
             if refusals
             else ""
         )
-        + '<div class="note">A stage machine, not a status field. The transition an operator '
-        "would most want &mdash; approving compensation straight into payment &mdash; is not an "
-        "edge in the graph, so it cannot be taken by anyone, including an agent.</div>"
+        + '<div class="note">This case can only move along the steps its process defines. The '
+        "shortcut an operator under time pressure would most want &mdash; paying compensation "
+        "before it has been approved &mdash; is not one of them, for anybody.</div>"
         "</div></div>",
         principal=principal,
         active="remediation",
