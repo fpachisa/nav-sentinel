@@ -36,7 +36,8 @@ def cycled() -> list[str]:
     for case_id in ids:
         document = store.load_case(case_id) or {}
         for field in ("triage", "routed", "refusal", "investigator", "verdict", "proposal",
-                      "signed_by", "signed_roles", "approval_ref", "last_outcome"):
+                      "drafted", "draft_skipped", "signed_by", "signed_roles", "approval_ref",
+                      "last_outcome"):
             document.pop(field, None)
         store.save_case(case_id, document)
     return ids
@@ -162,3 +163,57 @@ class TestTheScreenIsGated:
         body = client.get("/app/live.json", params={"since": "not-a-timestamp'; DROP"}).json()
         assert body["since"] == "", "an unparseable window was forwarded to the query"
         assert body["counters"]["cases"] == len(cycled)
+
+
+class TestTheScreenStopsWhenTheFleetIsFinished:
+    def test_a_case_that_established_no_cause_is_settled_not_in_flight(self, cycled):
+        """It has a verdict and will never have a proposal, so reading "no proposal" as "still
+        drafting" left the screen polling for eternity. Observed on a real unattended run: six of
+        seven settled and the seventh sat in flight forever."""
+        store = composition.store()
+        for case_id in cycled:
+            document = store.load_case(case_id)
+            document.update(
+                {
+                    "triage": {"capability": "nav.settlement", "confidence": 0.8, "reasoning": "r"},
+                    "routed": True,
+                    "investigator": "settlement-investigator@1.4.0",
+                    "verdict": {"root_cause": "inconclusive", "confidence": 0.4,
+                                "citations": [], "agent": "settlement-investigator@1.4.0"},
+                    "drafted": False,
+                    "draft_skipped": "no cause was established, so nothing was drafted",
+                }
+            )
+            store.save_case(case_id, document)
+
+        snapshot = workflow.live_snapshot()
+        row = snapshot["cases"][0]
+        assert row["stages"]["draft"] == "blocked"
+        assert row["next_kind"] == "human_investigation"
+        assert snapshot["settled"] is True, "the page would poll forever"
+
+    def test_a_case_still_being_drafted_is_not_settled(self, cycled):
+        """The distinction has to cut both ways, or `settled` just means "has a verdict"."""
+        store = composition.store()
+        for case_id in cycled:
+            document = store.load_case(case_id)
+            document.update({"routed": True, "verdict": {"root_cause": "x", "agent": "a@1"}})
+            store.save_case(case_id, document)
+        assert workflow.live_snapshot()["settled"] is False
+
+
+class TestResetClearsEverythingTheFleetWrites:
+    def test_no_field_the_fleet_writes_survives_a_reset(self):
+        """A reset that leaves one field behind opens the next take in a state the demo did not
+        produce -- and `drafted` is exactly the kind of field that gets added to the writer and
+        forgotten in the resetter, because nothing fails when it is missed.
+        """
+        from nav_sentinel import demo_reset
+
+        written = {
+            "triage", "routed", "refusal", "investigator", "verdict", "proposal",
+            "drafted", "draft_skipped", "signed_by", "signed_roles", "approval_ref",
+            "last_outcome", "signed_for",
+        }
+        missed = written - set(demo_reset.WORKING) - {"signed_for"}
+        assert not missed, f"demo-reset would leave these behind: {sorted(missed)}"

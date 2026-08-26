@@ -302,11 +302,15 @@ def _work(
             emit(WorkEvent("investigation", "done", document, detail=agent.ref))
 
             if not verdict.asserts_a_cause:
+                # Persisted, not just emitted. Without it the case has a verdict and no proposal
+                # forever, which is indistinguishable from "still drafting" to anything reading the
+                # store -- so the activity screen never settled and polled for eternity.
+                document = patch(
+                    drafted=False,
+                    draft_skipped="no cause was established, so nothing was drafted",
+                )
                 emit(WorkEvent(
-                    "proposal",
-                    "skipped",
-                    document,
-                    detail="no cause was established, so nothing is drafted against it",
+                    "proposal", "skipped", document, detail=document["draft_skipped"],
                 ))
                 return
 
@@ -525,9 +529,16 @@ def _stage_states(document: dict[str, Any]) -> dict[str, str]:
         "investigation": "done"
         if document.get("verdict")
         else ("blocked" if routed is False else "pending"),
+        # `drafted is False` is the fleet saying it finished and drafted nothing, which is a
+        # different state from not having got there yet. Reading them as one meant a case that
+        # established no cause looked permanently in-flight.
         "draft": "done"
         if document.get("proposal")
-        else ("blocked" if routed is False else "pending"),
+        else (
+            "blocked"
+            if routed is False or document.get("drafted") is False
+            else "pending"
+        ),
     }
 
 

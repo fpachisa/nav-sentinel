@@ -25,6 +25,7 @@ from nav_sentinel.webapp import workflow
 
 #: The working fields an analyst produces. Everything else on the document is detection output.
 WORKING = ("verdict", "proposal", "triage", "routed", "refusal", "investigator",
+           "drafted", "draft_skipped",
            "signed_by", "signed_roles", "approval_ref", "last_outcome")
 
 
