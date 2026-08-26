@@ -307,7 +307,36 @@ ul.plain li{margin:3px 0}
 @keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
 #work-progress.finished .bar{display:none}
 .reveal{animation:reveal .45s ease-out}
+.bump{animation:bump .5s ease-out}
+@keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.16);color:var(--accent)}100%{transform:scale(1)}}
 @keyframes reveal{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+/* ---- live ops ----------------------------------------------------------------------------- */
+.lgrid{width:100%;border-collapse:collapse}
+.lgrid th{font-size:9.5px}
+.lgrid td{padding:9px 12px;font-size:12.5px}
+.scell{text-align:center;width:74px}
+.sdot{display:inline-block;width:13px;height:13px;border-radius:50%;border:2px solid var(--line);
+  position:relative;vertical-align:middle}
+.sdot[data-s=done]{border-color:var(--cleared);background:var(--cleared)}
+.sdot[data-s=done]:after{content:"";position:absolute;left:2.5px;top:1px;width:3.5px;height:6px;
+  border:solid #fff;border-width:0 2px 2px 0;transform:rotate(40deg)}
+.sdot[data-s=refused]{border-color:var(--escalate);background:var(--escalate)}
+.sdot[data-s=refused]:after{content:"";position:absolute;left:3.5px;top:2.5px;width:5px;height:5px;
+  border-top:2px solid #fff;transform:rotate(45deg)}
+.sdot[data-s=blocked]{border-style:dotted;border-color:var(--line);background:transparent}
+.feed{max-height:300px;overflow-y:auto;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+.frow{display:grid;grid-template-columns:64px 54px 218px minmax(0,1fr);gap:12px;padding:5px 14px;
+  border-bottom:1px solid var(--hair);white-space:nowrap;align-items:baseline}
+.frow:last-child{border-bottom:0}
+.frow .fx{font-weight:700;letter-spacing:.04em}
+.frow[data-e=allow] .fx{color:var(--cleared)}
+.frow[data-e=deny] .fx{color:var(--escalate)}
+.frow .fr{overflow:hidden;text-overflow:ellipsis;color:var(--soft)}
+.frow .fa{color:var(--faint)}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3FBF8F;
+  animation:beat 1.4s ease-in-out infinite;vertical-align:middle;margin-right:6px}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.25}}
 
 /* ---- sign in ------------------------------------------------------------------------------ */
 .auth{min-height:100vh;display:grid;grid-template-columns:1.05fr .95fr}
@@ -431,6 +460,77 @@ _WORK_SCRIPT = r"""<script>
 </script>"""
 
 
+#: Polls the snapshot and repaints. Polling rather than a stream because with events fanned out
+#: across instances the browser is not connected to whichever worker is doing the work -- Firestore
+#: is the only thing both can see, and reading it is what an auditor would do.
+#:
+#: It stops when every case is terminal and says so. A page that keeps asking the same question
+#: every second forever is a cost with no answer attached.
+_LIVE_SCRIPT = r"""<script>
+(function(){
+  var rows = document.getElementById('live-rows');
+  if (!rows || !window.fetch) return;
+  var since = '', stopped = false;
+
+  function paintCounter(key, value){
+    var el = document.querySelector('[data-counter="' + key + '"]');
+    if (!el) return;
+    var suffix = el.querySelector('span');
+    var shown = suffix ? el.firstChild : el;
+    if (String(shown.textContent).trim() === String(value)) return;
+    shown.textContent = value;
+    el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+  }
+
+  function paint(snap){
+    Object.keys(snap.counters).forEach(function(k){ paintCounter(k, snap.counters[k]); });
+
+    snap.cases.forEach(function(c){
+      var tr = rows.querySelector('[data-case="' + c.case_id + '"]');
+      if (!tr) return;
+      var dots = tr.querySelectorAll('.sdot');
+      snap.stages.forEach(function(s, i){
+        if (dots[i] && dots[i].dataset.s !== c.stages[s.key]) dots[i].dataset.s = c.stages[s.key];
+      });
+    });
+
+    var feed = document.getElementById('live-feed');
+    if (snap.feed.length) {
+      feed.innerHTML = snap.feed.map(function(l){
+        return '<div class="frow" data-e="' + l.effect + '">'
+          + '<span class="fa">' + l.at + '</span>'
+          + '<span class="fx">' + l.effect.toUpperCase() + '</span>'
+          + '<span>' + l.policy + '</span>'
+          + '<span class="fr">' + l.reason + (l.agent ? '  &middot;  ' + l.agent : '') + '</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    if (snap.settled && !stopped) {
+      stopped = true;
+      document.getElementById('live-status').innerHTML =
+        'settled &middot; every case is at a point where only a person can move it';
+    }
+  }
+
+  function tick(){
+    fetch('/app/live.json' + (since ? '?since=' + encodeURIComponent(since) : ''))
+      .then(function(r){ return r.json(); })
+      .then(function(snap){
+        // The server hands back the window it counted from on the first response, and every later
+        // poll passes it back -- so the counters climb from zero for *this* run instead of opening
+        // at the accumulated total of every rehearsal.
+        if (!since && snap.now) since = snap.now;
+        paint(snap);
+        if (!stopped) setTimeout(tick, 1200);
+      })
+      .catch(function(){ if (!stopped) setTimeout(tick, 3000); });
+  }
+  setTimeout(tick, 1200);
+})();
+</script>"""
+
+
 def _e(value: Any) -> str:
     return escape("" if value is None else str(value), quote=True)
 
@@ -493,6 +593,7 @@ def shell(title: str, body: str, *, principal: Principal | None, active: str = "
     links = [
         ("queue", "/app", "Exceptions"),
         ("remediation", "/app/remediation", "Remediation"),
+        ("live", "/app/live", "Fleet activity"),
         ("fleet", "/app/fleet", "Fleet"),
         ("audit", "/console", "Audit view"),
     ]
@@ -1096,6 +1197,99 @@ def _actions(
             "</div></div>"
         )
     return blocks
+
+
+def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
+    """The fleet at work, read back from the store.
+
+    The screen exists because unattended work that nobody can see reads as nothing happening. Seven
+    cases advancing through four stages at once is the thing a single case page structurally cannot
+    show, and the governance feed underneath is what makes it a control plane rather than a job
+    runner.
+
+    Every number is counted from a persisted record, and the page says which window it is counting.
+    A live display is the easiest place in a system to put a number that cannot be checked.
+    """
+    counters = snapshot["counters"]
+    stages = snapshot["stages"]
+
+    tiles = "".join(
+        f'<div class="tile {cls}"><div class="lbl">{_e(label)}</div>'
+        f'<div class="big" data-counter="{_e(key)}">{_e(counters.get(key, 0))}'
+        f'{suffix}</div><div class="sub">{_e(note)}</div></div>'
+        for key, label, cls, suffix, note in (
+            ("investigated", "Cases investigated", "t-ok",
+             f'<span style="font-size:15px;color:var(--faint)">/{counters["cases"]}</span>',
+             "unattended, by the fleet"),
+            ("agents", "Specialists engaged", "", "", "each under its own identity"),
+            ("tool_calls", "Tool calls policed", "", "", "every one through the gateway"),
+            ("evidence", "Evidence records", "", "", "each with a source and a digest"),
+            ("decisions", "Policy decisions", "t-four", "", "persisted, not just traced"),
+            ("denials", "Refusals", "t-esc", "", "what the fleet was stopped from doing"),
+        )
+    )
+
+    head = "".join(f'<th class="scell">{_e(s["label"])}</th>' for s in stages)
+    rows = ""
+    for case in snapshot["cases"]:
+        cells = "".join(
+            f'<td class="scell"><span class="sdot" '
+            f'data-s="{_e(case["stages"][s["key"]])}"></span></td>'
+            for s in stages
+        )
+        trailing = (
+            f'<span class="none">{_e(case["refusal"])}</span>'
+            if case["refusal"]
+            else f'<span class="mono" style="font-size:11px">{_e(case["agent"])}</span>'
+            if case["agent"]
+            else '<span class="muted">—</span>'
+        )
+        rows += (
+            f'<tr data-case="{_e(case["case_id"])}">'
+            f'<td class="rail r-{_e(case["band"])}">'
+            f'<a href="/app/case/{_e(case["case_id"])}" style="text-decoration:none;'
+            f'font-weight:600">{_e(case["title"])}</a></td>'
+            f'<td class="r num">{_e(case["impact_bps"]) or "—"}</td>'
+            f"{cells}<td>{trailing}</td></tr>"
+        )
+
+    feed = "".join(
+        f'<div class="frow" data-e="{_e(line["effect"])}">'
+        f'<span class="fa">{_e(line["at"])}</span>'
+        f'<span class="fx">{_e(line["effect"].upper())}</span>'
+        f'<span>{_e(line["policy"])}</span>'
+        f'<span class="fr">{_e(line["reason"])}'
+        f'{f"  ·  {_e(line['agent'])}" if line["agent"] else ""}</span></div>'
+        for line in snapshot["feed"]
+    ) or '<div class="pad muted">Nothing yet. Publish an event and this fills as the fleet works.</div>'
+
+    window = (
+        f"counting from {_e(snapshot['since'][11:19])}"
+        if snapshot.get("since")
+        else "counting everything this store holds"
+    )
+    return shell(
+        "Fleet activity — NAV Sentinel",
+        _head(
+            "Fleet activity",
+            f"What the fleet is doing at the {_e(snapshot['as_of'])} valuation point, read back "
+            "from Firestore. Nothing here is a live stream from a worker: with events fanned out "
+            "across instances, the store is the only thing the browser and the worker both see.",
+            actions='<a class="btn ghost" href="/app">Exception queue</a>',
+        )
+        + f'<div class="kpis" id="live-tiles" style="grid-template-columns:repeat(6,1fr)">{tiles}'
+        "</div>"
+        '<div class="panel"><div class="panel-h"><b>Cases</b>'
+        f'<span class="r" id="live-status"><span class="pulse"></span>watching · {window}</span>'
+        '</div><div class="scroll"><table class="lgrid"><thead><tr><th>Exception</th>'
+        f'<th class="r">Impact</th>{head}<th>Authorised agent</th></tr></thead>'
+        f'<tbody id="live-rows">{rows}</tbody></table></div></div>'
+        '<div class="panel"><div class="panel-h"><b>Governance feed</b>'
+        '<span class="r">every line is a persisted policy decision</span></div>'
+        f'<div class="feed" id="live-feed">{feed}</div></div>' + _LIVE_SCRIPT,
+        principal=principal,
+        active="live",
+    )
 
 
 # ---------------------------------------------------------------------------------------------

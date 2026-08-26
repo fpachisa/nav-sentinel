@@ -32,7 +32,28 @@ def _blocks(html: str) -> list[str]:
     return re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
 
 
+def _served_scripts() -> dict[str, str]:
+    """Every inline script this application serves, found rather than listed.
+
+    Named individually, the second script would have been unguarded the moment it was added -- which
+    is precisely how the first one shipped broken. Anything matching `_*_SCRIPT` in `pages` is
+    checked, so a third is covered before anyone remembers to add it here.
+    """
+    found = {
+        name: value
+        for name, value in vars(pages).items()
+        if name.endswith("_SCRIPT") and isinstance(value, str)
+    }
+    assert found, "no inline scripts found in pages — has the naming changed?"
+    return found
+
+
 class TestTheDeliveredScriptParses:
+    def test_every_served_script_is_covered_by_these_checks(self):
+        """The guard's own coverage. `_WORK_SCRIPT` was the only one named, so `_LIVE_SCRIPT`
+        arrived unguarded — the same shape as the bug this file exists for."""
+        assert set(_served_scripts()) >= {"_WORK_SCRIPT", "_LIVE_SCRIPT"}
+
     def test_no_string_literal_spans_a_line_break(self):
         """The general form of the bug, checkable without a JS engine.
 
@@ -40,13 +61,15 @@ class TestTheDeliveredScriptParses:
         string -- which is exactly what a mishandled `\\n` escape produces, and it is a syntax
         error in JavaScript.
         """
-        for block in _blocks(pages._WORK_SCRIPT):
+        for name, script in _served_scripts().items():
+          for block in _blocks(script):
             for number, line in enumerate(block.splitlines(), 1):
                 stripped = re.sub(r"//.*$", "", line)
                 for quote in ("'", '"'):
                     unescaped = len(re.findall(rf"(?<!\\){quote}", stripped))
                     assert unescaped % 2 == 0, (
-                        f"line {number} opens a {quote} string and does not close it: {line!r}"
+                        f"{name} line {number} opens a {quote} string and does not "
+                        f"close it: {line!r}"
                     )
 
     def test_the_newline_escape_survives_as_two_characters(self):
@@ -60,13 +83,14 @@ class TestTheDeliveredScriptParses:
     @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
     def test_node_can_parse_it(self, tmp_path):
         """The real check, when a JS engine is available."""
-        for index, block in enumerate(_blocks(pages._WORK_SCRIPT)):
-            path = tmp_path / f"block{index}.js"
+        for name, script in _served_scripts().items():
+          for index, block in enumerate(_blocks(script)):
+            path = tmp_path / f"{name}{index}.js"
             path.write_text(block)
             result = subprocess.run(
                 ["node", "--check", str(path)], capture_output=True, text=True, check=False
             )
-            assert result.returncode == 0, result.stderr
+            assert result.returncode == 0, f"{name}: {result.stderr}"
 
 
 class TestTheScriptAnnouncesThatItRan:

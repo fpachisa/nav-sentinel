@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from datetime import datetime
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -251,6 +252,43 @@ def approve(case_id: str, request: Request) -> RedirectResponse:
         }
         store.save_case(case_id, document)
     return _to(f"/app/case/{case_id}")
+
+
+@router.get("/app/live", response_class=HTMLResponse)
+def live(request: Request) -> str:
+    composition.configure()
+    principal = _who(request)
+    if principal is None:
+        return _signin_page()
+    return pages.live(workflow.live_snapshot(AS_OF), principal=principal)
+
+
+@router.get("/app/live.json")
+def live_json(request: Request, since: str = "") -> dict:
+    """The snapshot the page polls.
+
+    `now` goes back on every response so the client can pin the window on its first poll: the
+    counters then climb from zero for this run rather than opening at the accumulated total of
+    every rehearsal, which `demo-reset` deliberately preserves.
+
+    `since` is caller-supplied and reaches a Firestore inequality filter, so it is validated as a
+    timestamp rather than passed through.
+    """
+    composition.configure()
+    if _who(request) is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+    from nav_sentinel.control_plane.observations import utcnow
+
+    scope = ""
+    if since:
+        try:
+            datetime.fromisoformat(since)
+            scope = since
+        except ValueError:
+            logger.warning("outcome=live_bad_since value=%r", since[:40])
+    snapshot = workflow.live_snapshot(AS_OF, since=scope)
+    snapshot["now"] = utcnow().isoformat()
+    return snapshot
 
 
 @router.get("/app/fleet", response_class=HTMLResponse)

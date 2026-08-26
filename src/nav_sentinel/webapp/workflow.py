@@ -77,6 +77,11 @@ def run_cycle(as_of: date = DEFAULT_AS_OF) -> list[QueueItem]:
     items: list[QueueItem] = []
     for case in _cases(as_of):
         facts = case.to_facts()
+        # Marked before the trace, so persisting this case does not re-persist the previous one's.
+        # `cycle_runner.run` has always done this and the desk never did, so a cycle started from
+        # the browser derived P-004 for every case and recorded it nowhere -- two entry points to
+        # the same work, one of them keeping the governance log and one dropping it.
+        gateway.mark_decisions(case.case_id)
         with audit.case_trace(facts) as (_span, trace_id, band):
             existing = store.load_case(case.case_id) or {}
             document = {
@@ -97,6 +102,8 @@ def run_cycle(as_of: date = DEFAULT_AS_OF) -> list[QueueItem]:
                 "note": next((b.note for b in case.breaks if b.note), ""),
             }
             store.save_case(case.case_id, document)
+            for sequence, decision in enumerate(gateway.decisions_since(case.case_id)):
+                store.record_decision(case.case_id, trace_id, sequence, decision)
         items.append(_to_item(document))
     return items
 
@@ -460,6 +467,119 @@ def approve(
         outstanding=0,
         agent_posting_blocked=_confirm_no_agent_can_post(case_id, record.ref, as_of=as_of),
     )
+
+
+#: The stages a case walks, and how each one is read back out of the store. Derived from the
+#: persisted document, never from anything held in memory by whichever instance did the work --
+#: with Pub/Sub fan-out the browser is not talking to that instance, and Firestore is the only
+#: thing both of them can see.
+LIVE_STAGES: tuple[tuple[str, str], ...] = (
+    ("triage", "Triage"),
+    ("routing", "Route"),
+    ("investigation", "Investigate"),
+    ("draft", "Draft"),
+)
+
+
+def _stage_states(document: dict[str, Any]) -> dict[str, str]:
+    """Where this case has got to, read from what is stored."""
+    routed = document.get("routed")
+    return {
+        "triage": "done" if document.get("triage") else "pending",
+        "routing": "done" if routed else ("refused" if routed is False else "pending"),
+        "investigation": "done"
+        if document.get("verdict")
+        else ("blocked" if routed is False else "pending"),
+        "draft": "done"
+        if document.get("proposal")
+        else ("blocked" if routed is False else "pending"),
+    }
+
+
+def live_snapshot(
+    as_of: date = DEFAULT_AS_OF, *, since: str = "", feed: int = 40
+) -> dict[str, Any]:
+    """What the fleet is doing, assembled from the store.
+
+    Every number here is counted from a persisted record. That is not a stylistic preference: a
+    counter derived from anything else is the defect this project keeps hitting -- a display that
+    reports work nobody can go and check.
+
+    `since` scopes the counters and the feed to one run. Without it they open at the accumulated
+    total of every rehearsal, because `demo-reset` deliberately preserves decisions and observations
+    -- a true number answering a question nobody asked.
+    """
+    store = composition.store()
+    documents = [store.load_case(case.case_id) or {} for case in _cases(as_of)]
+
+    rows: list[dict[str, Any]] = []
+    agents: set[str] = set()
+    evidence = 0
+    for document in documents:
+        case_id = str(document.get("case_id", ""))
+        agent = document.get("investigator") or (document.get("verdict") or {}).get("agent")
+        if agent:
+            agents.add(str(agent))
+        observations = [
+            observation
+            for observation in store.observations_for(case_id)
+            if not since or observation.retrieved_at.isoformat() >= since
+        ]
+        evidence += len(observations)
+        rows.append(
+            {
+                "case_id": case_id,
+                "title": _title(document),
+                "band": str(document.get("approval_band", "")),
+                "impact_bps": str(document.get("impact_bps") or ""),
+                "capability": str(document.get("capability", "")),
+                "agent": str(agent or ""),
+                "refusal": str(document.get("refusal") or ""),
+                "approved": bool(document.get("approval_ref")),
+                "stages": _stage_states(document),
+                "evidence": len(observations),
+            }
+        )
+
+    decisions = store.recent_decisions(feed, since=since)
+    investigated = sum(1 for r in rows if r["stages"]["investigation"] == "done")
+    refused = sum(1 for r in rows if r["stages"]["routing"] == "refused")
+    return {
+        "as_of": as_of.isoformat(),
+        "since": since,
+        "stages": [{"key": key, "label": label} for key, label in LIVE_STAGES],
+        "cases": rows,
+        "counters": {
+            "cases": len(rows),
+            "investigated": investigated,
+            "refused": refused,
+            "agents": len(agents),
+            "tool_calls": sum(
+                1 for d in decisions if str(d.get("nav.policy.id", "")).startswith("P-001")
+            ),
+            "evidence": evidence,
+            "decisions": len(decisions),
+            "denials": sum(1 for d in decisions if d.get("nav.policy.effect") == "deny"),
+        },
+        # Terminal means nothing more will change without someone acting. The page stops polling
+        # then and says so, rather than asking Firestore the same question every second forever.
+        "settled": all(
+            r["stages"]["draft"] in ("done", "blocked")
+            and r["stages"]["investigation"] in ("done", "blocked")
+            for r in rows
+        )
+        and bool(rows),
+        "feed": [
+            {
+                "at": str(d.get("recorded_at", ""))[11:19],
+                "effect": str(d.get("nav.policy.effect", "")),
+                "policy": str(d.get("nav.policy.id", "")),
+                "reason": str(d.get("nav.policy.reason", "")),
+                "agent": str(d.get("nav.agent.ref", "") or ""),
+            }
+            for d in decisions
+        ],
+    }
 
 
 def _routing_sequence(store, case_id: str) -> int:

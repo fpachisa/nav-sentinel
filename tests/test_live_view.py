@@ -1,0 +1,164 @@
+"""The live operations screen, and the rule that every number on it is countable.
+
+A live display is the easiest place in a system to put a figure nobody can check: it moves, it
+looks like telemetry, and it is gone by the time anyone asks. This project has already shipped a
+console panel that rendered empty on fourteen real decisions and a readiness probe that reported a
+row count as an answer to "can anyone sign?", so the standard here is that each counter is derived
+from a persisted record and can be reproduced by reading the store.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from nav_sentinel import composition
+from nav_sentinel.control_plane.approvals import Principal
+from nav_sentinel.control_plane.governance import PolicyDecision
+from nav_sentinel.webapp import pages, workflow
+
+ANALYST = Principal(subject="fpachisa@gmail.com", role="controller")
+
+
+@pytest.fixture
+def cycled() -> list[str]:
+    """A cycle with every case back at "not started".
+
+    The store is configured once for the session and case ids are content-derived, so work done by
+    an earlier test carries into this one -- and now that detection *merges* rather than
+    overwriting, re-running the cycle no longer clears it. That merge is the correct behaviour: it
+    is what stops a stray publish erasing a signed case. It does mean a test that wants a known
+    starting state has to establish one.
+    """
+    composition.configure()
+    workflow.run_cycle(workflow.DEFAULT_AS_OF)
+    store = composition.store()
+    ids = [item.case_id for item in workflow.queue(workflow.DEFAULT_AS_OF)]
+    for case_id in ids:
+        document = store.load_case(case_id) or {}
+        for field in ("triage", "routed", "refusal", "investigator", "verdict", "proposal",
+                      "signed_by", "signed_roles", "approval_ref", "last_outcome"):
+            document.pop(field, None)
+        store.save_case(case_id, document)
+    return ids
+
+
+class TestTheCountersAreCountedFromTheStore:
+    def test_a_fresh_cycle_reports_no_investigations_and_no_specialists(self, cycled):
+        counters = workflow.live_snapshot()["counters"]
+        assert counters["cases"] == len(cycled)
+        assert counters["investigated"] == 0
+        assert counters["agents"] == 0, "no agent has run, so none can be engaged"
+        assert counters["evidence"] == 0
+
+    def test_investigating_a_case_moves_the_counters(self, cycled):
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document.update(
+            {
+                "triage": {"capability": "nav.fx_rate", "confidence": 0.9, "reasoning": "r"},
+                "routed": True,
+                "investigator": "fx-rates-investigator@1.3.0",
+                "verdict": {"root_cause": "x", "confidence": 0.9, "citations": [],
+                            "agent": "fx-rates-investigator@1.3.0"},
+                "proposal": {"proposal_id": "PROP-1"},
+            }
+        )
+        store.save_case(cycled[0], document)
+
+        counters = workflow.live_snapshot()["counters"]
+        assert counters["investigated"] == 1
+        assert counters["agents"] == 1
+
+    def test_the_specialist_count_is_distinct_agents_not_cases(self, cycled):
+        """Two cases handled by one agent is one specialist engaged, not two."""
+        store = composition.store()
+        for case_id in cycled[:2]:
+            document = store.load_case(case_id)
+            document["investigator"] = "fx-rates-investigator@1.3.0"
+            store.save_case(case_id, document)
+        assert workflow.live_snapshot()["counters"]["agents"] == 1
+
+    def test_denials_count_only_denials(self, cycled):
+        store = composition.store()
+        before = workflow.live_snapshot()["counters"]["denials"]
+        store.record_decision(
+            cycled[0], "t-x", 5001,
+            PolicyDecision(policy_id="P-003-NO-AUTONOMOUS-POSTING", effect="deny", reason="no"),
+        )
+        store.record_decision(
+            cycled[0], "t-x", 5002,
+            PolicyDecision(policy_id="P-001-TOOL-ALLOWLIST", effect="allow", reason="yes"),
+        )
+        counters = workflow.live_snapshot()["counters"]
+        assert counters["denials"] == before + 1
+
+
+class TestTheWindowIsHonest:
+    def test_since_excludes_decisions_written_before_it(self, cycled):
+        """`demo-reset` preserves decisions on purpose, so an unscoped count opens at the total of
+        every rehearsal — a true number answering a question nobody asked."""
+        assert workflow.live_snapshot()["counters"]["decisions"] > 0
+        assert workflow.live_snapshot(since="2099-01-01T00:00:00+00:00")["counters"][
+            "decisions"
+        ] == 0
+
+    def test_the_page_says_which_window_it_counted(self, cycled):
+        unscoped = pages.live(workflow.live_snapshot(), principal=ANALYST)
+        assert "counting everything this store holds" in unscoped
+
+        scoped = pages.live(
+            workflow.live_snapshot(since="2026-08-17T09:00:00+00:00"), principal=ANALYST
+        )
+        assert "counting from 09:00:00" in scoped
+
+
+class TestTheStagesComeFromTheDocument:
+    def test_a_refused_case_shows_route_refused_and_the_rest_blocked(self, cycled):
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document.update({"triage": {"capability": "nav.pricing", "confidence": 0.9,
+                                    "reasoning": "r"}, "routed": False,
+                         "refusal": "no published agent handles nav.pricing"})
+        store.save_case(cycled[0], document)
+
+        row = next(r for r in workflow.live_snapshot()["cases"] if r["case_id"] == cycled[0])
+        assert row["stages"] == {
+            "triage": "done", "routing": "refused",
+            "investigation": "blocked", "draft": "blocked",
+        }
+        assert workflow.live_snapshot()["counters"]["refused"] == 1
+
+    def test_a_refused_case_counts_as_settled_because_only_a_person_can_move_it(self, cycled):
+        store = composition.store()
+        for case_id in cycled:
+            document = store.load_case(case_id)
+            document.update({"routed": False, "refusal": "no agent"})
+            store.save_case(case_id, document)
+        assert workflow.live_snapshot()["settled"] is True
+
+    def test_a_half_worked_fleet_is_not_settled(self, cycled):
+        assert workflow.live_snapshot()["settled"] is False
+
+
+class TestTheScreenIsGated:
+    def test_the_snapshot_endpoint_refuses_without_a_session(self):
+        from fastapi.testclient import TestClient
+
+        from nav_sentinel.server import app
+
+        composition.configure()
+        assert TestClient(app).get("/app/live.json").status_code == 401
+
+    def test_a_malformed_since_is_not_passed_to_the_store(self, cycled):
+        """It reaches a Firestore inequality filter, so it is validated rather than forwarded."""
+        from fastapi.testclient import TestClient
+
+        from nav_sentinel.server import app
+        from nav_sentinel.webapp import session
+
+        composition.configure()
+        client = TestClient(app)
+        client.post("/app/signin", data={"subject": session.ROSTER[1].subject})
+        body = client.get("/app/live.json", params={"since": "not-a-timestamp'; DROP"}).json()
+        assert body["since"] == "", "an unparseable window was forwarded to the query"
+        assert body["counters"]["cases"] == len(cycled)
