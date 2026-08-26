@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from nav_sentinel import composition
 from nav_sentinel.server import app
-from nav_sentinel.webapp import session, workflow
+from nav_sentinel.webapp import workflow
 
 CONTROLLER = "j.laurent@merian.example"
 
@@ -33,7 +33,7 @@ def _cite(observation_id: str) -> SimpleNamespace:
 def stubbed(monkeypatch):
     """Stand in for the three model calls, in the shapes the pipeline consumes."""
 
-    async def classify(case, agent):
+    async def classify(_case, _agent):
         return SimpleNamespace(
             capability="nav.fx_rate",
             confidence=0.91,
@@ -42,7 +42,7 @@ def stubbed(monkeypatch):
             classified=True,
         )
 
-    async def investigate(brief, agent, trace_id=None):
+    async def investigate(_brief, _agent, trace_id=None):  # noqa: ARG001
         verdict = SimpleNamespace(
             root_cause="a stale USD rate was applied",
             confidence=0.93,
@@ -52,7 +52,7 @@ def stubbed(monkeypatch):
         )
         return verdict, SimpleNamespace(as_mapping=lambda: {})
 
-    async def draft(case, verdict, agent, trace_id=None):
+    async def draft(_case, _verdict, _agent, trace_id=None):  # noqa: ARG001
         return SimpleNamespace(
             proposal_id="PROP-test",
             outcome=SimpleNamespace(value="correcting_entry"),
@@ -158,7 +158,7 @@ class TestFailuresDoNotLeaveTheScreenSpinning:
     def test_a_failure_mid_stream_is_reported_as_a_line_not_a_truncated_body(
         self, stubbed, client, case_id, monkeypatch
     ):
-        async def explode(brief, agent, trace_id=None):
+        async def explode(_brief, _agent, trace_id=None):  # noqa: ARG001
             raise RuntimeError("Vertex AI said no")
 
         monkeypatch.setattr(workflow, "investigate", explode)
