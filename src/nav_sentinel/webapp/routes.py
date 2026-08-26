@@ -247,7 +247,7 @@ def approve(case_id: str, request: Request) -> RedirectResponse:
         document["last_outcome"] = {
             "granted": outcome.granted,
             "message": outcome.message,
-            "posting_refused": outcome.posting_refused,
+            "agent_posting_blocked": outcome.agent_posting_blocked,
         }
         store.save_case(case_id, document)
     return _to(f"/app/case/{case_id}")

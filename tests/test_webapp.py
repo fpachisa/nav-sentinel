@@ -185,8 +185,8 @@ class TestTheFourEyesGateIsRealInTheUi:
             _signin(client, who)
             client.post(f"/app/case/{case_id}/approve")
         outcome = composition.store().load_case(case_id)["last_outcome"]
-        assert "P-003" in outcome["posting_refused"]
-        assert "may_post_entries=false" in outcome["posting_refused"]
+        assert "P-003" in outcome["agent_posting_blocked"]
+        assert "may_post_entries=false" in outcome["agent_posting_blocked"]
 
     def test_the_refusal_appears_on_the_page(self, client):
         case_id = _four_eyes_case(client)
@@ -194,7 +194,11 @@ class TestTheFourEyesGateIsRealInTheUi:
             _signin(client, who)
             client.post(f"/app/case/{case_id}/approve")
         page = client.get(f"/app/case/{case_id}").text
-        assert "Posting refused" in page
+        # The analyst approved; the headline says what happened. The control that holds is stated
+        # as the reason the entry is safe to release, not as a failure of their action.
+        assert "Cleared for posting" in page
+        assert "Posting refused" not in page
+        assert "no agent in NAV Sentinel can post it" in page
         assert "P-003" in page
 
 
@@ -373,3 +377,71 @@ class TestTheFleetPageDoesNotCountASentinelAsAGap:
         assert "refused at routing" in html
         assert "no agent is invoked" in html
         assert "stays in the queue as human work" in html
+
+
+class TestTheApprovedStateReadsAsFinished:
+    """After approval the rail said three things at once: "Approved — APPR-…", the same grant again
+    one box lower, and a disabled button labelled "Approve". Two of those invite the reading that
+    something is still expected of you."""
+
+    def _rail(self, *, granted: bool):
+        from nav_sentinel.control_plane.approvals import Principal
+        from nav_sentinel.webapp import pages
+
+        document = {
+            "case_id": "CASE-X",
+            "approval_band": "four_eyes",
+            "signed_by": ["a@x.example", "b@x.example"],
+            "signed_roles": ["controller", "cio"],
+        }
+        if granted:
+            document["approval_ref"] = "APPR-1234567890abcdef"
+            document["last_outcome"] = {
+                "granted": True,
+                "message": "APPR-1234567890abcdef granted at four_eyes by a@x.example, b@x.example",
+                "agent_posting_blocked": "[P-003-NO-AUTONOMOUS-POSTING] may_post_entries=false",
+            }
+        else:
+            document["signed_by"] = ["a@x.example"]
+            document["signed_roles"] = ["controller"]
+            document["last_outcome"] = {
+                "granted": False,
+                "message": "four_eyes requires 2 distinct signer(s); got 1",
+            }
+        return pages._actions(
+            document,
+            Principal(subject="b@x.example", role="cio"),
+            "four_eyes",
+            list(document["signed_by"]),
+            True,
+        )
+
+    def test_an_approved_case_offers_no_approve_button(self):
+        rail = self._rail(granted=True)
+        assert "/approve" not in rail, "a completed approval still offered a button"
+
+    def test_the_grant_is_stated_once(self):
+        rail = self._rail(granted=True)
+        assert rail.count("APPR-1234567890abcdef") == 1, (
+            "the same grant was shown twice, which reads as two things having happened"
+        )
+
+    def test_a_refusal_is_still_shown_and_the_button_stays(self):
+        """The suppression must apply to grants only — a refusal is the message that matters most."""
+        rail = self._rail(granted=False)
+        assert "four_eyes requires 2 distinct signer(s); got 1" in rail
+        assert "/approve" in rail
+
+    def test_an_analyst_who_has_signed_is_told_what_is_outstanding(self):
+        from nav_sentinel.control_plane.approvals import Principal
+        from nav_sentinel.webapp import pages
+
+        rail = pages._actions(
+            {"case_id": "CASE-X", "approval_band": "four_eyes",
+             "signed_by": ["b@x.example"], "signed_roles": ["cio"]},
+            Principal(subject="b@x.example", role="cio"),
+            "four_eyes",
+            ["b@x.example"],
+            True,
+        )
+        assert "waiting for another signatory" in rail

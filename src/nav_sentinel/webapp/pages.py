@@ -1054,31 +1054,47 @@ def _actions(
         )
     elif not eligible:
         blocks += f'<div class="note deny" style="margin:12px 0 0">{_e(why)}</div>'
-    blocks += (
-        f'<form class="block" method="post" action="/app/case/{_e(case_id)}/approve" '
-        "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
-        "b.textContent='Signing…';\" "
-        'style="margin-top:12px">'
-        f'<button class="btn wide" type="submit"'
-        f'{" disabled" if (already and not approved) or approved else ""}>'
-        f"{'Signed' if already and not approved else 'Approve'}</button></form></div></div>"
-    )
-
-    if outcome:
-        tone = "ok" if outcome.get("granted") else "deny"
+    if not approved:
         blocks += (
-            f'<div class="note {tone}" style="margin-bottom:16px">'
+            f'<form class="block" method="post" action="/app/case/{_e(case_id)}/approve" '
+            "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
+            "b.textContent='Signing…';\" "
+            'style="margin-top:12px">'
+            f'<button class="btn wide" type="submit"{" disabled" if already else ""}>'
+            f"{'Signed — waiting for another signatory' if already else 'Approve'}"
+            "</button></form>"
+        )
+    blocks += "</div></div>"
+
+    if outcome and not outcome.get("granted"):
+        # Refusals only. A granted outcome repeated, one box lower, the reference the Approval panel
+        # had just shown -- the same fact twice, which reads as two things having happened.
+        blocks += (
+            '<div class="note deny" style="margin-bottom:16px">'
             f'{_e(outcome.get("message"))}</div>'
         )
-        if outcome.get("posting_refused"):
-            blocks += (
-                '<div class="panel"><div class="panel-h" style="background:var(--escalate-w)">'
-                '<b style="color:var(--escalate)">Posting refused</b></div><div class="pad">'
-                f'<p style="margin:0 0 10px;font-size:13px">{_e(outcome["posting_refused"])}</p>'
-                '<p class="muted" style="font-size:11.5px;margin:0">An approval is necessary and '
-                "not sufficient. No agent in this fleet holds posting authority, so the entry is "
-                "refused with a valid signature in hand.</p></div></div>"
-            )
+    if outcome and outcome.get("agent_posting_blocked"):
+        # The analyst asked to approve, and the approval succeeded. Reporting "Posting refused"
+        # to them framed a property of the system as a failure of their action -- they never
+        # asked to post anything. So the headline is what did happen, and the control that
+        # holds is stated underneath it as the reason the entry is safe to release, in muted
+        # type rather than in red.
+        blocks += (
+            '<div class="panel"><div class="panel-h" style="background:var(--cleared-w)">'
+            '<b style="color:var(--cleared)">Cleared for posting</b>'
+            '<span class="r" style="color:var(--cleared)">signed</span></div><div class="pad">'
+            '<p style="margin:0 0 12px;font-size:13px">The correcting entry is authorised and '
+            "leaves the fleet here. It is released to the general ledger by the posting system, "
+            "under a human's hand &mdash; <b>no agent in NAV Sentinel can post it</b>.</p>"
+            '<div class="note" style="font-size:11.5px">Checked at approval, not asserted: the '
+            "gateway was asked to post this entry under an agent's identity, with this "
+            "signature attached, and refused.<br>"
+            f'<span class="mono" style="font-size:10.5px;color:var(--faint)">'
+            f'{_e(outcome["agent_posting_blocked"])}</span></div>'
+            '<p class="muted" style="font-size:11.5px;margin:12px 0 0">An approval authorises '
+            "a correction. It does not grant anything the authority to make it.</p>"
+            "</div></div>"
+        )
     return blocks
 
 

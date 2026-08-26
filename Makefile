@@ -22,6 +22,10 @@ fixtures: ## Generate synthetic books and records with seeded breaks (offline, f
 test: ## Run the invariant test suite (offline)
 	$(PY) -m pytest tests/ -q
 
+narration: ## Render the video narration to audio and time it (RATE=140 for a slow read)
+	$(PY) scripts/narration_audio.py --voice Daniel $(if $(RATE),--rate $(RATE),) \
+	  --out build/narration$(if $(RATE),-$(RATE),)
+
 verify: ## Offline gate: lint + diagrams + full invariant suite
 	.venv/bin/ruff check src tests fixtures scripts
 	$(PY) scripts/check_diagrams.py

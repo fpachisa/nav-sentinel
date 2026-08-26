@@ -366,7 +366,8 @@ class ApprovalOutcome:
     granted: bool
     message: str
     outstanding: int
-    posting_refused: str = ""
+    #: Why no agent could post this, once it was approved. Empty until it is.
+    agent_posting_blocked: str = ""
 
 
 def approve(
@@ -452,7 +453,7 @@ def approve(
         granted=True,
         message=f"{record.ref} granted at {band.value} by {', '.join(record.approvers)}",
         outstanding=0,
-        posting_refused=_attempt_posting(case_id, record.ref, as_of=as_of),
+        agent_posting_blocked=_confirm_no_agent_can_post(case_id, record.ref, as_of=as_of),
     )
 
 
@@ -473,13 +474,18 @@ def _requirement(band: ApprovalClass) -> tuple[frozenset[str], int]:
     return BAND_REQUIREMENTS[band]
 
 
-def _attempt_posting(case_id: str, approval_ref: str, *, as_of: date) -> str:
-    """Post the approved correction, and report the refusal.
+def _confirm_no_agent_can_post(case_id: str, approval_ref: str, *, as_of: date) -> str:
+    """Check, at the moment of approval, that no agent can post the thing just approved.
 
-    The approval reference is passed in, so this is not a straw attempt: a *valid, resolvable*
-    signature is presented and P-003 refuses anyway, because no published agent holds posting
-    authority. An attempt without the reference would be refused for the wrong reason and would
-    prove nothing.
+    Named for what it is. It used to be `_attempt_posting`, and the desk reported its result to the
+    analyst as "Posting refused" -- which reads as *your action failed*, when the analyst never
+    asked to post anything. They asked to approve, and the approval succeeded. What this establishes
+    is a property of the system: the correction is cleared, and it leaves the fleet's hands here.
+
+    The approval reference is passed in, so this is not a straw check: a *valid, resolvable*
+    signature is presented under an agent's identity and P-003 refuses anyway, because no published
+    agent holds posting authority. A check without the reference would be refused for the wrong
+    reason and would prove nothing.
     """
     case = next((c for c in _cases(as_of) if c.case_id == case_id), None)
     if case is None:

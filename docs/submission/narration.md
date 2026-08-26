@@ -1,18 +1,31 @@
-# Narration — for the AI voice
+# Narration
 
-**Budget.** Most AI voices read technical prose at 150–160 words per minute. At 150 wpm, 240 seconds
-is 600 words *if nothing is silent* — and things must be silent while the fleet runs and while a
-Console page loads. So the budget is **530 spoken words plus about 30 seconds of deliberate silence**,
-which lands near 3:45 and leaves headroom. Only the first four minutes are evaluated; overrunning
-loses the Google Cloud proof at the end, which is the one required element.
+Spoken text only, one block per shot. Measured, not estimated: `make narration` renders it with
+`say` and times it, because a word count is a proxy for duration that assumes the very thing nobody
+knows until a voice has read the script.
 
-**Generate it as one continuous track**, then cut the screen recording to it. Aligning eight separate
-clips is fiddly and drifts; one track with known timings does not.
+## Where the four minutes go
 
-**Written to be spoken.** No policy codes read aloud as letters — the code appears on screen while the
-voice says what it means. Numbers are written the way they should be said.
+Measured end to end, with the shot pauses in the file:
 
----
+| Speaking rate | Speech | + 8 pauses | Total | Against the 240s cap |
+|---|---|---|---|---|
+| ~157 wpm (system default) | 198s | 20s | **218s** | 22s spare |
+| 140 wpm (a slow, deliberate read) | 220s | 20s | **240s** | none |
+
+So the script fits comfortably at a normal narration pace and **does not fit at 140 wpm**. Two
+levers if the voice you pick reads slowly: drop the inter-shot pause from 2.5s to 1.5s, which buys
+8s, and cut shot 7 — it is 77 words for a point the address bar has already been making for three
+minutes.
+
+Only the first four minutes are evaluated, so overrunning does not truncate the video, it discards
+whatever is at the end. Re-measure after any edit:
+
+    make narration                    # default rate
+    make narration RATE=140           # the slow end
+
+Shot 5 is the longest at 110 words and 43–48 seconds. It earns it: it is four refusals and a grant,
+and it is the centre of the submission.
 
 ## 1 · The problem — 0:00–0:32 · 78 words
 
@@ -67,20 +80,18 @@ established it. Refusing is the harder behaviour and the only defensible one.
 
 *Silence: 12–20s while it actually runs. Do not cut this — a visible wait is evidence.*
 
-> Triage classified it, the registry chose the agent authorised for that capability, and that agent
-> investigated using only the tools its manifest allows.
+> Triage classified it, the registry chose the agent authorised for that capability, and that
+> agent investigated using only the tools its manifest allows.
 >
 > It found the stale rate and cited the European Central Bank data it read, with a digest of the
 > response — so the citation can be checked, not trusted. The correction balances: two legs, residual
 > zero.
 >
-> It cannot post this. Nothing in this fleet can.
-
 ---
 
 ## 5 · Where it says no — 2:05–2:45 · 96 words · **the centre of the video**
 
-> I'm signed in with Google, and this deployment has me down as a controller. Approve.
+> I'm signed in with Google; this deployment has me down as a controller. Approve.
 >
 > Refused — a controller can't clear an escalation; only the chief investment officer can. And
 > nothing was recorded: an ineligible signature isn't a partial signature.
@@ -89,17 +100,18 @@ established it. Refusing is the harder behaviour and the only defensible one.
 >
 > Second account, the CIO. Granted.
 >
-> And now the part that matters. With a valid approval in hand, posting is still refused. No agent
-> in this fleet holds posting authority, and the policy that says so is enforced at the gateway, not
-> asked of the model. An approval is necessary, and it is not sufficient.
+> And now the part that matters. Cleared for posting &mdash; and no agent in this system can post
+> it. That was checked, not claimed: the gateway was asked to post it under an agent's identity,
+> holding this signature, and refused. An approval authorises a correction; it doesn't grant
+> anything the authority to make it.
 
 ---
 
 ## 6 · Multi-week, multi-department — 2:45–3:05 · 71 words
 
-> A published error runs for weeks. Fund accounting quantifies it. Transfer agency is asked, through
-> the gateway and under its own identity, who dealt at the wrong price. A repeat is judged more
-> harshly than a first.
+> A published error runs for weeks. Fund accounting quantifies it. Transfer agency is asked,
+> through the gateway and under its own identity, who dealt at the wrong price. A repeat is judged
+> more harshly than a first.
 >
 > Three departments, twenty-eight business days. A payment file arrived before approval: refused, and
 > recorded. The wall clock is compressed; the business dates are not.
@@ -111,8 +123,8 @@ established it. Refusing is the harder behaviour and the only defensible one.
 > This runs on Cloud Run, in us-central1, as its own service account.
 >
 > Sign-in is public; the endpoints that do work are not. Asking it to run a reconciliation without
-> a session: four oh one. And it reports that it's persisting to Firestore rather than to memory,
-> because a service holding its audit trail in memory looks identical to a healthy one from outside.
+> a session: four oh one. And it reports it's persisting to Firestore, not memory &mdash; a service
+> holding its audit trail in memory looks identical to a healthy one from outside.
 >
 > Here are the stage transitions and policy decisions in Firestore, and the traces, one per
 > delivered event.
