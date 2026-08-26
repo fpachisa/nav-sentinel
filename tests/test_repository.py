@@ -310,3 +310,58 @@ class TestAgainstRealFirestore:
         assert decisions, "no decisions found; the test would prove nothing"
         sequences = [d["sequence"] for d in decisions]
         assert sequences == sorted(sequences, key=lambda s: s) or len(set(sequences)) < len(sequences)
+
+
+class TestBothBackendsStampWhenTheyWroteADecision:
+    """`recent_decisions` orders on `recorded_at`, and Firestore's `order_by` omits documents that
+    lack the ordered field. So a decision written without it is invisible to the live feed while
+    being perfectly present in the audit trail -- which is exactly what happened: the feed read 0
+    against 188 stored decisions, because the timestamp landed in the in-memory backend and not in
+    the Firestore one. Same interface, one implementation stamping, and only the deployed half wrong.
+    """
+
+    def test_the_memory_backend_stamps_it(self):
+        from nav_sentinel.control_plane.governance import PolicyDecision
+        from nav_sentinel.control_plane.repository import InMemoryRepository
+
+        store = InMemoryRepository()
+        store.record_decision(
+            "CASE-1", "t", 0,
+            PolicyDecision(policy_id="P-001-TOOL-ALLOWLIST", effect="allow", reason="ok"),
+        )
+        assert store.decisions_for("CASE-1")[0]["recorded_at"]
+
+    def test_the_firestore_backend_stamps_it_too(self):
+        """Asserted on the source, because the alternative is a live database.
+
+        A weaker check than the behavioural one above, and it is the one that would have caught the
+        bug: the two implementations diverged and the offline suite could not tell.
+        """
+        import inspect
+
+        from nav_sentinel.control_plane.repository import FirestoreRepository
+
+        source = inspect.getsource(FirestoreRepository.record_decision)
+        assert '"recorded_at"' in source, (
+            "the Firestore backend writes decisions with no timestamp, so the live feed cannot "
+            "order them and Firestore's order_by will omit every one"
+        )
+
+    def test_both_backends_agree_on_the_fields_a_decision_carries(self):
+        """The general form. Two implementations of one interface writing different shapes is the
+        defect above; this fails whenever they drift again, whatever the field."""
+        import inspect
+
+        from nav_sentinel.control_plane.repository import (
+            FirestoreRepository,
+            InMemoryRepository,
+        )
+
+        def keys(fn) -> set[str]:
+            import re
+
+            return set(re.findall(r'"([a-z_]+)":', inspect.getsource(fn)))
+
+        assert keys(InMemoryRepository.record_decision) == keys(
+            FirestoreRepository.record_decision
+        )

@@ -459,6 +459,12 @@ class FirestoreRepository(Repository):
                     "case_id": case_id,
                     "trace_id": trace_id,
                     "sequence": sequence,
+                    # Stamped for the same reason as the memory backend, and this is the copy that
+                    # matters: `recent_decisions` orders on this field, and Firestore's `order_by`
+                    # omits documents that lack it -- so a decision written without it is invisible
+                    # to the live feed while being perfectly present in the audit trail. The feed
+                    # read 0 against 188 stored decisions until this landed.
+                    "recorded_at": utcnow().isoformat(),
                     **decision.as_span_attributes(),
                 }
             )
