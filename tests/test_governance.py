@@ -852,3 +852,61 @@ class TestTheNoAutoClearFloorSurvivesTheSeam:
         assert facts.impact.value == Decimal(0)
         assert facts.no_auto_clear is True
         assert policies.approval_route(facts).metadata["band"] != "auto_clear"
+
+
+class TestARoutingOutcomeIsRecorded:
+    """P-010. Until it existed the most interesting thing the registry does -- decline to route --
+    left nothing in the governance log, while every routing that *succeeded* left governed tool
+    calls behind it. P-008's own rationale is the argument: a refusal that leaves no trace is
+    indistinguishable from a case nobody looked at.
+    """
+
+    def test_a_refusal_is_a_deny_naming_the_capability(self):
+        from nav_sentinel.control_plane import policies
+
+        decision = policies.capability_routing("CASE-X", "nav.pricing", None)
+        assert decision.policy_id == "P-010-CAPABILITY-ROUTING"
+        assert not decision.allowed
+        assert "nav.pricing" in decision.reason
+        assert decision.agent_ref is None
+
+    def test_a_successful_routing_names_the_specialist(self):
+        """Recorded on both outcomes: an operator should read which agent was authorised, not
+        infer it from the tool calls that followed."""
+        from nav_sentinel.control_plane import policies
+
+        decision = policies.capability_routing("CASE-X", "nav.fx_rate", "fx-rates@1.3.0")
+        assert decision.allowed
+        assert decision.agent_ref == "fx-rates@1.3.0"
+        assert "fx-rates@1.3.0" in decision.reason
+
+    def test_working_an_unroutable_case_persists_the_refusal(self, monkeypatch):
+        """The path that returns early. It used to persist nothing at all."""
+        from nav_sentinel import composition
+        from nav_sentinel.webapp import workflow
+
+        composition.configure()
+        workflow.run_cycle(workflow.DEFAULT_AS_OF)
+        store = composition.store()
+        case_id = workflow.queue(workflow.DEFAULT_AS_OF)[0].case_id
+
+        async def classify_as_unroutable(_case, _agent):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                capability="nav.pricing", confidence=0.9, reasoning="pricing",
+                overridden_from=None, classified=True,
+            )
+
+        monkeypatch.setattr(workflow.triage, "classify", classify_as_unroutable)
+        before = len(store.decisions_for(case_id))
+        document = workflow.work_case(case_id, workflow.DEFAULT_AS_OF)
+
+        assert document["routed"] is False
+        recorded = store.decisions_for(case_id)
+        assert len(recorded) > before, "the routing refusal persisted nothing"
+        assert any(
+            d.get("nav.policy.id") == "P-010-CAPABILITY-ROUTING"
+            and d.get("nav.policy.effect") == "deny"
+            for d in recorded
+        ), [d.get("nav.policy.id") for d in recorded]

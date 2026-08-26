@@ -31,7 +31,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from nav_sentinel.config import settings
-from nav_sentinel.control_plane.observations import Observation, evidence_of
+from nav_sentinel.control_plane.observations import Observation, evidence_of, utcnow
 
 if TYPE_CHECKING:  # pragma: no cover
 
@@ -121,6 +121,18 @@ class Repository(ABC):
 
     @abstractmethod
     def decisions_for(self, case_id: str) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    def recent_decisions(self, limit: int = 60, *, since: str = "") -> list[dict[str, Any]]:
+        """The newest policy decisions across every case, most recent first.
+
+        `decisions_for` answers "what happened to this case", which is the auditor's question. This
+        answers "what is the fleet doing", which is the operator's, and it cannot be assembled from
+        per-case reads because those have no order relative to one another.
+
+        `since` scopes it to one run. Without it the count opens at the accumulated total of every
+        rehearsal, which is a true number answering a question nobody asked.
+        """
 
 
 def _decision_id(case_id: str, trace_id: str | None, sequence: int) -> str:
@@ -262,6 +274,12 @@ class InMemoryRepository(Repository):
             "case_id": case_id,
             "trace_id": trace_id,
             "sequence": sequence,
+            # Stamped here rather than on `PolicyDecision`, deliberately. The model is frozen and
+            # shared with the span path, so a `default_factory` timestamp would make two otherwise
+            # identical decisions unequal and would put a moving value on every span event. It is
+            # also safe on an append-only record here in a way `retrieved_at` was not on an
+            # observation: decision ids are positional, and neither backend compares bodies.
+            "recorded_at": utcnow().isoformat(),
             **decision.as_span_attributes(),
         }
 
@@ -269,6 +287,15 @@ class InMemoryRepository(Repository):
         return sorted(
             (r for r in self._decisions.values() if r["case_id"] == case_id), key=_decision_order
         )
+
+    def recent_decisions(self, limit: int = 60, *, since: str = "") -> list[dict[str, Any]]:
+        rows = [
+            dict(r)
+            for r in self._decisions.values()
+            if not since or str(r.get("recorded_at", "")) >= since
+        ]
+        rows.sort(key=lambda r: str(r.get("recorded_at", "")), reverse=True)
+        return rows[:limit]
 
     def clear(self) -> None:
         self._cases.clear()
@@ -447,6 +474,20 @@ class FirestoreRepository(Repository):
         # removes an index the deployment would otherwise have to provision before any read worked.
         query = self._decision_docs.where(filter=FieldFilter("case_id", "==", case_id))
         return sorted((doc.to_dict() for doc in query.stream()), key=_decision_order)
+
+    def recent_decisions(self, limit: int = 60, *, since: str = "") -> list[dict[str, Any]]:
+        # Ordered on `recorded_at` and, when scoped, filtered on the *same* field. An inequality
+        # plus an order on one field is a single-field index, which Firestore maintains itself --
+        # unlike `decisions_for` above, where an equality filter on `case_id` beside an order needs
+        # a composite index. So this feed is global and scoped only by time, on purpose.
+        #
+        # `order_by` omits documents lacking the field, so decisions written before this existed are
+        # invisible here. Correct for a live feed, and the reason the screen states its window.
+        query = self._decision_docs
+        if since:
+            query = query.where(filter=FieldFilter("recorded_at", ">=", since))
+        query = query.order_by("recorded_at", direction="DESCENDING").limit(limit)
+        return [doc.to_dict() or {} for doc in query.stream()]
 
 
 def build(backend: str) -> Repository:

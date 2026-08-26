@@ -258,12 +258,17 @@ def _work(
         if classification.classified
         else None
     )
+    # Recorded before the branch, so the refusal is in the governance log on the path that returns
+    # early. It used to persist nothing: the most interesting thing the registry does was a field on
+    # a rewritable case document while every successful routing left governed tool calls behind it.
+    routing = gateway.record_capability_routing(
+        case_id, facts.capability, agent.ref if agent else None
+    )
+    store.record_decision(case_id, None, _routing_sequence(store, case_id), routing)
+
     if agent is None:
-        refusal = (
-            f"no published agent handles {facts.capability}, so this case escalates to a human"
-        )
-        document = patch(routed=False, refusal=refusal)
-        emit(WorkEvent("routing", "refused", document, detail=refusal))
+        document = patch(routed=False, refusal=routing.reason)
+        emit(WorkEvent("routing", "refused", document, detail=routing.reason))
         return
 
     document = patch(routed=True, investigator=agent.ref)
@@ -455,6 +460,16 @@ def approve(
         outstanding=0,
         agent_posting_blocked=_confirm_no_agent_can_post(case_id, record.ref, as_of=as_of),
     )
+
+
+def _routing_sequence(store, case_id: str) -> int:
+    """The next free position in this case's decision log.
+
+    The log is keyed by (case, trace, sequence) and refuses a duplicate, so a routing decision
+    written outside the investigation trace has to claim a position no earlier write took --
+    including on a re-run, which is a real path now that re-working a case is supported.
+    """
+    return len([d for d in store.decisions_for(case_id) if d.get("trace_id") in (None, "")]) + 1000
 
 
 def _signed_for(document: dict) -> str:

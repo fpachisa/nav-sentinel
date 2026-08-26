@@ -209,8 +209,8 @@ class TestTheSubmissionCopyIsTrue:
         assert len(packs.registered()) == 3, "devpost.md says three processes plug into the seam"
 
         policies = (ROOT / "src" / "nav_sentinel" / "control_plane" / "policies.py").read_text()
-        assert len(set(re.findall(r"P-0\d\d", policies))) == 9, (
-            "devpost.md says nine policies are enforced in code"
+        assert len(set(re.findall(r"P-0\d\d", policies))) == 10, (
+            "devpost.md says ten policies are enforced in code"
         )
 
     def test_the_deployed_url_it_sends_judges_to_is_the_one_that_can_sign_in(self):

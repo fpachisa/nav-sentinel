@@ -342,6 +342,34 @@ def stage_transition(
     )
 
 
+def capability_routing(case_id: str, capability: str, agent_ref: str | None) -> PolicyDecision:
+    """P-010: is any published agent authorised to investigate this capability.
+
+    Numbered rather than folded into P-001. The tool allowlist answers "may *this* agent call
+    *that* tool"; this answers the prior question of whether the fleet has anyone authorised at
+    all, and it is the question with the more dangerous wrong answer -- handing an unroutable break
+    to whichever agent looks closest returns a confident, wrong root cause with real citations
+    attached and an audit trail claiming a specialist established it.
+
+    Recorded on both outcomes, for P-008's reason: a refusal that left no trace is
+    indistinguishable from a case nobody looked at. Until this existed, the most interesting thing
+    the registry does -- decline to route -- was visible only as a field on a rewritable case
+    document, while every routing that *succeeded* left a governed tool call behind it.
+    """
+    return PolicyDecision(
+        effect=Effect.ALLOW if agent_ref else Effect.DENY,
+        policy_id="P-010-CAPABILITY-ROUTING",
+        reason=(
+            f"{agent_ref} is the published agent for {capability}"
+            if agent_ref
+            else f"no published agent handles {capability}; the case escalates to a human"
+        ),
+        agent_ref=agent_ref,
+        resource=case_id,
+        metadata={"capability": capability},
+    )
+
+
 def approval_route(facts: CaseFacts, thresholds: ThresholdSet | None = None) -> PolicyDecision:
     """P-004: route a case to its approval class.
 

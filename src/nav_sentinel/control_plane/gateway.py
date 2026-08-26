@@ -466,6 +466,17 @@ def record_stage_transition(
     )
 
 
+def record_capability_routing(
+    case_id: str, capability: str, agent_ref: str | None
+) -> PolicyDecision:
+    """P-010 through the gateway, so a routing outcome lands in the governance log like any other.
+
+    Both outcomes, not only the refusal: an operator reading the log needs to see which specialist
+    was authorised, not infer it from the tool calls that followed.
+    """
+    return _record(policies.capability_routing(case_id, capability, agent_ref))
+
+
 def prompt_dirs() -> tuple[Path, ...]:
     """Every registered process's prompt directory.
 

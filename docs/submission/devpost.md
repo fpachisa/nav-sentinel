@@ -90,10 +90,11 @@ OTLP, Cloud Build and Artifact Registry. Authentication is a verified Google acc
 service holds no passwords and never sees one.
 
 **The design decision the whole thing rests on:** agents are not trusted to obey their prompts.
-Every tool call passes through a policy gateway that can refuse it, and nine policies are
+Every tool call passes through a policy gateway that can refuse it, and ten policies are
 enforced in code — tool allowlist, draft-only authority, no autonomous posting, approval routing
 by materiality, untrusted-ingest screening, data scope, evidence corroboration, legal stage
-transitions, and delegation depth. A refusal is recorded as a governance decision with the
+transitions, delegation depth, and whether any published agent is authorised for a capability at
+all. A refusal is recorded as a governance decision with the
 policy id attached, so the audit trail contains the things the fleet was *stopped* from doing,
 not only what it did.
 
@@ -142,7 +143,7 @@ authenticates nobody.
   a fresh process from Firestore — not a session, not a cache.
 - The audit trail records refusals, not just actions. You can ask what the fleet was prevented
   from doing.
-- 927 offline tests that run in about eight seconds and need no cloud credentials, plus a
+- 930 offline tests that run in about eight seconds and need no cloud credentials, plus a
   documented list of the project's **known defects** in the README. The honest ones are the
   useful ones.
 - The control plane is genuinely process-agnostic, proven by three processes rather than
