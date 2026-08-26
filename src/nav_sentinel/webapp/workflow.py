@@ -519,9 +519,9 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     outstanding = max(0, required - len(set(document.get("signed_by", []))))
     if outstanding == 0:
         return "sign", "Awaiting signature"
-    # "cio, controller or reviewer" rather than "cio or controller or reviewer".
-    names = sorted(allowed)
-    who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" or {names[-1]}"
+    from nav_sentinel.webapp.pages import role_label
+
+    who = role_label(allowed)
     return "sign", (
         # A literal em dash, not `&mdash;`. This string is HTML-escaped on the way out, so an
         # entity arrives on screen as its own source text -- which it did.

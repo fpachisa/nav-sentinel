@@ -559,6 +559,32 @@ def _e(value: Any) -> str:
     return escape("" if value is None else str(value), quote=True)
 
 
+#: How a role is written on screen. `cio` is an initialism and reads wrong in sentence case, and
+#: the raw enum values leak the code's vocabulary into an operations screen.
+ROLE_LABELS = {"cio": "CIO", "controller": "Controller", "reviewer": "Reviewer"}
+
+
+def role_label(roles) -> str:
+    """"CIO", or "Controller or CIO" — the roles that may sign, as an operator would say them."""
+    names = [ROLE_LABELS.get(r, r.capitalize()) for r in sorted(roles)]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return ", ".join(names[:-1]) + f" or {names[-1]}"
+
+
+#: Approval bands as an operator says them. The enum spells them for code.
+BAND_LABELS = {
+    "auto_clear": "Auto-clear",
+    "single_reviewer": "Single reviewer",
+    "four_eyes": "Four eyes",
+    "cio_escalation": "CIO escalation",
+}
+
+
+def band_label(band: str) -> str:
+    return BAND_LABELS.get(band, band.replace("_", " ").capitalize())
+
+
 def _initials(subject: str) -> str:
     """Two letters for an avatar. From the local part, so `j.laurent@x.com` reads `JL`."""
     local = subject.split("@", maxsplit=1)[0]
@@ -1155,9 +1181,10 @@ def _actions(
             "Gemini on Vertex AI &middot; about 20 seconds</p></div></div>"
         )
 
-    eligible, why = session.may_sign(principal, ApprovalClass(band))
-    # `four_eyes` is how the enum spells it; an operations screen spells it the way the desk does.
-    why = why.replace("_", " ")
+    eligible, _why = session.may_sign(principal, ApprovalClass(band))
+    # The sentence is built here rather than taken from `may_sign`, which returns the enum's
+    # vocabulary -- "cio escalation may be signed only by cio; you hold controller" is the code
+    # talking. `may_sign` is still what decides; this is only how the decision is worded.
     already = principal.subject in signed
     approved = bool(document.get("approval_ref"))
     _allowed, required = BAND_REQUIREMENTS[ApprovalClass(band)]
@@ -1179,8 +1206,15 @@ def _actions(
         '<div class="panel"><div class="panel-h"><b>Approval</b>'
         f'<span class="r">{have} of {required}</span></div><div class="pad">'
         f'<div class="meter"><i style="width:{pct}%"></i></div>'
-        f'<p class="muted" style="font-size:12.5px;margin:0 0 8px">{_e(why)}.</p>'
-        f"{signatures}"
+        + (
+            ""
+            if not eligible
+            else f'<p class="muted" style="font-size:12.5px;margin:0 0 8px">'
+            f"{_e(band_label(band))} requires {_e(required)} signature"
+            f"{'s' if required > 1 else ''} from {_e(role_label(_allowed))}"
+            f"{', and they must be different people' if required > 1 else ''}.</p>"
+        )
+        + f"{signatures}"
     )
     if approved:
         blocks += (
@@ -1188,16 +1222,29 @@ def _actions(
             f'<span class="mono">{_e(document.get("approval_ref"))}</span></div>'
         )
     elif not eligible:
-        blocks += f'<div class="note deny" style="margin:12px 0 0">{_e(why)}</div>'
+        blocks += (
+            '<div class="note" style="margin:12px 0 0">This case is above your signing authority. '
+            f"It requires <b>{_e(role_label(_allowed))}</b>. Your role on this deployment is "
+            f"{_e(role_label([principal.role]))}.</div>"
+        )
     if not approved:
+        # A control that can only fail is not offered. A controller looking at an escalation gets a
+        # disabled button naming who *can* sign it, rather than a live button, a click, and a
+        # refusal -- the refusal is correct and the server still makes it, but an operations screen
+        # should not invite an action it knows the answer to.
+        if not eligible:
+            label, blocked = f"{role_label(_allowed)} to approve", True
+        elif already:
+            label, blocked = "Signed — waiting for another signatory", True
+        else:
+            label, blocked = "Approve", False
         blocks += (
             f'<form class="block" method="post" action="/app/case/{_e(case_id)}/approve" '
             "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
             "b.textContent='Signing…';\" "
             'style="margin-top:12px">'
-            f'<button class="btn wide" type="submit"{" disabled" if already else ""}>'
-            f"{'Signed — waiting for another signatory' if already else 'Approve'}"
-            "</button></form>"
+            f'<button class="btn wide" type="submit"{" disabled" if blocked else ""}>'
+            f"{_e(label)}</button></form>"
         )
     blocks += "</div></div>"
 

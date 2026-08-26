@@ -445,3 +445,124 @@ class TestTheApprovedStateReadsAsFinished:
             True,
         )
         assert "waiting for another signatory" in rail
+
+
+class TestTheApproveButtonSaysWhoCanApprove:
+    """A control that can only fail should not be offered.
+
+    A controller looking at a CIO escalation used to get a live **Approve** button, a click, and a
+    refusal. The refusal is correct and the server still makes it -- that is the control, and it is
+    tested elsewhere -- but an operations screen should not invite an action whose answer it
+    already knows.
+    """
+
+    @staticmethod
+    def _button(rail: str) -> str:
+        """The button element alone.
+
+        Asserting `"disabled" not in rail` matched the inline `onsubmit` handler, which sets
+        `b.disabled=true` on every form -- a substring that is present however the button renders.
+        """
+        import re
+
+        match = re.search(r"<button[^>]*>.*?</button>", rail, re.DOTALL)
+        assert match, "no button in the rail"
+        return match.group(0)
+
+    def _rail(self, *, band: str, role: str, signed=()):
+        from nav_sentinel.control_plane.approvals import Principal
+        from nav_sentinel.webapp import pages
+
+        document = {
+            "case_id": "CASE-X",
+            "approval_band": band,
+            "signed_by": list(signed),
+            "signed_roles": ["controller"] * len(signed),
+        }
+        return pages._actions(
+            document, Principal(subject="me@x.example", role=role), band, list(signed), True
+        )
+
+    def test_a_controller_on_an_escalation_is_told_the_cio_signs_it(self):
+        button = self._button(self._rail(band="cio_escalation", role="controller"))
+        assert "CIO to approve" in button
+        assert "disabled" in button
+
+    def test_a_reviewer_on_four_eyes_is_told_which_roles_sign_it(self):
+        button = self._button(self._rail(band="four_eyes", role="reviewer"))
+        assert "CIO or Controller to approve" in button
+        assert "disabled" in button
+
+    def test_the_cio_on_an_escalation_just_sees_approve(self):
+        button = self._button(self._rail(band="cio_escalation", role="cio"))
+        assert button.endswith(">Approve</button>")
+        assert "disabled" not in button
+
+    def test_a_controller_who_may_sign_four_eyes_just_sees_approve(self):
+        button = self._button(self._rail(band="four_eyes", role="controller"))
+        assert button.endswith(">Approve</button>")
+        assert "disabled" not in button
+
+    def test_having_already_signed_is_a_different_message_from_being_unable_to(self):
+        """"You have signed and need a second person" is not the same as "you may not sign"."""
+        button = self._button(self._rail(band="four_eyes", role="controller", signed=["me@x.example"]))
+        assert "waiting for another signatory" in button
+        assert "to approve" not in button
+        assert "disabled" in button
+
+    def test_the_note_names_your_role_and_the_required_one(self):
+        rail = self._rail(band="cio_escalation", role="controller")
+        assert "above your signing authority" in rail
+        assert "requires <b>CIO</b>" in rail
+        assert "Your role on this deployment is Controller" in rail
+
+    def test_the_server_still_refuses_regardless_of_what_the_button_says(self):
+        """The button is a courtesy. Removing it must not have moved the control into the page."""
+        from nav_sentinel.control_plane.approvals import Principal
+
+        composition.configure()
+        store = composition.store()
+        store.save_case("CASE-btn", {"case_id": "CASE-btn", "approval_band": "cio_escalation"})
+        outcome = workflow.approve(
+            "CASE-btn", Principal(subject="controller@x.example", role="controller")
+        )
+        assert not outcome.granted
+        assert store.load_case("CASE-btn").get("signed_by") == []
+
+
+class TestTheApprovalPanelUsesTheDeskVocabulary:
+    """`may_sign` returns the enum's words -- "cio escalation may be signed only by cio; you hold
+    controller" is the code talking. It still decides; it no longer writes the sentence."""
+
+    def _line(self, band: str, role: str) -> str:
+        import re
+
+        from nav_sentinel.control_plane.approvals import Principal
+        from nav_sentinel.webapp import pages
+
+        rail = pages._actions(
+            {"case_id": "C", "approval_band": band, "signed_by": [], "signed_roles": []},
+            Principal(subject="x@y.example", role=role), band, [], True,
+        )
+        found = re.search(r"font-size:12\.5px[^>]*>([^<]*)<", rail)
+        return found.group(1) if found else ""
+
+    def test_bands_and_roles_are_spelled_the_way_the_desk_says_them(self):
+        line = self._line("cio_escalation", "cio")
+        assert line == "CIO escalation requires 1 signature from CIO."
+
+    def test_four_eyes_says_the_signatories_must_be_different_people(self):
+        line = self._line("four_eyes", "controller")
+        assert line.startswith("Four eyes requires 2 signatures from")
+        assert "must be different people" in line
+
+    def test_no_enum_spelling_reaches_the_panel(self):
+        for band in ("cio_escalation", "four_eyes", "single_reviewer"):
+            for role in ("cio", "controller", "reviewer"):
+                line = self._line(band, role)
+                assert "_" not in line, f"{band}/{role}: {line!r}"
+                assert " cio" not in line and line[:3] != "cio", f"{band}/{role}: {line!r}"
+
+    def test_an_ineligible_role_gets_the_explanation_once_not_twice(self):
+        """The muted requirement line and the note said the same thing, stacked."""
+        assert self._line("cio_escalation", "controller") == ""
