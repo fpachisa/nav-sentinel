@@ -207,6 +207,7 @@ def readyz() -> dict:
     """Readiness: the registry loaded and at least one process is hosted."""
     from nav_sentinel import composition
     from nav_sentinel.control_plane import packs
+    from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS
     from nav_sentinel.registry import discover
     from nav_sentinel.webapp import identity
 
@@ -235,13 +236,24 @@ def readyz() -> dict:
     # as a 500 on whatever an analyst happened to click -- a configuration error reported as a
     # service fault, in the one place nobody would look for it.
     try:
-        signatories = len(identity.authorised())
+        table = identity.authorised()
+        signatories = len(table)
     except ValueError as malformed:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, f"NAV_ANALYSTS is unusable: {malformed}"
         ) from malformed
-    # Public ingress with an empty table is a deployment nobody can sign into. Reported, not
-    # refused: it is a legitimate state for a service that only takes Pub/Sub traffic.
+    # Not the headcount. A row count answers "is the variable set?", which is the question that
+    # already looks fine, and the first version of this reported `signatories: 2` for a deployment
+    # that could not approve five of its seven cases because no row held `cio`. What an operator
+    # needs is which bands this table can actually satisfy -- roles *and* the distinct-signer count.
+    #
+    # Reported, not refused: a deployment that only takes Pub/Sub traffic legitimately has nobody
+    # on it, and refusing readiness would take a working service out of rotation.
+    unsignable = sorted(
+        band.value
+        for band, (allowed, required) in BAND_REQUIREMENTS.items()
+        if len({email for email, role in table.items() if role in allowed}) < required
+    )
     return {
         "status": "ready",
         "processes": processes,
@@ -250,6 +262,7 @@ def readyz() -> dict:
         "capabilities": len(discover.coverage()),
         "identity": "google" if identity.uses_google() else "roster",
         "signatories": signatories,
+        "unsignable_bands": unsignable,
     }
 
 

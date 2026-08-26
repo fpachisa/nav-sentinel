@@ -261,59 +261,92 @@ def approve(
     rather than describing it means the refusal is on screen rather than in a paragraph.
     """
     store = composition.store()
-    document = dict(store.load_case(case_id) or {})
-    if not document:
-        raise LookupError(case_id)
-    band = ApprovalClass(document.get("approval_band", "single_reviewer"))
+    refusal: list[str] = []
 
-    signed: list[str] = list(document.get("signed_by", []))
-    roles: list[str] = list(document.get("signed_roles", []))
+    def _countersign(document: dict) -> dict:
+        """Add this analyst's signature, atomically, if it is one this case can accept.
 
-    # An ineligible signature is **not recorded**. It is not a partial signature; it is not a
-    # signature. Recording it first poisoned every later attempt: a reviewer's role stayed in the
-    # list, so two controllers signing afterwards were still refused on role -- the authority
-    # answering correctly about a record the application should never have built.
-    allowed, required = _requirement(band)
-    if principal.role not in allowed:
-        return ApprovalOutcome(
-            granted=False,
-            message=(
+        Runs inside `update_case`, so two controllers signing the same case at the same moment
+        both land. Read-modify-write lost one of them, silently -- and four-eyes is the one control
+        that *guarantees* two people are on a case at once.
+
+        Re-run on a Firestore retry, so it must be a pure function of the document handed to it.
+        """
+        band = ApprovalClass(document.get("approval_band", "single_reviewer"))
+        signed: list[str] = list(document.get("signed_by", []))
+        roles: list[str] = list(document.get("signed_roles", []))
+
+        # A signature is given for a *specific correction at a specific band*, so it is void when
+        # either changes. Without this, re-working a case swapped the journal entry underneath
+        # signatures that stayed valid -- two controllers on record as having approved a
+        # correction neither of them ever saw. The band matters for the same reason in reverse:
+        # signatures collected toward four-eyes must not carry over and satisfy a lower band alone.
+        if document.get("signed_for") != _signed_for(document):
+            signed, roles = [], []
+            document.pop("approval_ref", None)
+
+        allowed, required = _requirement(band)
+        if principal.role not in allowed:
+            # An ineligible signature is **not recorded**. It is not a partial signature; it is not
+            # a signature. Recording it first poisoned every later attempt: a reviewer's role stayed
+            # in the list, so two controllers signing afterwards were still refused on role -- the
+            # authority answering correctly about a record the application should never have built.
+            refusal.append(
                 f"{principal} may not sign at {band.value}; it requires "
                 f"{' or '.join(sorted(allowed))}. Nothing was recorded."
-            ),
-            outstanding=max(0, required - len(set(signed))),
+            )
+        elif principal.subject not in signed:
+            signed.append(principal.subject)
+            roles.append(principal.role)
+
+        document["signed_by"] = signed
+        document["signed_roles"] = roles
+        document["signed_for"] = _signed_for(document)
+        return document
+
+    document = store.update_case(case_id, _countersign)
+    band = ApprovalClass(document.get("approval_band", "single_reviewer"))
+    signed = list(document.get("signed_by", []))
+    roles = list(document.get("signed_roles", []))
+    _allowed, required = _requirement(band)
+
+    if refusal:
+        return ApprovalOutcome(
+            granted=False, message=refusal[-1], outstanding=max(0, required - len(set(signed)))
         )
 
-    if principal.subject not in signed:
-        signed.append(principal.subject)
-        roles.append(principal.role)
-
     authority = composition.approval_authority()
-    principals = tuple(
-        Principal(subject=s, role=r) for s, r in zip(signed, roles, strict=True)
-    )
-    document["signed_by"] = signed
-    document["signed_roles"] = roles
+    # `strict=False`: a case document written before signatures carried roles would otherwise raise
+    # on length mismatch and 500 the page. Firestore documents outlive the deploy that wrote them.
+    principals = tuple(Principal(subject=s, role=r) for s, r in zip(signed, roles, strict=False))
 
     try:
         record = authority.grant(case_id, band, principals, note="approved in the console")
     except ApprovalDenied as denied:
-        store.save_case(case_id, document)
-        _allowed, required = _requirement(band)
         return ApprovalOutcome(
             granted=False,
             message=str(denied),
             outstanding=max(0, required - len(set(signed))),
         )
 
-    document["approval_ref"] = record.ref
-    store.save_case(case_id, document)
+    store.update_case(case_id, lambda d: {**d, "approval_ref": record.ref})
     return ApprovalOutcome(
         granted=True,
         message=f"{record.ref} granted at {band.value} by {', '.join(record.approvers)}",
         outstanding=0,
         posting_refused=_attempt_posting(case_id, record.ref, as_of=as_of),
     )
+
+
+def _signed_for(document: dict) -> str:
+    """What a signature on this document would be a signature *for*.
+
+    The band and the proposal, because those are the two things an approver is actually agreeing
+    to. When either moves, the signatures collected against the old one are void.
+    """
+    band = document.get("approval_band", "single_reviewer")
+    proposal_id = (document.get("proposal") or {}).get("proposal_id", "")
+    return f"{band}|{proposal_id}"
 
 
 def _requirement(band: ApprovalClass) -> tuple[frozenset[str], int]:

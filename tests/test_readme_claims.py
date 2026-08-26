@@ -166,3 +166,58 @@ class TestClaimedCoverage:
     def test_license_claim_has_a_file(self):
         assert "MIT" in README
         assert (ROOT / "LICENSE").exists(), "README declares MIT with no LICENSE file"
+
+
+DEVPOST = (ROOT / "docs" / "submission" / "devpost.md").read_text()
+
+
+class TestTheSubmissionCopyIsTrue:
+    """The Devpost text is the version of these claims that strangers read.
+
+    It repeats numbers the README also carries, which means it can rot independently -- and it
+    rots somewhere nobody re-reads, in front of judges, after the code has moved on. It already
+    disagreed with the code once: it advertised five investigating specialists when the registry
+    publishes three, because two are deliberately unpublished so their breaks escalate. The
+    README made the same claim in its opening while contradicting it in its own evidence table.
+    """
+
+    def test_the_test_count_matches_the_suite(self):
+        claimed = {int(n) for n in re.findall(r"(\d+) offline tests", DEVPOST)}
+        assert claimed, "the submission copy no longer states a suite size"
+        assert claimed == {_collected("tests/")}, (
+            f"devpost.md claims {sorted(claimed)} offline tests; pytest collects {_collected('tests/')}"
+        )
+
+    def test_it_names_only_specialists_the_registry_will_actually_route_to(self):
+        """An unpublished agent is not a capability the fleet has."""
+        from nav_sentinel import composition
+        from nav_sentinel.registry import discover
+
+        composition.configure()
+        published = {a.agent_id for a in discover.all_agents()}
+        for gap in ("pricing-investigator", "cash-fees-investigator"):
+            assert gap not in published, (
+                f"{gap} is published now -- the submission copy says it is a deliberate coverage "
+                f"gap that escalates to a human, and that is no longer true"
+            )
+
+    def test_the_process_and_policy_counts_are_real(self):
+        from nav_sentinel import composition
+        from nav_sentinel.control_plane import packs
+
+        composition.configure()
+        assert len(packs.registered()) == 3, "devpost.md says three processes plug into the seam"
+
+        policies = (ROOT / "src" / "nav_sentinel" / "control_plane" / "policies.py").read_text()
+        assert len(set(re.findall(r"P-0\d\d", policies))) == 9, (
+            "devpost.md says nine policies are enforced in code"
+        )
+
+    def test_the_deployed_url_it_sends_judges_to_is_the_one_that_can_sign_in(self):
+        """Cloud Run publishes two hostnames for this service and only one is a registered
+        OAuth JavaScript origin. On the other, Google's button renders and then refuses."""
+        runbook = (ROOT / "docs" / "submission" / "recording-runbook.md").read_text()
+        signed_in_host = "nav-sentinel-rwkxhtvoeq-uc.a.run.app"
+        assert signed_in_host in DEVPOST
+        assert signed_in_host in runbook
+        assert "nav-sentinel-523099900380.us-central1.run.app/app" not in DEVPOST

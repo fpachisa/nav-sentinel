@@ -24,6 +24,16 @@ from nav_sentinel.control_plane import gateway, identity, model_armor
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = (ROOT / "infra" / "deploy.sh").read_text()
+
+
+def _analyst_table() -> str:
+    """A stand-in for `NAV_ANALYSTS`, shaped like the real one.
+
+    Deliberately fake. The real value was committed here, which put the two Google accounts that
+    can approve corrections on a publicly reachable service into a public repository -- not a
+    secret, and precisely the list an attacker would want. What these tests need is the *shape*.
+    """
+    return "first.analyst@example.com:controller,second.analyst@example.com:cio"
 DOCKERFILE = (ROOT / "Dockerfile").read_text()
 
 
@@ -258,14 +268,53 @@ class TestTheDeploymentPosture:
 
     def test_every_route_that_does_work_requires_an_analyst(self):
         """Cloud Run's IAM layer used to protect these by itself. With ingress open, a route that
-        runs a reconciliation or reports internals needs a check of its own."""
-        import inspect
+        runs a reconciliation or reports internals needs a check of its own.
 
-        from nav_sentinel import server
+        Enumerated from the app and asserted by *response*, not by grepping three named functions
+        for a call. The old version covered none of the desk's ten routes and would have covered
+        none of whatever gets added next, while being called "every route".
+        """
+        from fastapi.testclient import TestClient
 
-        for name in ("operations_console", "cycle", "selftest"):
-            source = inspect.getsource(getattr(server, name))
-            assert "_require_analyst(request)" in source, name
+        from nav_sentinel import composition
+        from nav_sentinel.server import app
+
+        composition.configure()
+        client = TestClient(app, follow_redirects=False)
+
+        #: Reachable without a session by design: liveness, readiness, the sign-in flow itself, and
+        #: the Pub/Sub endpoint, which authenticates an OIDC token rather than a browser session.
+        OPEN = {"/health", "/readyz", "/app/signin", "/app/auth/google", "/app/signout",
+                "/pubsub/exceptions", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+
+        def _flatten(routes):
+            """Walk nested routers. `app.routes` holds an `_IncludedRouter` wrapper rather than the
+            desk's ten routes, so a flat loop sees six routes and calls itself exhaustive -- the
+            failure this test was rewritten to stop making."""
+            for route in routes:
+                yield route
+                nested = getattr(route, "routes", None)
+                if nested is None:
+                    # FastAPI wraps an included router in `_IncludedRouter`, which exposes the
+                    # real thing as `original_router` and has no `.routes` of its own.
+                    original = getattr(route, "original_router", None)
+                    nested = getattr(original, "routes", None)
+                yield from _flatten(nested or [])
+
+        checked = 0
+        for route in _flatten(app.routes):
+            path = getattr(route, "path", "")
+            methods = (getattr(route, "methods", set()) or set()) - {"HEAD", "OPTIONS"}
+            if not path or not methods or path in OPEN:
+                continue
+            url = path.replace("{as_of}", "2026-08-17").replace("{case_id}", "CASE-nope")
+            for method in sorted(methods):
+                response = client.request(method, url)
+                assert response.status_code != 200 or "Sign in" in response.text, (
+                    f"{method} {url} returned 200 with content to an anonymous caller"
+                )
+                checked += 1
+        assert checked >= 8, f"only {checked} routes examined; the app has more than that"
 
     def test_it_runs_as_a_dedicated_service_account(self):
         assert "--service-account" in DEPLOY
@@ -815,15 +864,34 @@ class TestTheDeployPassesValuesThatContainSpecialCharacters:
         assert "^|^" in DEPLOY, "the default comma split breaks NAV_ANALYSTS"
 
     def test_the_delimiter_appears_in_none_of_the_values_it_separates(self):
-        """The actual property. `@` satisfied "a custom delimiter is used" and still failed."""
-        delimiter = "|"
-        for value in (
-            "fpachisa@gmail.com:controller,farhat@homecampus.ai:controller",   # NAV_ANALYSTS
-            "523099900380-qccq1vb0vi88uf0qofk0263p5u4gf7gs.apps.googleusercontent.com",
-            "https://nav-sentinel-rwkxhtvoeq-uc.a.run.app",                   # push audience
+        """The actual property. `@` satisfied "a custom delimiter is used" and still failed.
+
+        Read out of `deploy.sh` rather than retyped here. The first version of this test asserted
+        that `|` was absent from four string literals in this file, which is true of any four
+        strings a test author picks and cannot fail when the deploy script changes -- a test named
+        for a property of the deploy that never read the deploy.
+        """
+        import re
+
+        block = re.search(r'--update-env-vars "\^\|\^(.*?)"', DEPLOY, re.DOTALL)
+        assert block, "the env-var block is no longer where this test looks for it"
+
+        assignments = block.group(1).split("|")
+        assert len(assignments) >= 8, assignments
+        for assignment in assignments:
+            name, _, value = assignment.partition("=")
+            assert "|" not in name and "|" not in value, assignment
+            # Every value is a shell expansion here, so also assert the *runtime* values cannot
+            # contain it: an email, a URL and a client id are the ones that actually vary.
+            assert re.fullmatch(r"[A-Z_0-9]+", name), name
+
+        for runtime_value in (
+            _analyst_table(),
+            "523099900380-abcdefghijklmnop.apps.googleusercontent.com",
+            "https://nav-sentinel-rwkxhtvoeq-uc.a.run.app",
             "nav-pubsub-push@all-things-agentic-hack-fp.iam.gserviceaccount.com",
         ):
-            assert delimiter not in value, value
+            assert "|" not in runtime_value, runtime_value
 
     def test_the_analyst_table_round_trips_through_the_parser(self):
         """End to end: the string the deploy sets is the string the parser reads."""
@@ -831,16 +899,49 @@ class TestTheDeployPassesValuesThatContainSpecialCharacters:
 
         from nav_sentinel.webapp import identity
 
-        raw = "fpachisa@gmail.com:controller,farhat@homecampus.ai:controller"
+        raw = _analyst_table()
         previous = os.environ.get("NAV_ANALYSTS")
         os.environ["NAV_ANALYSTS"] = raw
         try:
             assert identity.authorised() == {
-                "fpachisa@gmail.com": "controller",
-                "farhat@homecampus.ai": "controller",
+                "first.analyst@example.com": "controller",
+                "second.analyst@example.com": "cio",
             }
         finally:
             if previous is None:
                 os.environ.pop("NAV_ANALYSTS", None)
             else:
                 os.environ["NAV_ANALYSTS"] = previous
+
+
+class TestReadinessGatesTheRevision:
+    """A probe nothing calls is a diagnostic, not a control. `/readyz` refuses an unusable analyst
+    table and a deployment that asked for Firestore and got memory -- both of which used to deploy
+    cleanly and serve traffic, with the refusal sitting at a URL nobody was calling."""
+
+    def test_the_deploy_configures_a_startup_probe(self):
+        assert "--startup-probe" in DEPLOY
+
+    def test_it_probes_readyz_and_not_a_liveness_only_route(self):
+        """`/health` returns ok as soon as the process is listening. It cannot fail for any of the
+        reasons a bad revision is bad."""
+        import re
+
+        probe = re.search(r'--startup-probe "([^"]+)"', DEPLOY)
+        assert probe, "the startup probe is no longer a quoted argument this test can read"
+        assert "httpGet.path=/readyz" in probe.group(1), probe.group(1)
+        assert "/health" not in probe.group(1)
+
+    def test_it_gives_the_container_time_to_start_before_failing_it(self):
+        """A probe that fails faster than the app starts turns every deploy into a rollback."""
+        import re
+
+        probe = dict(
+            part.split("=", 1)
+            for part in re.search(r'--startup-probe "([^"]+)"', DEPLOY).group(1).split(",")
+            if "=" in part
+        )
+        budget = int(probe["initialDelaySeconds"]) + int(probe["periodSeconds"]) * int(
+            probe["failureThreshold"]
+        )
+        assert budget >= 30, f"only {budget}s to become ready; cold start plus registry load"

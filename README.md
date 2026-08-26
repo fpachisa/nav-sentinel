@@ -30,9 +30,13 @@ makes it deployable.
    tolerance rules — no model, because deciding whether two numbers differ is arithmetic.
 2. **Triages** each break, computes its NAV impact in basis points, and asks the **Agent
    Registry** which specialist is authorised to investigate that root-cause family.
-3. **Investigates** in parallel via five specialists — corporate actions, FX and rates,
-   pricing, settlement, cash and fees — each with its own identity, its own read-only tool
-   allowlist, and evidence cited from authoritative sources.
+3. **Investigates** in parallel via the specialists the registry will actually route to —
+   corporate actions, FX and rates, and settlement — each with its own identity, its own
+   read-only tool allowlist, and evidence cited from authoritative sources. Pricing and
+   cash-and-fees are declared capabilities with **no published investigator**, deliberately: a
+   break correctly classified as either one escalates to a human instead of being handed to
+   whichever agent looked closest. A fleet's coverage gaps are a fact about it, and the
+   honest behaviour is to route around them loudly.
 4. **Drafts** a balanced correcting entry with the full evidence chain attached.
 5. **Routes** for approval by materiality. Nothing posts autonomously, at any size.
 
@@ -214,7 +218,7 @@ evaluation can be scored automatically.
 make verify
 ```
 
-Lint, the diagram geometry checks, then **867 invariant tests** in about five seconds. These are
+Lint, the diagram geometry checks, then **883 invariant tests** in about five seconds. These are
 not smoke tests — they assert properties like *no agent in the fleet may post a journal entry*,
 *a units magnitude bands through the same policy as a basis-point one*, and *the transfer-agency
 package imports no fund-accounting module*.
@@ -484,8 +488,26 @@ detail, reproductions and remediation plan in [docs/PLAN.md](docs/PLAN.md).
    *cloud* identity of a call is not per-agent, and PLAN.md's "Cloud Run (per-agent SA)" overstates
    what this slice delivers. Closing it needs either token impersonation per agent or
    collection-scoped conditions, and is not done.
-8. **Approvals are unbounded in use.** One record authorises repeated postings on its case, never
-   expires, and is not bound to the drafted entry.
+8. **Approvals are unbounded in use.** One record authorises repeated postings on its case and
+   never expires. Partly closed: a signature is now bound to *what it signed* — the band and the
+   proposal id — so re-working a case discards the signatures collected against the entry it
+   replaced, and signatures gathered toward four-eyes no longer carry over to satisfy a lower band
+   alone. A fresh-context review demonstrated the substitution: two controllers approved a
+   correcting entry, the case was re-worked with different journal lines, and the approval
+   reference stayed attached to a correction neither of them had ever seen. What remains open is
+   expiry and repeat use within one unchanged proposal.
+11. **Four-eyes counts distinct accounts, not distinct people.** `BAND_REQUIREMENTS` requires two
+    distinct principals and the authority enforces it, but a principal is a verified email address.
+    One person holding two Google accounts satisfies it alone. This is not fixable in the
+    application — deciding that two verified identities are one human is identity proofing, and
+    belongs to the directory that issues them — but the deployment used for the demo makes it
+    concrete, so it is recorded here rather than left implied. Removing the roster picker in favour
+    of verified Google identities raised the bar and did not close this.
+12. ~~**Nothing calls `/readyz`.**~~ **Closed.** The probe refuses a deployment whose analyst table
+    is unusable, or that asked for Firestore and got memory, and reports which approval bands nobody
+    on the table can sign. It now gates the revision as a Cloud Run startup probe, so a bad
+    configuration fails the deploy instead of serving traffic while its 503 sits at a URL an
+    operator would have to think to curl.
 9. ~~`FirestoreApprovalStore` is written but never executed.~~ **Closed.** The deployed service
    runs with `NAV_APPROVALS=firestore`; the offline default remains the in-process store, chosen
    explicitly and fail-closed when Firestore is requested and unavailable.

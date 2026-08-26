@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from dataclasses import dataclass
@@ -31,6 +32,8 @@ from dataclasses import dataclass
 from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS, Principal
 from nav_sentinel.control_plane.governance import ApprovalClass
 from nav_sentinel.webapp import identity
+
+logger = logging.getLogger("nav_sentinel.webapp")
 
 COOKIE = "nav_analyst"
 
@@ -101,7 +104,16 @@ def verify(cookie: str | None) -> Principal | None:
     if not hmac.compare_digest(mac, expected):
         return None
     if identity.uses_google():
-        role = identity.authorised().get(subject)
+        try:
+            role = identity.authorised().get(subject)
+        except ValueError:
+            # An unusable analyst table means this deployment cannot say what anyone is allowed to
+            # do, so nobody is signed in. Fail closed, not loud: raising here made a one-character
+            # typo in an environment variable a 500 on every page, reported as a service fault in
+            # the one place an operator would not look for a configuration error. `/readyz` refuses
+            # and names the variable, which is where this belongs.
+            logger.error("outcome=analyst_table_unusable -- see /readyz; nobody can sign in")
+            return None
         return Principal(subject=subject, role=role) if role else None
     return next((p for p in ROSTER if p.subject == subject), None)
 

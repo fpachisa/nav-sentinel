@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from nav_sentinel import composition
@@ -61,6 +61,13 @@ def signin(subject: str = Form(...)) -> RedirectResponse:
     Checked against the roster rather than trusted from the form: a posted subject is caller-supplied
     text, and an application about identity must not mint one from it.
     """
+    if identity.uses_google():
+        # The roster door is not merely ignored by `verify` in a Google deployment -- it is closed.
+        # Leaving it open let an unauthenticated caller on public ingress obtain a cookie signed
+        # with this deployment's key, harmless only for as long as `verify` keeps refusing it. One
+        # roster-shaped address in `NAV_ANALYSTS` would have turned that into a real session, and
+        # the safety of a public endpoint should not rest on a single `if` somewhere else.
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
     known = next((p for p in session.ROSTER if p.subject == subject), None)
     response = _to("/app")
     if known is not None:
@@ -80,9 +87,20 @@ def auth_google(credential: str = Form(...)) -> RedirectResponse:
     """
     response = _to("/app")
     try:
-        principal = identity.principal_for(identity.verify_google_credential(credential))
-    except (ValueError, identity.UnknownAnalyst) as refused:
+        verified = identity.verify_google_credential(credential)
+    except ValueError as bad_token:
+        logger.warning("outcome=signin_refused reason=%s", type(bad_token).__name__)
+        return response
+    try:
+        principal = identity.principal_for(verified)
+    except identity.UnknownAnalyst as refused:
         logger.warning("outcome=signin_refused reason=%s", type(refused).__name__)
+        return response
+    except ValueError as misconfigured:
+        # Distinct from a refusal, and it must be: this branch means the *deployment* is wrong, not
+        # the person. Folding the two together reported a broken environment variable to the
+        # operator as an authorisation decision, and threw away the message naming the bad role.
+        logger.error("outcome=analyst_table_unusable detail=%s", misconfigured)
         return response
     response.set_cookie(
         session.COOKIE, session.sign(principal.subject), httponly=True, samesite="lax", secure=True

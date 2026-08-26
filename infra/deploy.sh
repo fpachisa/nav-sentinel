@@ -91,6 +91,11 @@ gcloud builds submit --tag "gcr.io/${PROJECT}/${SERVICE}:latest" --project "$PRO
 say "Deploy"
 # --no-allow-unauthenticated is the first of two auth layers; the handler verifies the OIDC token
 # independently, because this flag is exactly the kind of thing a later deploy drops.
+#
+# The startup probe points at /readyz rather than a route that only proves the process is listening.
+# /readyz refuses when the analyst table is unusable or when a deployment asked for Firestore and
+# got memory, and until it gated the revision that refusal was a URL somebody had to think to curl:
+# a bad configuration deployed cleanly and served traffic. Now the revision does not take traffic.
 gcloud run deploy "$SERVICE" \
   --image "gcr.io/${PROJECT}/${SERVICE}:latest" \
   --region "$REGION" \
@@ -98,7 +103,8 @@ gcloud run deploy "$SERVICE" \
   --service-account "$RUNTIME_SA" \
   ${ACCESS_FLAG} \
   --update-env-vars "^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GOOGLE_CLOUD_LOCATION=global|NAV_REGION=${REGION}|GOOGLE_GENAI_USE_VERTEXAI=true|NAV_APPROVALS=firestore|NAV_REPOSITORY=firestore|NAV_SESSION_SECRET=${SESSION_SECRET}|NAV_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}|NAV_ANALYSTS=${ANALYSTS}|NAV_PUSH_SERVICE_ACCOUNT=${PUSH_SA}" \
-  --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0
+  --memory 1Gi --cpu 1 --timeout 300 --max-instances 4 --min-instances 0 \
+  --startup-probe "httpGet.path=/readyz,initialDelaySeconds=10,periodSeconds=5,failureThreshold=6,timeoutSeconds=5"
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \
         --format='value(status.url)')"

@@ -60,11 +60,16 @@ class TestTheRoleTableRefusesNonsense:
         with pytest.raises(ValueError, match="no approval band recognises"):
             identity.authorised()
 
-    def test_every_known_role_is_one_some_band_accepts(self):
+    def test_a_role_no_band_accepts_cannot_be_assigned(self):
+        """`KNOWN_ROLES` is derived from `BAND_REQUIREMENTS`, so checking one against the other is
+        a tautology -- it held even for a table whose only role was `janitor`. The property worth
+        asserting is that the roles the bands *do* use are accepted and nothing else is."""
         from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS
 
-        for role in identity.KNOWN_ROLES:
-            assert any(role in allowed for allowed, _ in BAND_REQUIREMENTS.values())
+        for allowed, _required in BAND_REQUIREMENTS.values():
+            for role in allowed:
+                assert {role} <= identity.KNOWN_ROLES, f"{role} signs a band and is unassignable"
+        assert "janitor" not in identity.KNOWN_ROLES
 
     @pytest.mark.parametrize("entry", ["", "   ", "no-colon", ":controller", "a@x.com:"])
     def test_malformed_entries_are_skipped_rather_than_guessed(self, entry, monkeypatch):
@@ -102,14 +107,51 @@ class TestTheDeploymentModeIsVisible:
 
 
 class TestTheTokenIsActuallyChecked:
-    def test_the_audience_is_pinned_to_this_deployment(self):
-        """Without it, a token minted for *any* Google application authenticates here: the
-        signature is valid, the issuer is Google, and the token was never meant for us."""
-        import inspect
+    """These were substring searches over `inspect.getsource` until a review pointed out that the
+    most important assertion in this file passed against a function pinning no audience at all."""
 
-        source = inspect.getsource(identity.verify_google_credential)
-        assert "client_id()" in source
-        assert "verify_oauth2_token" in source
+    def test_the_audience_is_pinned_to_this_deployment(self, monkeypatch):
+        """Without it, a token minted for *any* Google application authenticates here: the
+        signature is valid, the issuer is Google, and the token was never meant for us.
+
+        Checked by capturing what is handed to google-auth, because that is the thing that
+        decides. A test that greps for `client_id()` in the source passes on
+        `verify_oauth2_token(credential, request, None)`.
+        """
+        from google.oauth2 import id_token
+
+        captured: dict = {}
+
+        def fake(_credential, _request, audience=None, **_kwargs):
+            captured["audience"] = audience
+            return {
+                "iss": "https://accounts.google.com",
+                "email": "a@x.com",
+                "email_verified": True,
+            }
+
+        monkeypatch.setenv("NAV_OAUTH_CLIENT_ID", "123.apps.googleusercontent.com")
+        monkeypatch.setattr(id_token, "verify_oauth2_token", fake)
+        identity.verify_google_credential("a-token")
+
+        assert captured["audience"] == "123.apps.googleusercontent.com", (
+            f"the audience passed to google-auth was {captured['audience']!r}"
+        )
+
+    def test_it_refuses_to_run_at_all_without_a_configured_audience(self, monkeypatch):
+        """A refactor to `client_id() or None` would make every Google-signed token authenticate,
+        because google-auth skips the audience check when it is None. Empty string happens to fail
+        closed today; relying on that is relying on a library's `is not None`."""
+        from google.oauth2 import id_token
+
+        monkeypatch.delenv("NAV_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.setattr(
+            id_token,
+            "verify_oauth2_token",
+            lambda *a, **k: {"iss": "https://accounts.google.com", "email": "a@x.com"},
+        )
+        with pytest.raises(ValueError, match="no OAuth client"):
+            identity.verify_google_credential("a-token")
 
     def test_a_garbage_credential_raises(self, monkeypatch):
         monkeypatch.setenv("NAV_OAUTH_CLIENT_ID", "123.apps.googleusercontent.com")
@@ -119,10 +161,22 @@ class TestTheTokenIsActuallyChecked:
         with pytest.raises(ValueError):
             identity.verify_google_credential("not-a-jwt")
 
-    def test_the_issuer_is_checked_too(self):
-        import inspect
+    def test_a_token_from_another_issuer_is_refused(self, monkeypatch):
+        """Was a substring search that passed on a function mentioning the issuer in a comment."""
+        from google.oauth2 import id_token
 
-        assert "accounts.google.com" in inspect.getsource(identity.verify_google_credential)
+        monkeypatch.setenv("NAV_OAUTH_CLIENT_ID", "123.apps.googleusercontent.com")
+        monkeypatch.setattr(
+            id_token,
+            "verify_oauth2_token",
+            lambda *a, **k: {
+                "iss": "https://login.example.com",
+                "email": "a@x.com",
+                "email_verified": True,
+            },
+        )
+        with pytest.raises(ValueError, match="unexpected issuer"):
+            identity.verify_google_credential("a-token")
 
 
 class TestARefusedSignInStartsNoSession:
@@ -282,6 +336,9 @@ class TestTheSessionCookieIsProtectedInTransit:
 
 
 class TestAMalformedAnalystTableFailsReadinessNotEveryPage:
+    """The name is the claim; a review pointed out the class tested only half of it, and the other
+    half was false -- a one-character typo 500'd every page for every signed-in analyst."""
+
     """A configuration error should be reported where configuration errors are looked for.
 
     The role is resolved per request now, so an unparseable table would otherwise raise inside
@@ -315,3 +372,41 @@ class TestAMalformedAnalystTableFailsReadinessNotEveryPage:
 
         assert body["identity"] == "google"
         assert body["signatories"] == 2
+
+
+class TestReadinessAnswersWhetherAnyoneCanActuallySign:
+    """`signatories: 2` was a row count presented as an answer to "can this deployment approve
+    anything?". The live deployment held two controllers and no CIO, so five of the seven cases in
+    the demo cycle could not be signed by anybody -- and the number reported looked healthy."""
+
+    def _readyz(self, monkeypatch, table):
+        from fastapi.testclient import TestClient
+
+        from nav_sentinel import composition
+        from nav_sentinel.server import app
+
+        monkeypatch.setenv("NAV_OAUTH_CLIENT_ID", "123.apps.googleusercontent.com")
+        monkeypatch.setenv("NAV_ANALYSTS", table)
+        composition.configure()
+        return TestClient(app).get("/readyz").json()
+
+    def test_a_table_with_no_cio_reports_escalation_as_unsignable(self, monkeypatch):
+        body = self._readyz(monkeypatch, "a@x.com:controller,b@x.com:controller")
+        assert body["signatories"] == 2
+        assert "cio_escalation" in body["unsignable_bands"]
+
+    def test_one_controller_cannot_satisfy_four_eyes_and_readiness_says_so(self, monkeypatch):
+        body = self._readyz(monkeypatch, "a@x.com:controller,b@x.com:cio")
+        assert body["unsignable_bands"] == []
+
+        alone = self._readyz(monkeypatch, "a@x.com:controller")
+        assert "four_eyes" in alone["unsignable_bands"], (
+            "one person cannot sign a band needing two distinct signatories"
+        )
+
+    def test_an_empty_table_reports_every_band_unsignable_without_refusing_readiness(
+        self, monkeypatch
+    ):
+        body = self._readyz(monkeypatch, "")
+        assert body["status"] == "ready"
+        assert len(body["unsignable_bands"]) == 4

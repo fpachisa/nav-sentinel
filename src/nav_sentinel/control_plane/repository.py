@@ -25,7 +25,9 @@ handlers are synchronous, and an async repository would add a moving part to buy
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from nav_sentinel.config import settings
@@ -64,6 +66,22 @@ class Repository(ABC):
 
     @abstractmethod
     def load_case(self, case_id: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def update_case(
+        self, case_id: str, mutate: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Read, change and write a case document atomically. Returns what was stored.
+
+        `save_case` is a blind whole-document write, which is correct for the pipeline that owns a
+        case for the length of one run and wrong for the console, where two analysts act on the same
+        case at the same time. Four-eyes *requires* two people on one case; the load-mutate-save it
+        was built on lost whichever signature landed first, silently, because Firestore has no
+        opinion about a `set()` over a document that moved underneath it.
+
+        Fails safe -- a lost update drops a signature rather than inventing one -- which is exactly
+        why nothing caught it: the suite is single-threaded and never has two requests in flight.
+        """
 
     @abstractmethod
     def cases_for(self, subject_id: str, as_of: str) -> list[dict[str, Any]]: ...
@@ -136,6 +154,9 @@ class InMemoryRepository(Repository):
     """
 
     def __init__(self) -> None:
+        # A real lock, not a comment saying single-threaded. The offline suite is, and the
+        # threaded test that proves the Firestore path is not; both run against this class.
+        self._lock = threading.Lock()
         self._cases: dict[str, dict[str, Any]] = {}
         self._observations: dict[str, Observation] = {}
         self._decisions: dict[str, dict[str, Any]] = {}
@@ -147,6 +168,17 @@ class InMemoryRepository(Repository):
     def load_case(self, case_id: str) -> dict[str, Any] | None:
         found = self._cases.get(case_id)
         return dict(found) if found else None
+
+    def update_case(
+        self, case_id: str, mutate: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock:
+            document = self._cases.get(case_id)
+            if document is None:
+                raise LookupError(case_id)
+            updated = mutate(dict(document))
+            self._cases[case_id] = dict(updated)
+            return dict(updated)
 
     def cases_for(self, subject_id: str, as_of: str) -> list[dict[str, Any]]:
         return [
@@ -250,6 +282,28 @@ class FirestoreRepository(Repository):
     def load_case(self, case_id: str) -> dict[str, Any] | None:
         doc = self._cases.document(case_id).get()
         return doc.to_dict() if doc.exists else None
+
+    def update_case(
+        self, case_id: str, mutate: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        from google.cloud import firestore
+
+        reference = self._cases.document(case_id)
+
+        @firestore.transactional
+        def _apply(transaction: Any) -> dict[str, Any]:
+            # The read must be inside the transaction, or the write has nothing to conflict with
+            # and the whole thing is an expensive `set()`. Firestore retries `_apply` when the
+            # document changed between this read and the commit, so `mutate` gets re-run against
+            # the newer document -- which is why it must be a pure function of what it is handed.
+            snapshot = reference.get(transaction=transaction)
+            if not snapshot.exists:
+                raise LookupError(case_id)
+            updated = mutate(dict(snapshot.to_dict() or {}))
+            transaction.set(reference, updated)
+            return updated
+
+        return _apply(self._client.transaction())
 
     def cases_for(self, subject_id: str, as_of: str) -> list[dict[str, Any]]:
         # One equality filter, then filter the rest here. Two equality filters need a composite

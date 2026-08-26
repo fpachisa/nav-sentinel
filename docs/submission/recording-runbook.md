@@ -29,6 +29,12 @@ the sign-in page and a real Google account signs in. Nothing needs to run locall
 bar carries the `.run.app` URL through every shot — which is the required proof, obtained for free
 rather than staged at the end.
 
+**Use exactly that hostname.** Cloud Run publishes two for this service --
+`nav-sentinel-rwkxhtvoeq-uc.a.run.app` and `nav-sentinel-523099900380.us-central1.run.app` -- and only
+the first is a registered JavaScript origin on the OAuth client. On the other one Google's sign-in
+button renders and then refuses, with the reason only in the browser console. It looks like the app
+is broken.
+
 **Before you record, sign in once with both accounts.** The consent screen is in testing mode, so
 both addresses have to be listed as *Test users*, and `farhat@homecampus.ai` is a Workspace account
 whose admin may block third-party apps. Find that out now rather than on camera.

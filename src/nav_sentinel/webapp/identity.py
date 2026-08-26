@@ -87,8 +87,19 @@ def verify_google_credential(credential: str) -> Verified:
     from google.auth.transport import requests as google_requests
     from google.oauth2 import id_token
 
+    audience = client_id()
+    if not audience:
+        # Explicit, rather than relying on google-auth skipping the check only when the audience is
+        # `None` and empty string happening not to be `None`. That is a library's internal `is not
+        # None` standing between this service and accepting any Google-signed token in the world,
+        # and one tidy-up to `client_id() or None` removes it. The push handler carries the same
+        # guard for the same reason.
+        raise ValueError(
+            "this deployment has no OAuth client configured, so it cannot verify a Google token"
+        )
+
     claims = id_token.verify_oauth2_token(
-        credential, google_requests.Request(), client_id()
+        credential, google_requests.Request(), audience
     )
     if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
         raise ValueError(f"unexpected issuer {claims.get('iss')!r}")
