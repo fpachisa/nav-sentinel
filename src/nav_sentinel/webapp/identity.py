@@ -129,4 +129,8 @@ def principal_for(verified: Verified) -> Principal:
             f"{verified.email} is not on this deployment's list of authorised analysts. "
             f"Signing in proves who you are; it does not grant a role."
         )
+    # The address is in the message on purpose. The refusal is server-side and the log is
+    # IAM-protected, and without it "reason=UnknownAnalyst" is a dead end: the browser offers
+    # whichever Google account it happens to be signed into, which is not always the one the
+    # operator thinks they are using, and that is exactly the case this refusal cannot diagnose.
     return Principal(subject=verified.email, role=role)

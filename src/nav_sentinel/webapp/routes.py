@@ -31,11 +31,30 @@ def _who(request: Request) -> Principal | None:
     return session.verify(request.cookies.get(session.COOKIE))
 
 
-def _signin_page() -> str:
+#: Why a sign-in was refused, in the desk's words. A closed vocabulary, looked up by key: the
+#: query string is caller-supplied, so echoing any part of it back into the page would make the
+#: sign-in screen a surface for displaying arbitrary text to the next person who lands on it.
+REFUSALS = {
+    "account": (
+        "That Google account is not authorised on this deployment. Your identity was verified — "
+        "the account simply is not on this deployment's analyst list. Note that the button offers "
+        "whichever Google account your browser is already signed into, which is not always the one "
+        "you meant."
+    ),
+    "token": "That sign-in could not be verified. Try again.",
+    "config": (
+        "This deployment's analyst list is unusable, so nobody can sign in. An operator should "
+        "check /readyz."
+    ),
+}
+
+
+def _signin_page(refused: str = "") -> str:
     """Google sign-in when this deployment has a client id; the roster otherwise, labelled."""
+    notice = REFUSALS.get(refused, "")
     if identity.uses_google():
-        return pages.signin_google(AS_OF.isoformat(), identity.client_id())
-    return pages.signin(AS_OF.isoformat())
+        return pages.signin_google(AS_OF.isoformat(), identity.client_id(), notice=notice)
+    return pages.signin(AS_OF.isoformat(), notice=notice)
 
 
 def _to(path: str) -> RedirectResponse:
@@ -48,7 +67,7 @@ def desk(request: Request) -> str:
     composition.configure()
     principal = _who(request)
     if principal is None:
-        return _signin_page()
+        return _signin_page(request.query_params.get("denied", ""))
     return pages.queue(
         workflow.queue(AS_OF), principal=principal, as_of=AS_OF.isoformat()
     )
@@ -90,18 +109,20 @@ def auth_google(credential: str = Form(...)) -> RedirectResponse:
         verified = identity.verify_google_credential(credential)
     except ValueError as bad_token:
         logger.warning("outcome=signin_refused reason=%s", type(bad_token).__name__)
-        return response
+        return _to("/app?denied=token")
     try:
         principal = identity.principal_for(verified)
     except identity.UnknownAnalyst as refused:
-        logger.warning("outcome=signin_refused reason=%s", type(refused).__name__)
-        return response
+        # The address, not just the exception class. A refusal nobody can attribute to an account
+        # is a support call, and the browser does not always offer the account you expect.
+        logger.warning("outcome=signin_refused reason=UnknownAnalyst detail=%s", refused)
+        return _to("/app?denied=account")
     except ValueError as misconfigured:
         # Distinct from a refusal, and it must be: this branch means the *deployment* is wrong, not
         # the person. Folding the two together reported a broken environment variable to the
         # operator as an authorisation decision, and threw away the message naming the bad role.
         logger.error("outcome=analyst_table_unusable detail=%s", misconfigured)
-        return response
+        return _to("/app?denied=config")
     response.set_cookie(
         session.COOKIE, session.sign(principal.subject), httponly=True, samesite="lax", secure=True
     )

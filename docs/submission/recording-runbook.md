@@ -36,13 +36,13 @@ button renders and then refuses, with the reason only in the browser console. It
 is broken.
 
 **The two accounts hold different roles.** `fpachisa@gmail.com` is the controller,
-`farhat@homecampus.ai` is the CIO. That is deliberate: it makes the escalation refusal real (a
+`aitutor@homecampus.ai` is the CIO. That is deliberate: it makes the escalation refusal real (a
 controller genuinely cannot clear one) and it lets four-eyes be satisfied by two distinct
 principals. Check `/readyz` — `unsignable_bands` must be `[]` before you record, or some case in
 the queue cannot be approved by anyone on camera.
 
 **Before you record, sign in once with both accounts.** The consent screen is in testing mode, so
-both addresses have to be listed as *Test users*, and `farhat@homecampus.ai` is a Workspace account
+both addresses have to be listed as *Test users*, and `aitutor@homecampus.ai` is a Workspace account
 whose admin may block third-party apps. Find that out now rather than on camera.
 
 ## Capture

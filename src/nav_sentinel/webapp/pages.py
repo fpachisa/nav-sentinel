@@ -314,6 +314,9 @@ ul.plain li{margin:3px 0}
   color:var(--faint);font-weight:700}
 .auth-box h1{font-size:24px;margin:7px 0 6px}
 .auth-box .sub{color:var(--soft);font-size:13.5px;margin:0 0 26px}
+.auth-notice{border:1px solid var(--line);border-left:3px solid var(--escalate);
+  background:var(--escalate-w);color:var(--escalate);border-radius:7px;padding:11px 14px;
+  font-size:12.5px;line-height:1.55;margin:0 0 22px}
 .gbtn{display:flex;justify-content:center;min-height:44px}
 .auth-foot{margin-top:26px;padding-top:18px;border-top:1px solid var(--hair);
   font-size:11.5px;color:var(--faint);line-height:1.6}
@@ -480,7 +483,20 @@ def _auth_page(title: str, right: str) -> str:
     )
 
 
-def signin_google(as_of: str, client: str) -> str:
+def _notice(text: str) -> str:
+    """A refused sign-in, said out loud.
+
+    It used to set no cookie and redirect in silence, on the reasoning that saying *why* would turn
+    the sign-in screen into a directory of who can approve this fund's corrections. That reasoning
+    holds for the analyst list and not for this: a caller who has just proved they control an
+    address learns nothing about anyone else from being told that address is not authorised. What
+    the silence actually produced was a page that looked broken -- sign in, land back on sign in,
+    with the diagnosis only in a log the person cannot read.
+    """
+    return f'<div class="auth-notice">{_e(text)}</div>' if text else ""
+
+
+def signin_google(as_of: str, client: str, *, notice: str = "") -> str:
     """Real Google sign-in. The button is Google's own, and the token it returns is verified
     server-side before a single claim in it is believed."""
     return _auth_page(
@@ -489,6 +505,7 @@ def signin_google(as_of: str, client: str) -> str:
         "<h1>Sign in</h1>"
         f'<p class="sub">Valuation point {_e(as_of)}. Authenticate with Google to work the '
         "queue.</p>"
+        f"{_notice(notice)}"
         f'<div id="g_id_onload" data-client_id="{_e(client)}" '
         'data-callback="onCredential" data-auto_prompt="false"></div>'
         '<div class="gbtn"><div class="g_id_signin" data-type="standard" data-size="large" '
@@ -505,7 +522,7 @@ def signin_google(as_of: str, client: str) -> str:
     )
 
 
-def signin(as_of: str) -> str:
+def signin(as_of: str, *, notice: str = "") -> str:
     """Choose an analyst. No password, and the page says why."""
     rows = "".join(
         f'<div class="sig"><div class="avatar">{_e(_initials(p.subject))}</div>'
@@ -522,6 +539,7 @@ def signin(as_of: str) -> str:
         f'<p class="sub">Valuation point {_e(as_of)}. Which role you hold decides what you may '
         "sign: a reviewer cannot approve a four-eyes correction at all, and two different "
         "controllers are needed for one.</p>"
+        f"{_notice(notice)}"
         '<div class="note deny" style="margin-bottom:16px"><b>Local mode &mdash; identities are '
         "not verified.</b> No OAuth client is configured, so this deployment falls back to a fixed "
         "roster. The deployed service uses Google sign-in and checks the token before believing "

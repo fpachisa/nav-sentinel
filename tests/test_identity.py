@@ -410,3 +410,79 @@ class TestReadinessAnswersWhetherAnyoneCanActuallySign:
         body = self._readyz(monkeypatch, "")
         assert body["status"] == "ready"
         assert len(body["unsignable_bands"]) == 4
+
+
+class TestARefusedSignInSaysSomething:
+    """It set no cookie and redirected in silence, so a refusal was indistinguishable from a broken
+    application: sign in, land back on sign in, forever, with the diagnosis only in a log the
+    person cannot read. This actually happened -- the Google button offers whichever account the
+    browser is signed into, which was not the one on the analyst table."""
+
+    @pytest.fixture
+    def google(self, monkeypatch):
+        monkeypatch.setenv("NAV_OAUTH_CLIENT_ID", "123.apps.googleusercontent.com")
+        monkeypatch.setenv("NAV_ANALYSTS", "authorised@merian.example.com:controller")
+
+    def _client(self, follow=False):
+        from fastapi.testclient import TestClient
+
+        from nav_sentinel import composition
+        from nav_sentinel.server import app
+
+        composition.configure()
+        return TestClient(app, follow_redirects=follow, base_url="https://testserver")
+
+    def test_an_unauthorised_account_is_told_it_is_unauthorised(self, google, monkeypatch):
+        monkeypatch.setattr(
+            identity,
+            "verify_google_credential",
+            lambda credential: identity.Verified(
+                email="someone.else@merian.example.com", email_verified=True
+            ),
+        )
+        client = self._client()
+        redirect = client.post("/app/auth/google", data={"credential": "tok"})
+        assert redirect.headers["location"] == "/app?denied=account"
+
+        page = client.get("/app?denied=account")
+        assert "not authorised on this deployment" in page.text
+        # And it must not name anyone who *is* authorised.
+        assert "authorised@merian.example.com" not in page.text
+
+    def test_the_refused_address_reaches_the_log_but_not_the_page(self, google, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr(
+            identity,
+            "verify_google_credential",
+            lambda credential: identity.Verified(
+                email="wrong.account@merian.example.com", email_verified=True
+            ),
+        )
+        with caplog.at_level(logging.WARNING, logger="nav_sentinel.webapp"):
+            self._client().post("/app/auth/google", data={"credential": "tok"})
+
+        assert "wrong.account@merian.example.com" in caplog.text, (
+            "reason=UnknownAnalyst alone cannot tell an operator which account was refused"
+        )
+
+    def test_the_reason_is_looked_up_not_echoed(self, google):
+        """The query string is caller-supplied. Reflecting it would make the sign-in screen a
+        surface for showing arbitrary text to whoever opens the link."""
+        page = self._client().get("/app?denied=<script>alert(1)</script>")
+        assert "<script>alert" not in page.text
+        assert "not authorised on this deployment" not in page.text
+
+    def test_a_successful_sign_in_shows_no_refusal(self, google, monkeypatch):
+        monkeypatch.setattr(
+            identity,
+            "verify_google_credential",
+            lambda credential: identity.Verified(
+                email="authorised@merian.example.com", email_verified=True
+            ),
+        )
+        client = self._client()
+        assert client.post("/app/auth/google", data={"credential": "tok"}).headers[
+            "location"
+        ] == "/app"
+        assert "not authorised on this deployment" not in client.get("/app").text
