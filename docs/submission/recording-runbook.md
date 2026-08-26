@@ -41,6 +41,20 @@ controller genuinely cannot clear one) and it lets four-eyes be satisfied by two
 principals. Check `/readyz` — `unsignable_bands` must be `[]` before you record, or some case in
 the queue cannot be approved by anyone on camera.
 
+**Warm the service before you record.** Cloud Run runs this at `--min-instances 0`, and a cold
+start costs about fifty seconds on the first investigation. Measured on the deployed service:
+
+| | first line arrives | whole investigation |
+|---|---|---|
+| Cold instance | 11.2s | 74.4s |
+| Warm instance | 0.3s | 23.8s |
+
+Open `/readyz` a couple of times, then work one case for real, and only then start recording. Even
+warm, the investigate step is about fifteen seconds of a model actually working — plan the cut
+rather than discovering it in the edit. The progress rail is there so those seconds read as
+progress rather than as a hang, and shot 4 should linger on it: it names the four steps, and each
+one going green is a separate authorisation.
+
 **Before you record, sign in once with both accounts.** The consent screen is in testing mode, so
 both addresses have to be listed as *Test users*, and `aitutor@homecampus.ai` is a Workspace account
 whose admin may block third-party apps. Find that out now rather than on camera.

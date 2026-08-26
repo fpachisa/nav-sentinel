@@ -377,6 +377,11 @@ _WORK_SCRIPT = """<script>
     rail.innerHTML = form.dataset.progress;
     var steps = {};
     rail.querySelectorAll('.pstep').forEach(function(el){ steps[el.dataset.stage] = el; });
+    // Spin the first step immediately rather than waiting for the server to say so. On a cold
+    // instance the first line can be ten seconds out, and four pending rows with nothing moving
+    // is the frozen screen this replaced.
+    var first = rail.querySelector('.pstep');
+    if (first) first.dataset.state = 'running';
 
     function mark(stage, state, note){
       var el = steps[stage];
