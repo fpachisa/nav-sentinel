@@ -2,7 +2,7 @@ PROJECT ?= all-things-agentic-hack-fp
 REGION  ?= us-central1
 PY      := .venv/bin/python
 
-.PHONY: ta remediation app help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
+.PHONY: ta remediation app demo-reset help venv fixtures fixtures-live test verify diagrams compliance lint bootstrap deploy teardown registry demo investigate approve eval eval-score clean
 # `eval` collides with the eval/ directory, so without .PHONY make reports it up to date and
 # silently runs nothing -- a target that appears to succeed while doing no work.
 
@@ -57,6 +57,9 @@ investigate: ## One case, investigated by the fleet. NEEDS a live model, unlike 
 
 ta:  ## one transfer-agency cycle: the same investigator, a different process
 	$(PY) -m nav_sentinel.ta_cli
+
+demo-reset: ## Clear worked/approved state so a re-take opens like a first take (keeps the audit trail)
+	NAV_REPOSITORY=$${NAV_REPOSITORY:-firestore} $(PY) -m nav_sentinel.demo_reset
 
 app: ## Serve the exception desk at http://127.0.0.1:8080/app (and /console for the audit view)
 	NAV_REPOSITORY=$${NAV_REPOSITORY:-firestore} .venv/bin/uvicorn nav_sentinel.server:app --port 8080
