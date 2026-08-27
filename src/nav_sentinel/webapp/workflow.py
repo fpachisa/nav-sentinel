@@ -481,6 +481,25 @@ LIVE_STAGES: tuple[tuple[str, str], ...] = (
 )
 
 
+#: How long a handed-over case may show no progress before the screen stops calling it "in
+#: progress". Longer than a cold investigation (measured at 74s) so a slow case is not libelled,
+#: and shorter than the subscription's 300s ack deadline so the operator learns before the
+#: automatic retry rather than after it.
+STALL_AFTER_SECONDS = 150
+
+
+def _stalled_for(dispatched_at: str) -> float:
+    """Seconds since this case was handed to the fleet, or 0 if the stamp is unreadable."""
+    from datetime import datetime
+
+    from nav_sentinel.control_plane.observations import utcnow
+
+    try:
+        return (utcnow() - datetime.fromisoformat(dispatched_at)).total_seconds()
+    except ValueError:
+        return 0.0
+
+
 def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     """What has to happen next, and who has to do it.
 
@@ -499,9 +518,16 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
         # "In progress" only once the case has actually been handed over. Before that nothing is
         # working on it, and a screen saying otherwise at rest tells an analyst the fleet is busy
         # when it has not been asked to do anything -- which was the opening state of every take.
-        if document.get("dispatched_at"):
-            return "fleet", "In progress"
-        return "not_started", "Not started"
+        dispatched = str(document.get("dispatched_at") or "")
+        if not dispatched:
+            return "not_started", "Not started"
+        if _stalled_for(dispatched) > STALL_AFTER_SECONDS:
+            # An attempt that dies without answering is not retried until the subscription's ack
+            # deadline expires, which is deliberately longer than one investigation -- so a lost
+            # delivery reads as five minutes of work that is not happening. Observed live: one case
+            # sat "In progress" from 02:31:50 to 02:36:50 before Pub/Sub redelivered it.
+            return "stalled", "No progress — retry from the case"
+        return "fleet", "In progress"
     if not document.get("proposal"):
         return "human_investigation", "Cause not established — needs an analyst"
 
@@ -646,12 +672,16 @@ def live_snapshot(
         "handover": {
             "sign": sum(1 for r in rows if r["next_kind"] == "sign"),
             "not_started": sum(1 for r in rows if r["next_kind"] == "not_started"),
+            "stalled": sum(1 for r in rows if r["next_kind"] == "stalled"),
             "human_investigation": sum(
                 1 for r in rows if r["next_kind"] == "human_investigation"
             ),
             "fleet": sum(1 for r in rows if r["next_kind"] == "fleet"),
             "posted_by_ledger": sum(1 for r in rows if r["next_kind"] == "posted_by_ledger"),
         },
+        # Unchanged by the stall work, deliberately: a stalled case has its investigation stage
+        # still pending, so it already counts as unsettled and the page keeps polling -- which is
+        # right, because the subscription will retry it.
         "settled": all(
             r["stages"]["draft"] in ("done", "blocked")
             and r["stages"]["investigation"] in ("done", "blocked")

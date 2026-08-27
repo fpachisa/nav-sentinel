@@ -341,6 +341,7 @@ ul.plain li{margin:3px 0}
 .nx[data-k=human_investigation]{color:var(--escalate);font-weight:600}
 .nx[data-k=fleet]{color:var(--faint)}
 .nx[data-k=not_started]{color:var(--faint)}
+.nx[data-k=stalled]{color:var(--escalate);font-weight:600}
 .nx[data-k=posted_by_ledger]{color:var(--cleared);font-weight:600}
 .feed{max-height:300px;overflow-y:auto;font-family:"JetBrains Mono",monospace;font-size:11.5px}
 .frow{display:grid;grid-template-columns:64px 54px 218px minmax(0,1fr);gap:12px;padding:5px 14px;
@@ -1319,11 +1320,18 @@ def _handover(snapshot: dict[str, Any]) -> str:
     manual = hand.get("human_investigation", 0)
     working = hand.get("fleet", 0)
     idle = hand.get("not_started", 0)
+    stalled = hand.get("stalled", 0)
 
     if idle and not working and not waiting and not manual:
         lead = (
             f"<b>Nothing has been investigated yet.</b> {idle} exception"
             f"{'s' if idle != 1 else ''} waiting. Start the fleet from the exception queue."
+        )
+    elif stalled:
+        lead = (
+            f"<b>{stalled} case{'s' if stalled != 1 else ''} stopped making progress.</b> "
+            "A delivery was lost; it will retry on its own, or you can open the case and run it "
+            "again now."
         )
     elif working and not settled:
         lead = (

@@ -30,7 +30,17 @@ WORKING = ("verdict", "proposal", "triage", "routed", "refusal", "investigator",
 
 
 def reset(as_of: date = workflow.DEFAULT_AS_OF) -> int:
+    """Put every case back to the state a first take opens in.
+
+    **Re-runs detection as well as clearing the work.** Clearing alone left whatever detection had
+    written whenever it last ran, so a field added to the detected case -- `currency`, which is what
+    tells two cash breaks apart -- never reached the deployed documents: `Investigate all` dispatches
+    existing cases and does not re-detect, so the fix shipped and the screen kept showing the same
+    title twice. Detection is arithmetic over two books and costs nothing, so the honest opening
+    state is a freshly detected one.
+    """
     store = composition.store()
+    workflow.run_cycle(as_of)
     cleared = 0
     for item in workflow.queue(as_of):
         document = store.load_case(item.case_id)

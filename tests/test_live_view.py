@@ -405,3 +405,92 @@ class TestTheNextStepCountsWhatIsActuallyOutstanding:
             for signed in ([], ["a@x.example"]):
                 step = self._step(band, signed)
                 assert not re.search(r"&[a-z]+;", step), f"{band}/{len(signed)}: {step!r}"
+
+
+class TestResetOpensOnTheCurrentSchema:
+    """Clearing the worked fields is not enough to open a take cleanly.
+
+    Detection output survives a reset by design -- it is not work an analyst did -- so a field added
+    to the *detected* case never reached the deployed documents. `currency`, which is the only thing
+    telling two cash breaks apart, shipped and the screen kept showing the same title twice, because
+    `Investigate all` dispatches existing cases and does not re-detect.
+    """
+
+    def test_reset_re_detects_so_new_fields_appear(self):
+        from nav_sentinel import demo_reset
+
+        composition.configure()
+        store = composition.store()
+        workflow.run_cycle(workflow.DEFAULT_AS_OF)
+        ids = [i.case_id for i in workflow.queue(workflow.DEFAULT_AS_OF)]
+
+        # A document written by an older schema: the currency was never stored.
+        cash = next(c for c in ids if "cash" in c)
+        document = store.load_case(cash)
+        document.pop("currency", None)
+        document["verdict"] = {"root_cause": "x", "agent": "a@1"}
+        store.save_case(cash, document)
+        assert "currency" not in store.load_case(cash)
+
+        demo_reset.reset()
+
+        after = store.load_case(cash)
+        assert after.get("currency"), "reset left a case that detection can no longer describe"
+        assert "verdict" not in after, "reset did not clear the work"
+
+    def test_no_two_titles_collide_after_a_reset(self):
+        from nav_sentinel import demo_reset
+        from nav_sentinel.webapp.pages import describe
+
+        composition.configure()
+        demo_reset.reset()
+        store = composition.store()
+        titles = [
+            describe(store.load_case(i.case_id) or {})
+            for i in workflow.queue(workflow.DEFAULT_AS_OF)
+        ]
+        assert len(set(titles)) == len(titles), sorted(t for t in titles if titles.count(t) > 1)
+
+
+class TestAStalledCaseSaysSo:
+    """A lost delivery is not retried until the subscription's ack deadline expires, which is
+    deliberately longer than one investigation. Observed live: a case sat "In progress" from
+    02:31:50 to 02:36:50 -- five minutes of a screen reporting work that was not happening."""
+
+    def _step(self, seconds_ago: int) -> tuple[str, str]:
+        from datetime import timedelta
+
+        from nav_sentinel.control_plane.observations import utcnow
+
+        return workflow._next_step(
+            {"routed": True, "dispatched_at": (utcnow() - timedelta(seconds=seconds_ago)).isoformat()}
+        )
+
+    def test_a_recently_dispatched_case_is_in_progress(self):
+        assert self._step(20) == ("fleet", "In progress")
+
+    def test_a_case_with_no_progress_past_the_threshold_says_so(self):
+        kind, step = self._step(workflow.STALL_AFTER_SECONDS + 30)
+        assert kind == "stalled"
+        assert "retry" in step.lower()
+
+    def test_the_threshold_sits_between_one_investigation_and_the_ack_deadline(self):
+        """Longer than a cold investigation so a slow case is not libelled; shorter than the 300s
+        ack deadline so the operator learns before the automatic retry rather than after it."""
+        assert 74 < workflow.STALL_AFTER_SECONDS < 300
+
+    def test_an_unreadable_timestamp_does_not_declare_a_stall(self):
+        kind, _ = workflow._next_step({"routed": True, "dispatched_at": "not-a-time"})
+        assert kind == "fleet"
+
+    def test_the_band_offers_the_retry(self):
+        import re
+
+        snapshot = {
+            "handover": {"sign": 0, "human_investigation": 0, "fleet": 0,
+                         "not_started": 0, "stalled": 2},
+            "settled": False,
+        }
+        band = re.sub(r"<[^>]+>", " ", pages._handover(snapshot))
+        assert "stopped making progress" in band
+        assert "run it again" in band
