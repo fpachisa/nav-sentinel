@@ -261,7 +261,10 @@ class TestTheDepartmentCountIsTheRegisteredOne:
         )
         narration = (ROOT / "docs" / "submission" / "narration.md").read_text()
         words = {3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven"}
-        assert f"{words[gaps]} capabilities have no authorised agent" in narration, (
+        # The wording moved from shot 2 to shot 5, where the routing table is on screen and the
+        # number is legible behind the claim. The property is unchanged: whatever the script says
+        # out loud must be what the page computes.
+        assert f"{words[gaps]} kinds of break here have nobody" in narration, (
             f"there are {gaps} unhandled capabilities; the narration names a different number"
         )
 

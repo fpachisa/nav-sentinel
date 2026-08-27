@@ -75,31 +75,33 @@ whose admin may block third-party apps. Find that out now rather than on camera.
 Screen at **1920×1080**, browser zoomed so the queue fills the frame without a scrollbar. Hide
 bookmarks and any other tabs. macOS: `⇧⌘5` → Record Selected Portion.
 
-Record in **eight separate clips**, one per shot, rather than one continuous take. A fluffed
+Record in **five separate clips**, one per shot, rather than one continuous take. A fluffed
 approval click means re-recording twenty seconds instead of four minutes, and the narration is one
 continuous track you cut to anyway.
 
 | Clip | What is on screen | Live? |
 | --- | --- | --- |
-| 0 | The sign-in page, then signing in with Google | — |
-| 1 | Queue, seven rows | — |
-| 2 | Fleet page, then `make registry` in a terminal | — |
-| 3 | Case page, the "what the numbers say" panel | — |
-| 4 | Click **Run the fleet**, wait, page reloads with cause + evidence + legs | **yes, real model calls** |
-| 5 | Sign in as reviewer → Approve → refusal; controller → refusal; second controller → granted → red posting refusal | — |
-| 6 | Remediation timeline | — |
-| 7 | Cloud Run console; the two curls; Firestore collections; Cloud Trace | **yes** |
-| 8 | `git diff --stat` for the transfer-agency commit, then `make registry` | — |
+| 0 | Sign-in page, then signing in with Google | — |
+| 1 | The queue: seven rows, impacts in bps, the approval each one needs | — |
+| 2 | A terminal, `gcloud pubsub topics publish` — **then hands off the keyboard** — then Fleet activity filling in | **yes, real model calls** |
+| 3 | A case page: cause, cited evidence, journal legs. Then the disabled **CIO to approve**, the four-eyes refusal, the second account, **Cleared for posting** | **yes** |
+| 4 | The remediation timeline | — |
+| 5 | Fleet page and the routing table, then Cloud Run console, the 401 curl, Firestore, Cloud Trace | **yes** |
 
-**Clip 4 is the one that must not be cut.** The wait is the evidence. If it runs 30 seconds, keep it
-and trim words elsewhere.
+**Clip 2 is the one that must not be cut.** It is the only shot that shows the fleet acting without
+a human, and that is the heaviest judging criterion. Publish, take your hands off the keyboard
+visibly, and let it run: counters climbing, one gold arc per row walking left to right, the control
+log scrolling. If it takes sixty seconds, keep sixty seconds and trim words elsewhere.
 
-**Clip 5 is the video.** Three refusals and a grant, in that order, with the red panel at the end.
-Do it slowly enough to read.
+**Clip 3 is the argument.** A disabled button, a real refusal, a grant, and then posting refused
+with a valid signature in hand. Do it slowly enough to read.
 
-## Shot 7, the Google Cloud proof
+**Reset between takes.** `make demo-reset` puts all seven cases back to *Not started* and re-runs
+detection, so a retake opens exactly as the first one did.
 
-The address bar has already been showing `.run.app` for six shots, so this shot is about the
+## Clip 5, the Google Cloud proof
+
+The address bar has been showing `.run.app` since clip 0, so this clip is about the
 *infrastructure* rather than the URL:
 
 1. **Cloud Console → Cloud Run → `nav-sentinel`** — region, live revision, the `nav-runtime` service
@@ -133,7 +135,7 @@ ffmpeg -i video.mp4 -i narration.m4a -map 0:v -map 1:a -c:v copy -c:a aac -short
 ffprobe -v error -show_entries format=duration -of csv=p=0 final.mp4
 ```
 
-If `final.mp4` exceeds 240 seconds, cut from clips 1, 2 and 8 — never from 4, 5 or 7.
+If `final.mp4` exceeds 240 seconds, cut from clips 1 and 4 — never from 2, 3 or 5.
 
 ## Subtitles
 

@@ -342,10 +342,18 @@ class TestTheOpeningStateDoesNotClaimWorkIsHappening:
         assert "in progress" not in band.lower()
 
     def test_a_dispatched_case_with_no_verdict_is_in_progress(self, cycled):
-        """The distinction has to cut both ways, or "not started" just means "no verdict"."""
+        """The distinction has to cut both ways, or "not started" just means "no verdict".
+
+        Relative to now, not a fixed date. It was `2026-08-27T09:00:00`, which was recent when
+        written and became older than the stall threshold the next day -- a test that passes on the
+        day it is written and fails afterwards is worse than no test, because the failure looks like
+        a regression in the code.
+        """
+        from nav_sentinel.control_plane.observations import utcnow
+
         store = composition.store()
         document = store.load_case(cycled[0])
-        document["dispatched_at"] = "2026-08-27T09:00:00+00:00"
+        document["dispatched_at"] = utcnow().isoformat()
         store.save_case(cycled[0], document)
 
         row = next(r for r in workflow.live_snapshot()["cases"] if r["case_id"] == cycled[0])
@@ -629,3 +637,33 @@ class TestOneStageSpinsAtATime:
         assert "[data-s=running]" in pages.CSS
         assert "animation:spin" in pages.CSS
         assert "@keyframes pop" in pages.CSS
+
+
+class TestStalenessIsMeasuredFromNow:
+    """One fixture pinned `dispatched_at` to a calendar date. It was minutes old when written and
+    hours old the next day, which put it past the stall threshold -- so the suite reported a
+    regression in code that had not changed.
+
+    I first wrote this as a grep for literal timestamps in this file and it flagged two legitimate
+    fixtures: one uses `2020-01-01` deliberately to make a counting window wide, the other asserts
+    a window *equals* a specific value. Neither rots. A guard that cannot tell intent apart from
+    error is a guard that gets weakened the first time it is wrong, so this asserts the property the
+    stall logic actually depends on instead.
+    """
+
+    def test_a_stamp_made_now_reads_as_no_elapsed_time(self):
+        from nav_sentinel.control_plane.observations import utcnow
+
+        assert workflow._stalled_for(utcnow().isoformat()) < 2
+
+    def test_elapsed_time_is_measured_against_the_current_clock(self):
+        from datetime import timedelta
+
+        from nav_sentinel.control_plane.observations import utcnow
+
+        elapsed = workflow._stalled_for((utcnow() - timedelta(seconds=400)).isoformat())
+        assert 395 < elapsed < 405
+
+    def test_a_fixed_past_date_would_always_read_as_stalled(self):
+        """Which is why a fixture meaning "just dispatched" has to be built from now."""
+        assert workflow._stalled_for("2020-01-01T00:00:00+00:00") > workflow.STALL_AFTER_SECONDS

@@ -4,152 +4,138 @@ Spoken text only, one block per shot. Measured, not estimated: `make narration` 
 `say` and times it, because a word count is a proxy for duration that assumes the very thing nobody
 knows until a voice has read the script.
 
+## What each shot is for
+
+Five sections, in the order a sceptic asks the questions. The right-hand column is the judging
+criterion the shot is answering, because a four-minute video has no room for a beat that is not
+paying for itself.
+
+| Shot | Answers | Criterion |
+|---|---|---|
+| 1 · Why this matters | Is the problem real and expensive? | Utility (40%) |
+| 2 · The fleet does the work | Does it act on its own, and on what? | Utility (40%) · named tech |
+| 3 · Evidence and the human gate | Can I trust it, and who is accountable? | Utility · Architecture (30%) |
+| 4 · Weeks, not minutes | Does it hold state across departments and time? | Architecture (30%) |
+| 5 · Extensible, on Google Cloud | Does it generalise, and is it really running? | Architecture · Demo (30%) |
+
+Two things are said plainly rather than implied, because the brief asks for them and says not to
+bury them: **which agent framework** (Google ADK) and **which Gemini models** (3.7 Flash for
+investigation, 3.5 Flash Lite for classification, on Vertex AI). Both land in shot 2.
+
 ## Where the four minutes go
 
-Measured end to end, with the shot pauses in the file:
-
-| Speaking rate | Speech | + 8 pauses | Total | Against the 240s cap |
-|---|---|---|---|---|
-| ~157 wpm (system default) | 198s | 20s | **218s** | 22s spare |
-| 140 wpm (a slow, deliberate read) | 220s | 20s | **240s** | none |
-
-So the script fits comfortably at a normal narration pace and **does not fit at 140 wpm**. Two
-levers if the voice you pick reads slowly: drop the inter-shot pause from 2.5s to 1.5s, which buys
-8s, and cut shot 7 — it is 77 words for a point the address bar has already been making for three
-minutes.
-
-Only the first four minutes are evaluated, so overrunning does not truncate the video, it discards
-whatever is at the end. Re-measure after any edit:
+Measured end to end, with the shot pauses in the file. Re-measure after any edit — only the first
+four minutes are evaluated, so overrunning does not truncate the video, it discards the end of it.
 
     make narration                    # default rate
-    make narration RATE=140           # the slow end
-
-Shot 5 is the longest at 110 words and 43–48 seconds. It earns it: it is four refusals and a grant,
-and it is the centre of the submission.
-
-## 1 · The problem — 0:00–0:32 · 78 words
-
-> A fund publishes a price for itself every day. Investors deal at that price, so a wrong one means
-> compensating them and explaining yourself to a regulator.
->
-> Every morning the books disagree with the custodian's somewhere, and someone must find out why
-> before the deadline. I sign in with Google. This is that desk: seven differences today, and
-> the column on the right is who is legally required to sign.
-
-*Silence: 3s on the queue.*
+    make narration RATE=140           # a slow, deliberate read
 
 ---
 
-## 2 · The stack — 0:35–0:58 · 68 words
+## 1 · Why this matters — 0:00–0:34
 
-> Eight agents on Google's Agent Development Kit version two, running Gemini three-point-seven Flash
-> for reasoning and three-point-five Flash Lite for classification, on Vertex AI.
+> A fund publishes one number every day: its net asset value. Investors buy and sell at that
+> number, so a wrong one means compensating them and explaining yourself to a regulator.
 >
-> None is named in the application code — each is discovered from the registry by the capability it
-> declares. Four capabilities have no authorised agent, so a break classified as one of those is
-> refused at routing. No agent runs. It stays in the queue as human work.
+> Before it can be published, the fund's own books have to agree with the custodian's. Every
+> morning they don't, somewhere, and each difference has to be explained before the deadline.
+> Today that is skilled people, working by hand, against a clock.
 
-*On screen while this is said: the Fleet page, `gemini-3.7-flash` visible per agent, and the routing
-table showing `NO PUBLISHED AGENT` against four capabilities.*
-
-**Say four, not seven.** The page reports fourteen declared capabilities: seven routed, four with
-nobody published to handle them, and three `.unclassified` sentinels — the value triage returns when
-no root-cause family fits, which must never have an agent. Those three are not gaps, and the Fleet
-page labels them separately so the screen and the narration agree.
-
-**Why this line is in the video at all.** It is the difference between this fleet and a demo. The
-tempting alternative is to hand an unroutable break to whichever agent looks closest, which returns
-a confident, wrong root cause with real citations attached — and an audit trail saying a specialist
-established it. Refusing is the harder behaviour and the only defensible one.
+*On screen: the exception queue. Seven differences, impacts in basis points, the approval each one
+needs already assigned.*
 
 ---
 
-## 3 · Before any model — 0:55–1:18 · 55 words
+## 2 · The fleet does the work — 0:34–1:32
 
-> Open one. Before a single model call: quantity agrees, price agrees, market value differs by
-> eighty-six thousand euros — and the exchange rate applied differs.
+> I'm signed in with Google. Seven differences at today's valuation point, found by arithmetic over
+> two books — no model, because deciding whether two numbers differ is subtraction.
 >
-> That's arithmetic. A model here would be spending a request to be told what the numbers already
-> say.
+> Now watch. One event, published to Pub/Sub. Nobody is driving this.
+>
+> Eight agents on Google's Agent Development Kit, running Gemini three-point-seven Flash to
+> investigate and three-point-five Flash Lite to classify, on Vertex AI. Each case is classified,
+> handed to the specialist authorised for that kind of break, investigated against source data, and
+> drafted into a correcting entry.
+>
+> Three specialists engaged. Seventeen source lookups, every one checked against this fund's
+> mandate. Forty controls applied. About a minute, and no analyst touched it.
+
+*On screen: the terminal `gcloud pubsub topics publish`, hands off the keyboard, then Fleet
+activity — counters climbing, one gold arc per row walking left to right, the control log
+scrolling. Let the numbers move; this shot is the 40% criterion.*
 
 ---
 
-## 4 · The fleet works — 1:18–2:05 · 84 words
+## 3 · Evidence and the human gate — 1:32–2:30
 
-> Now the agents.
-
-*Silence: 12–20s while it actually runs. Do not cut this — a visible wait is evidence.*
-
-> Triage classified it, the registry chose the agent authorised for that capability, and that
-> agent investigated using only the tools its manifest allows.
->
-> It found the stale rate and cited the European Central Bank data it read, with a digest of the
-> response — so the citation can be checked, not trusted. The correction balances: two legs, residual
+> Open one. The cause, and the European Central Bank rate it read, with a digest of the response —
+> so the citation can be checked rather than trusted. The correction balances: two legs, residual
 > zero.
 >
----
+> I'm a controller. This case is above my authority, so the desk won't offer it: the button reads
+> CIO to approve, and it's disabled.
+>
+> A four-eyes case. I sign. Refused — four eyes means two *different* people. Second account, the
+> chief investment officer. Granted.
+>
+> And now the part that matters. Cleared for posting — and no agent in this system can post it.
+> That was checked, not claimed: the gateway was asked to post this entry under an agent's
+> identity, carrying the signature, and refused.
 
-## 5 · Where it says no — 2:05–2:45 · 96 words · **the centre of the video**
-
-> I'm signed in with Google; this deployment has me down as a controller. Approve.
->
-> The desk won't even offer it — only the chief investment officer can clear this one, and the
-> button says so instead of letting me try.
->
-> Now a four-eyes case. Signed. Refused again — four eyes means two *different* people.
->
-> Second account, the CIO. Granted.
->
-> And now the part that matters. Cleared for posting &mdash; and no agent in this system can post
-> it. That was checked, not claimed: the gateway was asked to post it under an agent's identity,
-> holding this signature, and refused. An approval authorises a correction; it doesn't grant
-> anything the authority to make it.
+*On screen: the case page, then both accounts. Linger on the refusal and on "Cleared for posting".*
 
 ---
 
-## 6 · Multi-week, multi-department — 2:45–3:05 · 71 words
+## 4 · Weeks, not minutes — 2:30–2:56
 
-> A published error runs for weeks. Fund accounting quantifies it. Transfer agency is asked,
+> A published error is not a one-day job. Fund accounting sizes it. Transfer agency is asked,
 > through the gateway and under its own identity, who dealt at the wrong price. A repeat is judged
 > more harshly than a first.
 >
-> Three departments, twenty-eight business days. A payment file arrived before approval: refused, and
-> recorded. The wall clock is compressed; the business dates are not.
+> Three departments, twenty-eight business days. A payment file arrived before approval: refused,
+> and recorded. The case is read back from Firestore on every event, so it outlives the process
+> that opened it.
+
+*On screen: the remediation timeline. Business dates down the rail, the refused transition in red.*
 
 ---
 
-## 7 · On Google Cloud — 3:05–3:38 · 74 words · **required**
+## 5 · Extensible, and running on Google Cloud — 2:56–3:44
 
-> This runs on Cloud Run, in us-central1, as its own service account.
+> None of this knows about fund accounting. A second department — a share register, counted in
+> units instead of currency — cost five lines and no change to the registry. Any process where the
+> work is slow, the evidence matters, and a person must answer for the outcome fits the same seam.
 >
-> Sign-in is public; the endpoints that do work are not. Asking it to run a reconciliation without
-> a session: four oh one. And it reports it's persisting to Firestore, not memory &mdash; a service
-> holding its audit trail in memory looks identical to a healthy one from outside.
+> And where no specialist is authorised, a break is refused rather than handed to the closest one.
+> Four kinds of break here have nobody, and they go to a person.
 >
-> Here are the stage transitions and policy decisions in Firestore, and the traces, one per
-> delivered event.
-
-*Fire the traffic before this shot — Cloud Trace indexes with about forty-five seconds of lag.*
-
----
-
-## 8 · Close — 3:38–3:50 · 48 words
-
-> A second business process — a share register, in units instead of currency — cost five lines and
-> no change to the registry.
+> This runs on Cloud Run, in us-central1, as its own service account. Sign-in is public; the
+> endpoints that do work are not — asking it to run a reconciliation without a session gives four
+> oh one. State is in Firestore, and here are the traces, one per delivered event.
 >
 > The agents never get the authority. They gather evidence, they propose, and a person signs.
 
+*On screen: the Fleet page, then the `.run.app` URL, the 401, Firestore, Cloud Trace. The address
+bar has carried the proof since shot 1; this is where it is stated.*
+
 ---
 
-## Check the length before you record
+## Notes for the recording
 
-Do not trust a word count written by hand — the first draft of this file claimed 558 words and
-measured 581, which with the silences ran to 4:22 and would have cut the required Google Cloud shot.
+**Shot 2 is the one to get right.** It is the heaviest criterion and the only shot that shows
+autonomy. Warm the service first (`/readyz` twice) — cold, the first case takes 74 seconds instead
+of 24, and the whole run 74 instead of about 60.
 
-    awk '/^> /{gsub(/^> /,""); n+=split($0,a," ")} END{print n, "words →", int(n/150*60), "s at 150 wpm"}' \
-      docs/submission/narration.md
+**Shot 3's first beat changed** when the desk stopped offering actions it knows will fail. It is a
+disabled button now, not a click and a refusal. The four-eyes beat still puts a real server-side
+refusal on camera, because a controller *is* eligible there and is turned down on count rather than
+on role.
 
-Add roughly 25 seconds of silence on top for the run-the-fleet wait and page loads. If your voice
-runs faster than 155 wpm, put the slack into shot 4's wait rather than adding words — the visible
-wait is what proves it isn't a mockup.
+**Say the numbers you actually see.** Three specialists, seventeen lookups and forty controls are
+what a warm run produced; if the take differs, read the take. A figure that does not match the
+screen is worse than no figure.
+
+**If the voice reads slowly**, the levers in order: inter-shot pauses from 2.5s to 1.5s buys 8s;
+then trim shot 5's first sentence, which is the one point the address bar has been making for three
+minutes. Not shot 2, and not shot 3.
