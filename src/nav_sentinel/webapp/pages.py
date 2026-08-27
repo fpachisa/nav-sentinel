@@ -625,12 +625,18 @@ BREAK_TITLES = {
 
 
 def describe(document: dict[str, Any]) -> str:
-    """What this exception is, for a human. Never an enum."""
+    """What this exception is, for a human. Never an enum.
+
+    Qualified by whatever identifies it: an instrument for a security break, a currency for a cash
+    one. Without the currency the queue showed "Cash balance difference" twice, identically, for two
+    different cases -- and a row an analyst cannot tell apart from the one above it is a row they
+    have to open to identify.
+    """
     types = [t for t in document.get("break_types", []) if t]
     titles = [BREAK_TITLES.get(t, t.replace("_", " ").capitalize()) for t in dict.fromkeys(types)]
-    isin = document.get("isin")
     head = " and ".join(titles) if titles else "Exception"
-    return f"{head}{f' · {isin}' if isin else ''}"
+    qualifier = document.get("isin") or document.get("currency") or ""
+    return f"{head}{f' · {qualifier}' if qualifier else ''}"
 
 
 def classification(document: dict[str, Any]) -> str:

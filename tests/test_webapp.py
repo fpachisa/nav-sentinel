@@ -566,3 +566,75 @@ class TestTheApprovalPanelUsesTheDeskVocabulary:
     def test_an_ineligible_role_gets_the_explanation_once_not_twice(self):
         """The muted requirement line and the note said the same thing, stacked."""
         assert self._line("cio_escalation", "controller") == ""
+
+
+class TestEveryRowInTheQueueIsDistinguishable:
+    """Two cash cases rendered as "Cash balance difference", identically, for different currencies.
+
+    A row an analyst cannot tell apart from the one above it is a row they have to open to
+    identify, which is the opposite of what a queue is for.
+    """
+
+    def test_a_cash_case_is_qualified_by_its_currency(self):
+        from nav_sentinel.webapp.pages import describe
+
+        assert describe({"break_types": ["cash_balance"], "currency": "EUR"}) == (
+            "Cash balance difference · EUR"
+        )
+
+    def test_a_security_case_is_qualified_by_its_instrument(self):
+        from nav_sentinel.webapp.pages import describe
+
+        assert describe(
+            {"break_types": ["market_value"], "isin": "GB00BN7SWP63", "currency": "GBP"}
+        ) == "Market value difference · GB00BN7SWP63"
+
+    def test_no_two_rows_in_a_real_cycle_share_a_title(self):
+        """The property, rather than the two examples. A new break type that forgets to carry an
+        identifier fails here rather than at 6am."""
+        composition.configure()
+        workflow.run_cycle(workflow.DEFAULT_AS_OF)
+        titles = [item.title for item in workflow.queue(workflow.DEFAULT_AS_OF)]
+        duplicates = {t for t in titles if titles.count(t) > 1}
+        assert not duplicates, f"indistinguishable rows: {sorted(duplicates)}"
+
+
+class TestBothCycleEntryPointsWriteTheSameCase:
+    """The desk and the Pub/Sub handler each built their own projection of a detected case, and
+    they had drifted by four fields: the unattended path wrote no break types, no instrument, no
+    currency and no basis points.
+
+    So an event-driven cycle produced a queue of rows all titled "Exception" with blank impacts. It
+    looked correct in testing only because the desk had usually run first and the merge preserved
+    its fields -- the state that exposes it is a store nobody has opened a browser against.
+    """
+
+    def test_the_projection_has_one_definition(self):
+        import inspect
+
+        from nav_sentinel.pipeline import cycle_runner
+
+        assert "case_document" in inspect.getsource(cycle_runner._persist)
+        assert "case_document" in inspect.getsource(workflow.run_cycle)
+
+    def test_a_case_written_by_detection_alone_can_still_be_named(self):
+        """Driven through `cycle_runner.run`, which is what Pub/Sub calls, on a store the desk has
+        never touched."""
+        from datetime import date
+
+        from nav_sentinel.control_plane.repository import InMemoryRepository
+        from nav_sentinel.pipeline import cycle_runner
+        from nav_sentinel.webapp.pages import describe
+
+        composition.configure()
+        previous = composition._repository
+        composition._repository = InMemoryRepository()
+        try:
+            cycle_runner.run(date(2026, 8, 17))
+            documents = composition.store().cases_for("MERID-GEF", "2026-08-17")
+            assert documents
+            for document in documents:
+                assert describe(document) != "Exception", document.get("case_id")
+                assert document.get("impact_bps"), document.get("case_id")
+        finally:
+            composition._repository = previous

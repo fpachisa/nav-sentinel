@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from nav_sentinel import composition
 from nav_sentinel.control_plane import audit, gateway, identity, telemetry
@@ -110,6 +111,40 @@ def run(as_of: date) -> dict:
     }
 
 
+def case_document(
+    case, facts, band: str, trace_id: str | None, agent_ref: str | None = None
+) -> dict[str, Any]:
+    """What detection knows about a case, projected identically by every entry point.
+
+    The desk and the Pub/Sub handler each built their own version of this and they had drifted: the
+    unattended path wrote no break types, no instrument, no currency and no basis points, so a
+    cycle started from an event produced a queue of rows all titled "Exception" with blank impacts.
+    It looked correct only because the desk had usually run first and the merge preserved its
+    fields -- which is the worst kind of passing, since the state that exposes it is a store nobody
+    has opened the browser against.
+    """
+    return {
+        "case_id": case.case_id,
+        "subject_id": facts.subject_id,
+        "as_of": facts.as_of.isoformat(),
+        "capability": facts.capability,
+        "status": facts.status,
+        "severity": facts.severity,
+        "impact": str(facts.impact) if facts.impact else None,
+        "impact_bps": str(case.nav_impact_bps) if case.nav_impact_bps is not None else "",
+        "approval_band": band,
+        "authorised_agent": agent_ref,
+        "trace_id": trace_id,
+        "break_ids": [b.break_id for b in case.breaks],
+        # What the exception is *about*, so a page can name it. Two cash breaks differ only by
+        # currency, and without it the queue showed the same title twice.
+        "isin": next((b.isin for b in case.breaks if b.isin), ""),
+        "currency": next((b.currency for b in case.breaks if b.currency), ""),
+        "break_types": [b.break_type.value for b in case.breaks],
+        "note": next((b.note for b in case.breaks if b.note), ""),
+    }
+
+
 def _persist(case, facts, band: str, agent, trace_id: str | None) -> None:
     """Write the case and its governance decisions to the repository.
 
@@ -121,19 +156,7 @@ def _persist(case, facts, band: str, agent, trace_id: str | None) -> None:
     from nav_sentinel import composition
 
     store = composition.store()
-    detected = {
-            "case_id": case.case_id,
-            "subject_id": facts.subject_id,
-            "as_of": facts.as_of.isoformat(),
-            "capability": facts.capability,
-            "status": facts.status,
-            "severity": facts.severity,
-            "impact": str(facts.impact) if facts.impact else None,
-            "approval_band": band,
-            "authorised_agent": agent.ref if agent else None,
-            "trace_id": trace_id,
-            "break_ids": [b.break_id for b in case.breaks],
-    }
+    detected = case_document(case, facts, band, trace_id, agent.ref if agent else None)
     # Merged, not written over. Detection re-runs -- Pub/Sub is at-least-once, `make demo` is run
     # repeatedly, and a stray publish is one keystroke -- and a blind `set()` here deleted the
     # verdict, the drafted correction, the signatures and the approval reference of every case that

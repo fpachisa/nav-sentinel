@@ -84,22 +84,11 @@ def run_cycle(as_of: date = DEFAULT_AS_OF) -> list[QueueItem]:
         gateway.mark_decisions(case.case_id)
         with audit.case_trace(facts) as (_span, trace_id, band):
             existing = store.load_case(case.case_id) or {}
+            # One projection, shared with `cycle_runner._persist`. Two entry points each
+            # building their own had already drifted by four fields.
             document = {
                 **existing,
-                "case_id": case.case_id,
-                "subject_id": facts.subject_id,
-                "as_of": facts.as_of.isoformat(),
-                "capability": facts.capability,
-                "status": facts.status,
-                "impact": str(facts.impact) if facts.impact else None,
-                "impact_bps": str(case.nav_impact_bps) if case.nav_impact_bps is not None else "",
-                "approval_band": band,
-                "trace_id": trace_id,
-                "isin": next((b.isin for b in case.breaks if b.isin), ""),
-                # Break types, so a page can name the exception in an operator's language instead
-                # of showing `nav.unclassified` -- an internal enum meaning "triage has not run".
-                "break_types": [b.break_type.value for b in case.breaks],
-                "note": next((b.note for b in case.breaks if b.note), ""),
+                **cycle_runner.case_document(case, facts, band, trace_id),
             }
             store.save_case(case.case_id, document)
             for sequence, decision in enumerate(gateway.decisions_since(case.case_id)):
