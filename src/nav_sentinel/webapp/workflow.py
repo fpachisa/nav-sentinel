@@ -577,17 +577,21 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
 def _stage_states(document: dict[str, Any]) -> dict[str, str]:
     """Where this case has got to, read from what is stored."""
     routed = document.get("routed")
+    # Key presence, not truthiness. A stage is finished when the fleet wrote its result, and an
+    # empty result is still a result -- testing truthiness made a triage that classified nothing
+    # look like a triage that never ran, which is the same conflation of "no answer" and "not
+    # asked" that the next-step column had.
     return {
-        "triage": "done" if document.get("triage") else "pending",
+        "triage": "done" if "triage" in document else "pending",
         "routing": "done" if routed else ("refused" if routed is False else "pending"),
         "investigation": "done"
-        if document.get("verdict")
+        if "verdict" in document
         else ("blocked" if routed is False else "pending"),
         # `drafted is False` is the fleet saying it finished and drafted nothing, which is a
         # different state from not having got there yet. Reading them as one meant a case that
         # established no cause looked permanently in-flight.
         "draft": "done"
-        if document.get("proposal")
+        if "proposal" in document
         else (
             "blocked"
             if routed is False or document.get("drafted") is False
@@ -634,6 +638,17 @@ def live_snapshot(
         # and not inflated by another valuation date.
         observations = store.observations_for(case_id)
         evidence += len(observations)
+        stages = _stage_states(document)
+        kind, step = _next_step(document)
+        if kind == "fleet":
+            # The stages run in order, so the first unfinished one is the one being worked. Derived
+            # rather than recorded: the worker that knows is on another instance, and a field
+            # written per stage would be a second source of truth for something the sequence
+            # already determines.
+            for key, _label in LIVE_STAGES:
+                if stages[key] == "pending":
+                    stages[key] = "running"
+                    break
         rows.append(
             {
                 "case_id": case_id,
@@ -644,10 +659,10 @@ def live_snapshot(
                 "agent": str(agent or ""),
                 "refusal": str(document.get("refusal") or ""),
                 "approved": bool(document.get("approval_ref")),
-                "stages": _stage_states(document),
+                "stages": stages,
                 "evidence": len(observations),
-                "next_kind": _next_step(document)[0],
-                "next_step": _next_step(document)[1],
+                "next_kind": kind,
+                "next_step": step,
             }
         )
 

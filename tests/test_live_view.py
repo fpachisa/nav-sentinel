@@ -551,3 +551,81 @@ class TestTheNextStepDoesNotChangeItsMind:
         })
         assert kind == "human_investigation"
         assert "Cause not established" in step
+
+
+class TestOneStageSpinsAtATime:
+    """A row of static dots gives no sign the fleet is alive.
+
+    The stage being worked is derived rather than recorded: the stages run in order, so the first
+    unfinished one is the one in hand. A field written per stage would be a second source of truth
+    for something the sequence already determines -- and the worker that knows is on another
+    instance.
+    """
+
+    T = {"capability": "nav.fx_rate", "confidence": 0.9, "reasoning": "r"}
+    V = {"root_cause": "x", "agent": "a@1"}
+
+    def _stages(self, cycled, fields: dict) -> dict:
+        from nav_sentinel.control_plane.observations import utcnow
+
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document.update({"dispatched_at": utcnow().isoformat(), **fields})
+        store.save_case(cycled[0], document)
+        return next(
+            r for r in workflow.live_snapshot()["cases"] if r["case_id"] == cycled[0]
+        )["stages"]
+
+    def test_exactly_one_stage_runs_while_the_case_is_in_flight(self, cycled):
+        for fields in (
+            {},
+            {"triage": self.T},
+            {"triage": self.T, "routed": True},
+            {"triage": self.T, "routed": True, "verdict": self.V},
+        ):
+            stages = self._stages(cycled, fields)
+            running = [k for k, v in stages.items() if v == "running"]
+            assert len(running) == 1, f"{fields.keys()} -> {stages}"
+
+    def test_the_spinner_is_on_the_first_unfinished_stage(self, cycled):
+        stages = self._stages(cycled, {"triage": self.T, "routed": True})
+        assert stages["triage"] == "done"
+        assert stages["routing"] == "done"
+        assert stages["investigation"] == "running"
+        assert stages["draft"] == "pending"
+
+    def test_a_finished_case_has_no_spinner(self, cycled):
+        stages = self._stages(
+            cycled,
+            {"triage": self.T, "routed": True, "verdict": self.V,
+             "proposal": {"proposal_id": "P"}},
+        )
+        assert "running" not in stages.values()
+
+    def test_an_undispatched_case_has_no_spinner(self, cycled):
+        """Nothing is working on it, so nothing should look like it is."""
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        for field in ("dispatched_at", "triage", "routed", "verdict", "proposal"):
+            document.pop(field, None)
+        store.save_case(cycled[0], document)
+        stages = next(
+            r for r in workflow.live_snapshot()["cases"] if r["case_id"] == cycled[0]
+        )["stages"]
+        assert set(stages.values()) == {"pending"}
+
+    def test_a_refused_case_has_no_spinner(self, cycled):
+        stages = self._stages(cycled, {"triage": self.T, "routed": False, "refusal": "none"})
+        assert "running" not in stages.values()
+        assert stages["routing"] == "refused"
+
+    def test_an_empty_result_still_counts_as_a_finished_stage(self, cycled):
+        """Presence, not truthiness. A triage that classified nothing is not a triage that never
+        ran -- the same conflation of "no answer" and "not asked" the next-step column had."""
+        stages = self._stages(cycled, {"triage": {}})
+        assert stages["triage"] == "done"
+
+    def test_the_running_state_is_styled(self):
+        assert "[data-s=running]" in pages.CSS
+        assert "animation:spin" in pages.CSS
+        assert "@keyframes pop" in pages.CSS

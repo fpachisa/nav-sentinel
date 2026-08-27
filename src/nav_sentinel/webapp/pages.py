@@ -328,6 +328,13 @@ ul.plain li{margin:3px 0}
 .sdot[data-s=refused]:after{content:"";position:absolute;left:3.5px;top:2.5px;width:5px;height:5px;
   border-top:2px solid #fff;transform:rotate(45deg)}
 .sdot[data-s=blocked]{border-style:dotted;border-color:var(--line);background:transparent}
+/* The stage being worked: a rotating arc, because a static row gives no sign the fleet is alive.
+   The finished state pops once as it lands -- the attribute change restarts the animation, so the
+   moment a stage completes is visible even to someone not watching that row. */
+.sdot[data-s=running]{border-color:var(--accent);border-right-color:transparent;
+  animation:spin .75s linear infinite}
+.sdot[data-s=done],.sdot[data-s=refused]{animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(.55);opacity:.4}55%{transform:scale(1.28)}100%{transform:scale(1)}}
 .handover{display:flex;align-items:center;gap:14px;padding:14px 17px;border-radius:9px;
   border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper);
   margin-bottom:16px;font-size:13px;box-shadow:var(--shadow)}
