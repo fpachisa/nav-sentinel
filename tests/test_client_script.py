@@ -184,3 +184,51 @@ class TestWhatTheClientDoesWithTheLinesItReceives:
         assert result["railSwapped"] == "<div>APPROVAL RAIL</div>"
         assert result["status"] == "complete"
         assert result["finishedClass"] is True
+
+
+class TestTheThemeIsWholeAndSelfContained:
+    """One committed palette, and every colour on screen resolves.
+
+    The desk was a light/dark pair; it is now a single deep-navy and gold theme, which is a
+    deliberate choice rather than a simplification: the demo is recorded once, and a viewer whose
+    operating system prefers light should not be shown a different product than the video shows.
+
+    The failure mode of a retheme is a rule left pointing at a token that no longer exists. That
+    renders as `unset` -- usually transparent or black -- which is invisible in a diff and obvious
+    only on the one screen nobody re-opened.
+    """
+
+    def _tokens(self):
+        import re
+
+        css = pages.CSS
+        return (
+            set(re.findall(r"(--[a-z0-9-]+)\s*:", css)),
+            set(re.findall(r"var\((--[a-z0-9-]+)", css)),
+        )
+
+    def test_every_token_used_is_defined(self):
+        defined, used = self._tokens()
+        assert not (used - defined), sorted(used - defined)
+
+    def test_there_is_exactly_one_palette(self):
+        """A second block would be a theme nobody re-checks after every copy change."""
+        assert "prefers-color-scheme" not in pages.CSS
+        assert "[data-theme" not in pages.CSS
+        assert pages.CSS.count(":root{") == 1
+
+    def test_no_colour_is_hard_coded_outside_the_palette(self):
+        """A literal hex in a component rule is a colour the theme cannot move."""
+        import re
+
+        body = pages.CSS[pages.CSS.index("*{box-sizing"):]
+        # `#000` appears only inside a `mask-image` gradient, where it is an alpha stop rather
+        # than a colour anyone sees. `#fff` is white on a coloured surface, which no palette moves.
+        allowed = {"#fff", "#ffffff", "#0000", "#000"}
+        found = {h.lower() for h in re.findall(r"#[0-9a-fA-F]{3,8}\b", body)} - allowed
+        assert not found, f"hard-coded colours outside :root: {sorted(found)}"
+
+    def test_the_accent_carries_readable_text(self):
+        """A filled gold button needs dark text. White on #C9A227 fails contrast outright."""
+        assert "--accent-ink:" in pages.CSS
+        assert "background:var(--accent);color:var(--accent-ink)" in pages.CSS
