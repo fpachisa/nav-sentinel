@@ -54,7 +54,7 @@ and even there the lift is precision rather than excitement — the system sayin
 ```
 [neutral] I'm signed in with Google; this deployment has me down as a controller. [instruction] Approve.
 
-[emphatic] Refused — [explanation] a controller can't clear an escalation; only the chief investment officer can. [serious] And nothing was recorded: an ineligible signature isn't a partial signature.
+[emphatic] The desk won't even offer it — [explanation] only the chief investment officer can clear this one, and the button says so instead of letting me try.
 
 [neutral] Now a four-eyes case. [instruction] Signed. [emphatic] Refused again — [explanation] four eyes means two different people.
 
