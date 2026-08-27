@@ -510,17 +510,30 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
         allowed, required = BAND_REQUIREMENTS[ApprovalClass(band)]
     except (KeyError, ValueError):
         return "sign", "Awaiting signature"
-    outstanding = max(0, required - len(set(document.get("signed_by", []))))
-    if outstanding == 0:
-        return "sign", "Awaiting signature"
     from nav_sentinel.webapp.pages import role_label
 
-    who = role_label(allowed)
-    return "sign", (
-        # A literal em dash, not `&mdash;`. This string is HTML-escaped on the way out, so an
-        # entity arrives on screen as its own source text -- which it did.
-        f"Needs {outstanding} more signature{'s' if outstanding > 1 else ''} \u2014 {who}"
-    )
+    have = len(set(document.get("signed_by", [])))
+    outstanding = max(0, required - have)
+    if outstanding == 0:
+        return "sign", "Awaiting signature"
+
+    # "*more*" only once one has actually been given. Read cold, "Needs 1 more signature" says a
+    # signature is already on the case, so a queue of untouched escalations claimed to be half
+    # approved -- and the number an analyst most needs to trust on that screen is how far from
+    # signed a case is.
+    if have:
+        # A literal em dash, not `&mdash;`: this string is HTML-escaped on the way out, so an
+        # entity arrives on screen as its own source text.
+        return "sign", (
+            f"Needs {outstanding} more signature{'s' if outstanding > 1 else ''} "
+            f"\u2014 {role_label(allowed)}"
+        )
+    if required > 1:
+        return "sign", f"{required} signatures required"
+    # One signature, and naming the role is only useful when there is exactly one that will do.
+    if len(allowed) == 1:
+        return "sign", f"{role_label(allowed)} to sign"
+    return "sign", "Signature required"
 
 
 def _stage_states(document: dict[str, Any]) -> dict[str, str]:

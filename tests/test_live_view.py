@@ -357,3 +357,51 @@ class TestTheOpeningStateDoesNotClaimWorkIsHappening:
         band = pages._handover(workflow.live_snapshot())
         assert "not started" in band
         assert 'data-counter="hand_idle"' in band
+
+
+class TestTheNextStepCountsWhatIsActuallyOutstanding:
+    """"Needs 1 more signature" says a signature is already on the case.
+
+    So a queue of untouched CIO escalations claimed to be half approved, and the one number an
+    analyst most needs to trust on that screen -- how far from signed a case is -- was the number
+    that lied. "More" is only correct once one has been given.
+    """
+
+    WORKED = {"routed": True, "verdict": {"agent": "a@1"}, "proposal": {"proposal_id": "P"}}
+
+    def _step(self, band: str, signed: list[str]) -> str:
+        return workflow._next_step(
+            {**self.WORKED, "approval_band": band, "signed_by": signed}
+        )[1]
+
+    def test_one_signature_from_one_role_names_the_role(self):
+        assert self._step("cio_escalation", []) == "CIO to sign"
+
+    def test_one_signature_from_any_of_several_roles_does_not_list_them(self):
+        """Naming three roles is noise when any one of them will do."""
+        assert self._step("single_reviewer", []) == "Signature required"
+        assert self._step("auto_clear", []) == "Signature required"
+
+    def test_two_signatures_with_none_given_says_two(self):
+        assert self._step("four_eyes", []) == "2 signatures required"
+
+    def test_only_a_partly_signed_case_says_more(self):
+        step = self._step("four_eyes", ["first@x.example"])
+        assert step.startswith("Needs 1 more signature")
+        assert "CIO or Controller" in step
+
+    def test_nothing_unsigned_ever_claims_a_signature_exists(self):
+        """The property, across every band: with no signatures, the wording cannot say "more"."""
+        from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS
+
+        for band in BAND_REQUIREMENTS:
+            step = self._step(band.value, [])
+            assert "more" not in step.lower(), f"{band.value}: {step!r}"
+
+    def test_the_wording_holds_no_html_entity(self):
+        import re
+
+        for band in ("cio_escalation", "four_eyes", "single_reviewer"):
+            for signed in ([], ["a@x.example"]):
+                step = self._step(band, signed)
+                assert not re.search(r"&[a-z]+;", step), f"{band}/{len(signed)}: {step!r}"

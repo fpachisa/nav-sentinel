@@ -26,6 +26,13 @@ narration: ## Render the video narration to audio and time it (RATE=140 for a sl
 	$(PY) scripts/narration_audio.py --voice Daniel $(if $(RATE),--rate $(RATE),) \
 	  --out build/narration$(if $(RATE),-$(RATE),)
 
+sabotage-check: ## Run the suite with no bytecode cache (for verifying a guard by breaking the code)
+	@# Cheap insurance. Restoring a file from a backup once left bytecode that made the restored
+	@# tree behave as the sabotaged one -- harmless in that direction, and confusing enough to be
+	@# worth removing from the loop.
+	find src -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+	PYTHONDONTWRITEBYTECODE=1 $(PY) -m pytest tests/ -q
+
 verify: ## Offline gate: lint + diagrams + full invariant suite
 	.venv/bin/ruff check src tests fixtures scripts
 	$(PY) scripts/check_diagrams.py
