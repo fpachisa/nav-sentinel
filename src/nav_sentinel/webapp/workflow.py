@@ -504,31 +504,45 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     """What has to happen next, and who has to do it.
 
     The fleet finishing is not the case finishing, and a screen that showed four green ticks and
-    stopped would imply otherwise. Every one of these is a person's move: the whole claim of this
-    system is that the last step is never the agent's.
+    stopped would imply otherwise. Every terminal value here is a person's move: the whole claim of
+    this system is that the last step is never the agent's.
+
+    **It says one thing while the fleet works, and then the answer.** It used to read "verdict, but
+    no proposal" as *no cause established* -- which is true when the fleet decided not to draft, and
+    false during the seconds between the verdict landing and the draft landing. So a case announced
+    "Cause not established — needs an analyst", then changed its mind to "Signature required", and
+    an operator watching a queue do that learns to distrust the column. A conclusion that arrives
+    before the work is finished is worse than no conclusion.
+
+    The two states are distinguishable because the fleet records which one it is: `drafted=False` is
+    the fleet saying it finished and drafted nothing. Absent means it has not got there yet.
     """
     from nav_sentinel.control_plane.approvals import BAND_REQUIREMENTS
     from nav_sentinel.control_plane.governance import ApprovalClass
+    from nav_sentinel.webapp.pages import role_label
 
     if document.get("approval_ref"):
         return "posted_by_ledger", "Approved — release to the ledger"
     if document.get("routed") is False:
         return "human_investigation", "No specialist authorised — needs an analyst"
-    if not document.get("verdict"):
-        # "In progress" only once the case has actually been handed over. Before that nothing is
-        # working on it, and a screen saying otherwise at rest tells an analyst the fleet is busy
-        # when it has not been asked to do anything -- which was the opening state of every take.
+
+    verdict = document.get("verdict")
+    proposal = document.get("proposal")
+    drafted_nothing = document.get("drafted") is False
+
+    # Still the fleet's: no cause yet, or a cause with a draft it has not finished or declined.
+    if not verdict or (not proposal and not drafted_nothing):
         dispatched = str(document.get("dispatched_at") or "")
         if not dispatched:
             return "not_started", "Not started"
         if _stalled_for(dispatched) > STALL_AFTER_SECONDS:
             # An attempt that dies without answering is not retried until the subscription's ack
             # deadline expires, which is deliberately longer than one investigation -- so a lost
-            # delivery reads as five minutes of work that is not happening. Observed live: one case
-            # sat "In progress" from 02:31:50 to 02:36:50 before Pub/Sub redelivered it.
+            # delivery reads as minutes of work that is not happening.
             return "stalled", "No progress — retry from the case"
         return "fleet", "In progress"
-    if not document.get("proposal"):
+
+    if not proposal:
         return "human_investigation", "Cause not established — needs an analyst"
 
     band = str(document.get("approval_band", "single_reviewer"))
@@ -536,7 +550,6 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
         allowed, required = BAND_REQUIREMENTS[ApprovalClass(band)]
     except (KeyError, ValueError):
         return "sign", "Awaiting signature"
-    from nav_sentinel.webapp.pages import role_label
 
     have = len(set(document.get("signed_by", [])))
     outstanding = max(0, required - have)
@@ -545,8 +558,7 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
 
     # "*more*" only once one has actually been given. Read cold, "Needs 1 more signature" says a
     # signature is already on the case, so a queue of untouched escalations claimed to be half
-    # approved -- and the number an analyst most needs to trust on that screen is how far from
-    # signed a case is.
+    # approved.
     if have:
         # A literal em dash, not `&mdash;`: this string is HTML-escaped on the way out, so an
         # entity arrives on screen as its own source text.

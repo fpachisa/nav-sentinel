@@ -494,3 +494,60 @@ class TestAStalledCaseSaysSo:
         band = re.sub(r"<[^>]+>", " ", pages._handover(snapshot))
         assert "stopped making progress" in band
         assert "run it again" in band
+
+
+class TestTheNextStepDoesNotChangeItsMind:
+    """It announced a conclusion, then withdrew it.
+
+    "verdict, but no proposal" is *no cause established* when the fleet decided not to draft, and
+    is also the seconds between the verdict landing and the draft landing. So a case read "Cause
+    not established — needs an analyst" and then changed to "Signature required" -- and an operator
+    watching a queue do that learns to distrust the column. A conclusion that arrives before the
+    work is finished is worse than no conclusion.
+    """
+
+    #: Every document state a case actually passes through, in order, as `_work` persists them.
+    def _sequence(self) -> list[tuple[str, dict]]:
+        from nav_sentinel.control_plane.observations import utcnow
+
+        now = utcnow().isoformat()
+        base = {"dispatched_at": now, "approval_band": "four_eyes"}
+        verdict = {"root_cause": "x", "confidence": 0.9, "agent": "fx@1"}
+        return [
+            ("detected", {"approval_band": "four_eyes"}),
+            ("dispatched", {**base}),
+            ("triaged", {**base, "triage": {"capability": "nav.fx_rate"}}),
+            ("routed", {**base, "triage": {}, "routed": True, "investigator": "fx@1"}),
+            ("verdict", {**base, "routed": True, "verdict": verdict}),
+            ("drafted", {**base, "routed": True, "verdict": verdict,
+                         "proposal": {"proposal_id": "P"}}),
+        ]
+
+    TERMINAL_WORDS = ("needs an analyst", "signature", "signatures", "release to the ledger")
+
+    def test_nothing_terminal_is_claimed_before_the_draft_lands(self):
+        steps = [(label, workflow._next_step(d)[1]) for label, d in self._sequence()]
+        for label, step in steps[:-1]:
+            assert not any(w in step.lower() for w in self.TERMINAL_WORDS), (
+                f"at '{label}' the column already claimed an outcome: {step!r}"
+            )
+        assert steps[-1][1] == "2 signatures required"
+
+    def test_the_column_takes_exactly_two_values_before_the_answer(self):
+        """One for "you have not started it" and one for "it is being worked". Any third is a
+        state that will be contradicted."""
+        values = {workflow._next_step(d)[1] for _label, d in self._sequence()[:-1]}
+        assert values == {"Not started", "In progress"}, sorted(values)
+
+    def test_a_deliberate_no_cause_still_reads_as_terminal(self):
+        """The distinction must cut both ways, or "In progress" becomes the answer to everything."""
+        from nav_sentinel.control_plane.observations import utcnow
+
+        kind, step = workflow._next_step({
+            "dispatched_at": utcnow().isoformat(),
+            "routed": True,
+            "verdict": {"root_cause": "inconclusive", "agent": "a@1"},
+            "drafted": False,
+        })
+        assert kind == "human_investigation"
+        assert "Cause not established" in step
