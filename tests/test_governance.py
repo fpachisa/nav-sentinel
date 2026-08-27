@@ -473,7 +473,8 @@ class TestApprovalBand:
             ("0.99", "single_reviewer"),
             ("1", "four_eyes"),
             ("4.99", "four_eyes"),
-            ("5", "cio_escalation"),
+            ("199.99", "four_eyes"),
+            ("200", "cio_escalation"),      # two percent of the fund: the CIO's decision
             ("500", "cio_escalation"),
         ],
     )
@@ -629,7 +630,13 @@ class TestApprovalReferencesAreResolved:
             update={"authority": Authority(may_propose_remediation=True, may_post_entries=True)}
         )
 
-    def _facts(self, bps="5.41", case_id="C-APPR"):
+    #: An impact that bands to `cio_escalation`, because this class grants at that band and
+    #: `may_post_entry` refuses an approval whose band no longer matches the case. Was 5.41, which
+    #: stopped being an escalation when the CIO threshold moved from 5bps to 200 -- and the failure
+    #: was the band-mismatch control working correctly on an inconsistent fixture.
+    ESCALATION_BPS = "285.57"
+
+    def _facts(self, bps=ESCALATION_BPS, case_id="C-APPR"):
         return CaseFacts(
             case_id=case_id, subject_id="F1", as_of=NAV_DATE, capability="nav.fx_rate",
             impact=Impact(value=Decimal(bps), unit="bps"), status="remediation_proposed",
@@ -910,3 +917,43 @@ class TestARoutingOutcomeIsRecorded:
             and d.get("nav.policy.effect") == "deny"
             for d in recorded
         ), [d.get("nav.policy.id") for d in recorded]
+
+
+class TestTheThresholdsRouteSomethingRatherThanEverything:
+    """A threshold everything crosses routes nothing.
+
+    The CIO boundary started at 5bps, which sent six of a normal day's seven exceptions to the one
+    person whose attention is scarcest -- and an escalation path that fires on almost every case
+    trains its recipient to sign without reading. Raised to 200bps, two percent of the fund, which
+    is where a mis-struck price stops being operational and becomes reportable.
+    """
+
+    def test_a_normal_day_does_not_land_mostly_on_the_cio(self):
+        from collections import Counter
+
+        from nav_sentinel import composition
+        from nav_sentinel.webapp import workflow
+
+        composition.configure()
+        workflow.run_cycle(workflow.DEFAULT_AS_OF)
+        bands = Counter(item.band for item in workflow.queue(workflow.DEFAULT_AS_OF))
+        total = sum(bands.values())
+        assert total >= 5, bands
+        assert bands["cio_escalation"] < total / 2, (
+            f"the CIO is on {bands['cio_escalation']} of {total} cases; that is not an escalation"
+        )
+
+    def test_more_than_one_band_is_exercised(self):
+        """A demo where every case routes the same way demonstrates no routing at all."""
+        from nav_sentinel import composition
+        from nav_sentinel.webapp import workflow
+
+        composition.configure()
+        workflow.run_cycle(workflow.DEFAULT_AS_OF)
+        bands = {item.band for item in workflow.queue(workflow.DEFAULT_AS_OF)}
+        assert len(bands) >= 3, sorted(bands)
+
+    def test_the_boundary_is_where_the_pack_says_it_is(self):
+        from nav_sentinel.domain import pack
+
+        assert pack.BPS_THRESHOLDS.four_eyes_below == 200

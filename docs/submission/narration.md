@@ -93,8 +93,8 @@ established it. Refusing is the harder behaviour and the only defensible one.
 
 > I'm signed in with Google; this deployment has me down as a controller. Approve.
 >
-> Refused — a controller can't clear an escalation; only the chief investment officer can. And
-> nothing was recorded: an ineligible signature isn't a partial signature.
+> The desk won't even offer it — only the chief investment officer can clear this one, and the
+> button says so instead of letting me try.
 >
 > Now a four-eyes case. Signed. Refused again — four eyes means two *different* people.
 >

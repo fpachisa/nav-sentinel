@@ -35,6 +35,17 @@ the first is a registered JavaScript origin on the OAuth client. On the other on
 button renders and then refuses, with the reason only in the browser console. It looks like the app
 is broken.
 
+**Shot 5's first beat changed.** It used to be "Approve, refused" on a CIO escalation. The desk
+no longer offers an action it knows will fail: signed in as controller the button reads **CIO to
+approve** and is disabled. Film that, then switch account. The *four-eyes* beat still shows a real
+server-side refusal, because a controller is genuinely eligible there and is turned down on count
+rather than on role -- so there is still a live refusal on camera, and it is the more interesting
+one.
+
+Dropped from the narration with it: "nothing was recorded: an ineligible signature isn't a partial
+signature." Still true, still tested, no longer *shown* -- and a claim the footage does not support
+is one a judge has to take on trust.
+
 **The two accounts hold different roles.** `fpachisa@gmail.com` is the controller,
 `aitutor@homecampus.ai` is the CIO. That is deliberate: it makes the escalation refusal real (a
 controller genuinely cannot clear one) and it lets four-eyes be satisfied by two distinct

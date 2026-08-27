@@ -27,13 +27,22 @@ CAPABILITIES: tuple[str, ...] = (
     "nav.unclassified",
 )
 
-#: Basis points of net asset value. The thresholds a fund administrator would actually set:
-#: sub-quarter-bp differences clear themselves, anything above 5bp goes to the CIO.
+#: Basis points of net asset value, and the reason each boundary sits where it does.
+#:
+#: A quarter of a basis point is inside the noise of a daily valuation, so those clear themselves.
+#: Up to a basis point is one reviewer's judgement. From there to 200bps -- two full percent of the
+#: fund -- is a material correction and takes two different signatories. Above 200bps the fund has
+#: mis-struck its own price by more than most prospectuses tolerate before an error becomes
+#: reportable, and that is the chief investment officer's decision rather than an operational one.
+#:
+#: 200 rather than the 5 this started with: at 5, six of a normal day's seven exceptions escalated
+#: to the CIO, which is not a control -- a threshold everything crosses routes nothing and trains
+#: the one person whose attention is scarcest to rubber-stamp.
 BPS_THRESHOLDS = ThresholdSet(
     unit="bps",
     auto_clear_below=Decimal("0.25"),
     single_reviewer_below=Decimal(1),
-    four_eyes_below=Decimal(5),
+    four_eyes_below=Decimal(200),
 )
 
 PACK = ProcessPack(
