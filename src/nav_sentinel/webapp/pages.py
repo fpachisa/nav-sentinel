@@ -340,6 +340,7 @@ ul.plain li{margin:3px 0}
 .nx[data-k=sign]{color:var(--four);font-weight:600}
 .nx[data-k=human_investigation]{color:var(--escalate);font-weight:600}
 .nx[data-k=fleet]{color:var(--faint)}
+.nx[data-k=not_started]{color:var(--faint)}
 .nx[data-k=posted_by_ledger]{color:var(--cleared);font-weight:600}
 .feed{max-height:300px;overflow-y:auto;font-family:"JetBrains Mono",monospace;font-size:11.5px}
 .frow{display:grid;grid-template-columns:64px 54px 218px minmax(0,1fr);gap:12px;padding:5px 14px;
@@ -1311,8 +1312,14 @@ def _handover(snapshot: dict[str, Any]) -> str:
     waiting = hand.get("sign", 0)
     manual = hand.get("human_investigation", 0)
     working = hand.get("fleet", 0)
+    idle = hand.get("not_started", 0)
 
-    if working and not settled:
+    if idle and not working and not waiting and not manual:
+        lead = (
+            f"<b>Nothing has been investigated yet.</b> {idle} exception"
+            f"{'s' if idle != 1 else ''} waiting. Start the fleet from the exception queue."
+        )
+    elif working and not settled:
         lead = (
             f"<b>Investigation in progress.</b> {working} case"
             f"{'s' if working != 1 else ''} still being worked. No action needed from you yet."
@@ -1330,8 +1337,12 @@ def _handover(snapshot: dict[str, Any]) -> str:
         '<div class="hs">'
         f'<span><b data-counter="hand_sign">{waiting}</b> awaiting your signature</span>'
         f'<span><b data-counter="hand_manual">{manual}</b> for manual review</span>'
-        f'<span><b data-counter="hand_working">{working}</b> in progress</span>'
-        "</div></div>"
+        + (
+            f'<span><b data-counter="hand_working">{working}</b> in progress</span>'
+            if not idle or working
+            else f'<span><b data-counter="hand_idle">{idle}</b> not started</span>'
+        )
+        + "</div></div>"
     )
 
 

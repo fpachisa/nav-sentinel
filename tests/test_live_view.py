@@ -317,3 +317,43 @@ class TestOperatorTextIsNotHtmlSource:
 
     def test_the_rendered_page_shows_no_escaped_entity(self, cycled):
         assert "&amp;mdash;" not in pages.live(workflow.live_snapshot(), principal=ANALYST)
+
+
+class TestTheOpeningStateDoesNotClaimWorkIsHappening:
+    """At rest, before anything is dispatched, every row read "In progress" and the band said
+    "Investigation in progress. 7 cases still being worked. No action needed from you yet."
+
+    Nothing was being worked. `_next_step` treated "no verdict" as "the fleet is on it", which is
+    true only once the case has actually been handed over -- and the opening state of every take is
+    exactly the state where it is false. Found by resetting the desk to test the flow.
+    """
+
+    def test_an_undispatched_case_is_not_started_rather_than_in_progress(self, cycled):
+        row = workflow.live_snapshot()["cases"][0]
+        assert row["next_kind"] == "not_started"
+        assert row["next_step"] == "Not started"
+
+    def test_the_band_tells_you_to_start_the_fleet(self, cycled):
+        import re
+
+        band = re.sub(r"<[^>]+>", " ", pages._handover(workflow.live_snapshot()))
+        assert "Nothing has been investigated yet" in band
+        assert "Start the fleet" in band
+        assert "in progress" not in band.lower()
+
+    def test_a_dispatched_case_with_no_verdict_is_in_progress(self, cycled):
+        """The distinction has to cut both ways, or "not started" just means "no verdict"."""
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document["dispatched_at"] = "2026-08-27T09:00:00+00:00"
+        store.save_case(cycled[0], document)
+
+        row = next(r for r in workflow.live_snapshot()["cases"] if r["case_id"] == cycled[0])
+        assert row["next_kind"] == "fleet"
+        assert row["next_step"] == "In progress"
+
+    def test_the_idle_count_is_shown_instead_of_a_zero_in_progress(self, cycled):
+        """Zero in progress is a true number that answers nothing. Seven not started is the fact."""
+        band = pages._handover(workflow.live_snapshot())
+        assert "not started" in band
+        assert 'data-counter="hand_idle"' in band

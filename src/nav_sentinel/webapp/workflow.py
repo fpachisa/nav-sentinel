@@ -507,7 +507,12 @@ def _next_step(document: dict[str, Any]) -> tuple[str, str]:  # noqa: PLR0911
     if document.get("routed") is False:
         return "human_investigation", "No specialist authorised — needs an analyst"
     if not document.get("verdict"):
-        return "fleet", "In progress"
+        # "In progress" only once the case has actually been handed over. Before that nothing is
+        # working on it, and a screen saying otherwise at rest tells an analyst the fleet is busy
+        # when it has not been asked to do anything -- which was the opening state of every take.
+        if document.get("dispatched_at"):
+            return "fleet", "In progress"
+        return "not_started", "Not started"
     if not document.get("proposal"):
         return "human_investigation", "Cause not established — needs an analyst"
 
@@ -638,6 +643,7 @@ def live_snapshot(
         # then and says so, rather than asking Firestore the same question every second forever.
         "handover": {
             "sign": sum(1 for r in rows if r["next_kind"] == "sign"),
+            "not_started": sum(1 for r in rows if r["next_kind"] == "not_started"),
             "human_investigation": sum(
                 1 for r in rows if r["next_kind"] == "human_investigation"
             ),
