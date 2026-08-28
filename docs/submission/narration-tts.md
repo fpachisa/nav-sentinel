@@ -28,7 +28,7 @@ there the lift is precision rather than excitement — the system saying no is t
 ## Shot 2 · The fleet does the work
 
 ```
-[neutral] I'm signed in with Google. [informative] Seven differences at today's valuation point, found by arithmetic over two books — [matter-of-fact] no model needed to subtract.
+[informative] Seven differences at today's valuation point, found by arithmetic over two books — [matter-of-fact] no model needed to subtract.
 
 [instruction] Now watch. [neutral] One event, published to Pub/Sub. [emphatic] Nobody is driving this.
 

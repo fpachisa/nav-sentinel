@@ -52,6 +52,23 @@ controller genuinely cannot clear one) and it lets four-eyes be satisfied by two
 principals. Check `/readyz` — `unsignable_bands` must be `[]` before you record, or some case in
 the queue cannot be approved by anyone on camera.
 
+**Use a clean Chrome profile.** The Google account chooser shows every account signed into the
+browser, and clip 0 puts it on screen. A fresh profile with only the two demo accounts avoids
+publishing a list of your other addresses to the judges — and avoids the chooser being three
+scrolls long.
+
+**Paste the URL, do not type it.** A blank tab, a paste, and the page arriving is a second of video
+and it is the cheapest proof in the submission that this is a live service rather than a recording
+of one. Typing it out is the same proof at ten times the cost.
+
+**Clip 0 has to be warm, and that is not optional.** The paste-and-load *is* the shot. On a cold
+instance that load takes several seconds and reads as a slow site rather than a live one — the
+opposite of the point. Hit `/readyz` twice, then record.
+
+**Use a clean Chrome profile.** The account chooser shows every Google account signed into the
+browser, and clip 0 puts it on screen. A fresh profile holding only the two demo accounts keeps
+your other addresses out of the submission and the chooser down to two rows.
+
 **Warm the service before you record.** Cloud Run runs this at `--min-instances 0`, and a cold
 start costs about fifty seconds on the first investigation. Measured on the deployed service:
 
@@ -81,7 +98,7 @@ continuous track you cut to anyway.
 
 | Clip | What is on screen | Live? |
 | --- | --- | --- |
-| 0 | Sign-in page, then signing in with Google | — |
+| 0 | A blank tab, paste the `.run.app` URL, the sign-in page loads, sign in with Google, land on Fund | **yes — the load is the proof** |
 | 1 | **Fund page** — the two NAVs and the gap, the holdings, then the filed notice under *What explaining one of these takes*; then the queue | — |
 | 2 | A terminal, `gcloud pubsub topics publish` — **then hands off the keyboard** — then Fleet activity filling in | **yes, real model calls** |
 | 3 | A case page: the **Source document** (the filed notice, in prose), cause, cited evidence, journal legs. Then the disabled **CIO to approve**, the four-eyes refusal, the second account, **Cleared for posting** | **yes** |

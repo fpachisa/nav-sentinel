@@ -43,11 +43,20 @@ four minutes are evaluated, so overrunning does not truncate the video, it disca
 > It is still done by hand. Explaining a break is judgement, not rules — read the notice, work out
 > which of four causes fits, find the evidence. Software could not do that. Now agents can.
 
-*On screen, three beats rather than one static page — this was thirty-seven seconds on a list of
-seven rows, which is the weakest picture in the video:*
+*On screen, four beats rather than one static page — this was thirty-seven seconds on a list of
+seven rows, which is the weakest picture in the video. Note that shot 2 no longer says "I'm signed
+in with Google": the viewer watches it happen here, and saying it thirty seconds later reads as a
+recap.*
 
-1. **The Fund page.** The fund's own books say 41.8519 per share; the custodian says 42.9177. They
-   disagree by 4,529,562.69 — 248 basis points. Two numbers, side by side, and the gap in red.
+0. **A blank tab. Paste the URL. Sign in.** Over the first two sentences. The paste and the load
+   are the point — a page that arrives from a URL is a live service in a way an already-open tab is
+   not — and the Google account chooser makes the identity claim shot 3 rests on something the
+   viewer watched rather than something the narration asserts. About seven seconds, and it costs no
+   narration time at all.
+
+1. **The Fund page** lands as "before it can be published" is said. The fund's own books say
+   41.8519 per share; the custodian says 42.9177. They disagree by 4,529,562.69 — 248 basis
+   points. Two numbers side by side, and the gap in red.
 2. **Scroll to the holdings.** Eight positions, five of them differing, the differing figures
    marked. `US5949181045` is the one to rest on: quantity halved, price doubled, value identical —
    a split that moves no money and is still a stock-record failure.
@@ -62,8 +71,8 @@ seven rows, which is the weakest picture in the video:*
 
 ## 2 · The fleet does the work — 0:34–1:32
 
-> I'm signed in with Google. Seven differences at today's valuation point, found by arithmetic over
-> two books — no model needed to subtract.
+> Seven differences at today's valuation point, found by arithmetic over two books — no model
+> needed to subtract.
 >
 > Now watch. One event, published to Pub/Sub. Nobody is driving this.
 >
