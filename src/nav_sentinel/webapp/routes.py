@@ -280,7 +280,9 @@ def fund(request: Request) -> str:
     principal = _who(request)
     if principal is None:
         return _signin_page()
-    return pages.fund(workflow.fund_overview(AS_OF), principal=principal)
+    overview = workflow.fund_overview(AS_OF)
+    overview["explaining"] = workflow.explaining_document(overview)
+    return pages.fund(overview, principal=principal)
 
 
 @router.get("/app/live", response_class=HTMLResponse)

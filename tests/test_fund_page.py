@@ -212,3 +212,58 @@ class TestTheSourceDocumentIsShownAsItWasWritten:
     def test_the_panel_is_styled(self):
         assert ".filing{" in pages.CSS
         assert ".filing-src{" in pages.CSS
+
+
+class TestTheFundPageShowsWhatExplainingOneTakes:
+    """The fund page shows two numbers that disagree. This shows why closing that gap is a
+    person's morning: neither book says *why* a position differs, and the answer is in a filing
+    written for a human and kept somewhere else.
+
+    It is the input to the job, not evidence that an agent did anything — nothing has investigated
+    anything at the point this screen is describing.
+    """
+
+    def test_it_picks_a_position_the_books_actually_disagree_about(self, overview):
+        document = workflow.explaining_document(overview)
+        assert document is not None
+        holding = next(h for h in overview["holdings"] if h["isin"] == document["isin"])
+        assert any(holding["differs"].values())
+
+    def test_it_reads_the_filing_rather_than_calling_the_governed_tool(self):
+        """`corporate_action.notice_for` binds an identity, screens the content and writes a policy
+        decision. Rendering a read-only page must not leave a governance record claiming an
+        investigation happened."""
+        import inspect
+
+        # The *call*, not the name: the docstring names the tool in order to explain why it is
+        # not called, and a bare substring check fails on the explanation.
+        source = inspect.getsource(workflow.explaining_document)
+        assert "notice_for(" not in source
+        assert "_cassette" in source
+
+    def test_rendering_the_page_records_no_policy_decision(self, overview):
+        composition.configure()
+        store = composition.store()
+        before = len(store.recent_decisions(500))
+        overview["explaining"] = workflow.explaining_document(overview)
+        pages.fund(overview, principal=ANALYST)
+        assert len(store.recent_decisions(500)) == before
+
+    def test_the_panel_states_the_two_quantities_and_that_the_value_agrees(self, overview):
+        overview["explaining"] = workflow.explaining_document(overview)
+        html = pages.fund(overview, principal=ANALYST)
+        assert "96,000" in html and "192,000" in html
+        assert "agree on its value to the penny" in html
+        assert "CORPORATE ACTION NOTICE" in html
+
+    def test_it_says_this_is_one_of_seven(self, overview):
+        """The point is the volume, not the single document."""
+        overview["explaining"] = workflow.explaining_document(overview)
+        html = pages.fund(overview, principal=ANALYST)
+        assert "seven this morning" in html
+
+    def test_no_matching_filing_renders_nothing_rather_than_an_empty_frame(self):
+        assert pages._explaining_panel(None) == ""
+
+    def test_an_unknown_valuation_point_has_no_document(self):
+        assert workflow.explaining_document({"known": False}) is None

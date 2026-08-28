@@ -51,8 +51,12 @@ seven rows, which is the weakest picture in the video:*
 2. **Scroll to the holdings.** Eight positions, five of them differing, the differing figures
    marked. `US5949181045` is the one to rest on: quantity halved, price doubled, value identical —
    a split that moves no money and is still a stock-record failure.
-3. **Then the exception queue**, as the line about judgement lands. Seven differences, impacts in
-   basis points, and the approval each one already requires.
+3. **Keep scrolling to "What explaining one of these takes"** as the line about judgement lands.
+   The corporate-action notice as it was filed — prose, a split ratio, par values — with the two
+   quantities above it and the point that neither book says why. That document is what a rules
+   engine cannot read, and it is the whole reason this job is still manual.
+4. **Then the exception queue.** Seven differences, impacts in basis points, and the approval each
+   one already requires.
 
 ---
 
@@ -96,10 +100,9 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 > That was checked, not claimed: the gateway was asked to post this entry under an agent's
 > identity, carrying the signature, and refused.
 
-*On screen: the case page. **Scroll to the Source document panel first** — the corporate-action
-notice as it was filed, in prose, with the split ratio and the par values. That is the thing a
-rules engine cannot read, and it is on screen for free while the narration is talking about the
-cause and the citation. Then both accounts. Linger on the refusal and on "Cleared for posting".*
+*On screen: the case page, then both accounts. Linger on the refusal and on "Cleared for posting".
+The same filing appears here too, under **Source document**, now as evidence the specialist read
+rather than as the analyst's inbox — do not dwell on it a second time, shot 1 has spent it.*
 
 ---
 

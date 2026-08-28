@@ -82,7 +82,7 @@ continuous track you cut to anyway.
 | Clip | What is on screen | Live? |
 | --- | --- | --- |
 | 0 | Sign-in page, then signing in with Google | — |
-| 1 | **Fund page** — the two NAVs and the gap, then scroll to the holdings; then the queue | — |
+| 1 | **Fund page** — the two NAVs and the gap, the holdings, then the filed notice under *What explaining one of these takes*; then the queue | — |
 | 2 | A terminal, `gcloud pubsub topics publish` — **then hands off the keyboard** — then Fleet activity filling in | **yes, real model calls** |
 | 3 | A case page: the **Source document** (the filed notice, in prose), cause, cited evidence, journal legs. Then the disabled **CIO to approve**, the four-eyes refusal, the second account, **Cleared for posting** | **yes** |
 | 4 | The remediation timeline | — |

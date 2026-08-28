@@ -176,6 +176,43 @@ WORK_STAGES: tuple[tuple[str, str], ...] = (
 )
 
 
+def explaining_document(overview: dict[str, Any]) -> dict[str, Any] | None:
+    """One filing an analyst would have to read to explain one of these differences.
+
+    Shown on the fund page as *the input*, not as evidence: nothing has investigated anything at
+    this point. The two books disagree about a position and neither of them says why, and the
+    answer is in a document written for a person and filed somewhere else.
+
+    Read straight from the recorded filing rather than through `corporate_action.notice_for`, which
+    is a governed tool: calling it would bind an identity, screen the content and write a policy
+    decision, all to render a read-only page. This is an illustration of the work, and it should
+    not leave a governance record claiming an investigation happened.
+    """
+    from nav_sentinel.tools.corporate_action import FIXTURES, _cassette
+
+    if not overview.get("known"):
+        return None
+    recorded = _cassette()
+    for holding in overview["holdings"]:
+        if not any(holding["differs"].values()):
+            continue
+        entry = recorded.get(f"{holding['isin']}|{overview['as_of']}")
+        if not entry:
+            continue
+        path = FIXTURES / entry["document"]
+        if not path.is_file():
+            continue
+        return {
+            "isin": holding["isin"],
+            "filing": entry["document"],
+            "source_uri": entry.get("source_uri", ""),
+            "text": path.read_text(),
+            "quantity": holding["quantity"],
+            "value_agrees": not holding["differs"]["value"],
+        }
+    return None
+
+
 def source_documents(observations: list[Any]) -> list[dict[str, Any]]:
     """The external documents an investigation actually read, as they were written.
 

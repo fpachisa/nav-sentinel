@@ -869,6 +869,43 @@ def _bps(value: Any) -> float:
         return 0.0
 
 
+def _explaining_panel(document: dict[str, Any] | None) -> str:
+    """What explaining one of these differences actually takes, today.
+
+    The fund page shows two numbers that disagree. This shows why closing that gap is a person's
+    morning: neither book says *why* a position differs, and the answer is in a filing written for
+    a human and kept somewhere else. An analyst finds it, reads it, decides whether it explains the
+    break, and works out what it means for the stock record.
+
+    That is the work, and it is the reason this job survived every previous wave of automation
+    aimed at it. Showing the document is the only way to make that concrete rather than asserted.
+    """
+    if not document:
+        return ""
+    fund_qty, custodian_qty = document["quantity"]["a"], document["quantity"]["c"]
+    same_value = (
+        " and the two books agree on its value to the penny"
+        if document["value_agrees"]
+        else ""
+    )
+    return (
+        "<h2>What explaining one of these takes</h2>"
+        '<div class="panel"><div class="panel-h"><b>The document an analyst has to find</b>'
+        f'<span class="r mono" style="font-size:11px">{_e(document["filing"])}</span></div>'
+        '<div class="pad">'
+        f'<p style="margin:0 0 14px;font-size:13px;color:var(--soft)">The fund holds '
+        f'<b style="color:var(--ink)">{fund_qty:,.0f}</b> of <code>{_e(document["isin"])}</code>; '
+        f'the custodian records <b style="color:var(--ink)">{custodian_qty:,.0f}</b>'
+        f"{same_value}. Neither book says why. The answer is in a filing:</p>"
+        f'<pre class="filing">{_e(document["text"])}</pre>'
+        f'<div class="filing-src"><span>filed at {_e(document["source_uri"])}</span></div>'
+        '<p class="muted" style="font-size:12.5px;margin:14px 0 0">Read it, decide that a '
+        "two-for-one split explains the quantity and that no cash moved, and restate the stock "
+        "record. That is one difference. There are seven this morning, and the valuation point "
+        "closes either way.</p></div></div>"
+    )
+
+
 def fund(overview: dict[str, Any], *, principal: Principal) -> str:
     """The fund, its published number, and the two books that have to agree about it.
 
@@ -939,7 +976,8 @@ def fund(overview: dict[str, Any], *, principal: Principal) -> str:
         + f"<tbody>{rows}</tbody></table></div></div>"
         + '<div class="note">Neither book is assumed correct. The fund\'s is its own record and '
         "the custodian's is independent; the exercise is to explain every difference before the "
-        "valuation point closes, not to pick a side.</div>",
+        "valuation point closes, not to pick a side.</div>"
+        + _explaining_panel(overview.get("explaining")),
         principal=principal,
         active="fund",
     )
