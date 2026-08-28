@@ -264,7 +264,9 @@ class TestTheDepartmentCountIsTheRegisteredOne:
         # The wording moved from shot 2 to shot 5, where the routing table is on screen and the
         # number is legible behind the claim. The property is unchanged: whatever the script says
         # out loud must be what the page computes.
-        assert f"{words[gaps]} kinds of break here have nobody" in narration, (
+        # Case-insensitive: the sentence has been rephrased once already and the number moved from
+        # the start of a sentence to after a colon. The property is the number, not the capital.
+        assert f"{words[gaps]} kinds of break here have nobody".lower() in narration.lower(), (
             f"there are {gaps} unhandled capabilities; the narration names a different number"
         )
 

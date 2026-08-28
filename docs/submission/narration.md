@@ -39,7 +39,9 @@ four minutes are evaluated, so overrunning does not truncate the video, it disca
 >
 > Before it can be published, the fund's own books have to agree with the custodian's. Every
 > morning they don't, somewhere, and each difference has to be explained before the deadline.
-> Today that is skilled people, working by hand, against a clock.
+>
+> It is still done by hand. Explaining a break is judgement, not rules — read the notice, work out
+> which of four causes fits, find the evidence. Software could not do that. Now it can.
 
 *On screen: the exception queue. Seven differences, impacts in basis points, the approval each one
 needs already assigned.*
@@ -49,21 +51,20 @@ needs already assigned.*
 ## 2 · The fleet does the work — 0:34–1:32
 
 > I'm signed in with Google. Seven differences at today's valuation point, found by arithmetic over
-> two books — no model, because deciding whether two numbers differ is subtraction.
+> two books — no model needed to subtract.
 >
 > Now watch. One event, published to Pub/Sub. Nobody is driving this.
 >
 > Eight agents on Google's Agent Development Kit, running Gemini three-point-seven Flash to
 > investigate and three-point-five Flash Lite to classify, on Vertex AI. Each case is classified,
-> handed to the specialist authorised for that kind of break, investigated against source data, and
-> drafted into a correcting entry.
+> handed to the specialist authorised for it, and investigated against the sources: a rate table,
+> a dividend notice, the trade blotter. Then a balanced correcting entry, evidence cited.
 >
-> Three specialists engaged. Seventeen source lookups, every one checked against this fund's
-> mandate. Forty controls applied. About a minute, and no analyst touched it.
+> Three specialists. Seventeen source lookups, each checked against this fund's mandate. Forty
+> controls applied. About a minute, and no analyst touched it.
 >
-> That run cost cents of model time. By hand it is most of an analyst's morning — and a break
-> still unexplained at the deadline becomes a NAV struck on wrong numbers: investor compensation,
-> and a filing with the regulator.
+> That cost cents of model time. By hand it is most of an analyst's morning — and a break
+> unexplained at the deadline is a NAV struck on numbers somebody knew were wrong.
 
 *On screen: the terminal `gcloud pubsub topics publish`, hands off the keyboard, then Fleet
 activity — counters climbing, one gold arc per row walking left to right, the control log
@@ -77,8 +78,8 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 > citation can be checked rather than trusted. The correction balances: two legs, residual
 > zero.
 >
-> I'm a controller. This case is above my authority, so the desk won't offer it: the button reads
-> CIO to approve, and it's disabled.
+> I'm a controller. This one is above my authority, so the desk won't offer it — the button reads
+> CIO to approve, disabled.
 >
 > A four-eyes case. I sign. Refused — four eyes means two *different* people. Second account, the
 > chief investment officer. Granted.
@@ -93,9 +94,8 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 
 ## 4 · Weeks, not minutes — 2:30–2:56
 
-> A published error is not a one-day job. Fund accounting sizes it. Transfer agency is asked,
-> through the gateway and under its own identity, who dealt at the wrong price. A repeat is judged
-> more harshly than a first.
+> A published error runs for weeks. Fund accounting sizes it. Transfer agency is asked, under its
+> own identity, who dealt at the wrong price. A repeat is judged more harshly than a first.
 >
 > Three departments, twenty-eight business days. A payment file arrived before approval: refused,
 > and recorded. The case is read back from Firestore on every event, so it outlives the process
@@ -108,15 +108,15 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 ## 5 · Extensible, and running on Google Cloud — 2:56–3:44
 
 > A second department — a share register, counted in units instead of currency — cost five lines
-> and no change to the registry. Any process where the work is slow, the evidence matters, and a
-> person must answer for the outcome fits the same seam.
+> and no change to the registry. Any slow, evidence-heavy process where a person must answer for
+> the outcome fits the same seam.
 >
-> And where no specialist is authorised, a break is refused rather than handed to the closest one.
-> Four kinds of break here have nobody, and they go to a person.
+> Where no specialist is authorised, a break is refused rather than handed to the closest one:
+> four kinds of break here have nobody, and they go to a person.
 >
-> This runs on Cloud Run, in us-central1, as its own service account. Sign-in is public; the
-> endpoints that do work are not — asking it to run a reconciliation without a session gives four
-> oh one. State is in Firestore, and here are the traces, one per delivered event.
+> This runs on Cloud Run in us-central1, as its own service account. Sign-in is public; the
+> endpoints that do work are not — a reconciliation without a session gives four oh one. State is
+> in Firestore, and here are the traces, one per delivered event.
 >
 > The agents never get the authority. They gather evidence, they propose, and a person signs.
 

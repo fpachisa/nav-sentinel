@@ -39,13 +39,22 @@ pull the break, guess the cause, chase evidence across a price feed, an FX table
 corporate-action notice and a trade blotter, write the correcting entry, then find someone
 senior enough to approve it.
 
-Agents can do nearly all of that today. The reason they are not doing it is not capability. It
-is that no fund administrator will let an autonomous process near a NAV without verified
-identity, enforced separation of duties, screening of anything ingested from outside, and an
-audit trail that survives a regulator asking *why* eighteen months later.
+Two things had to become true before this could be automated, and only one of them was ever an
+engineering choice.
 
-So the interesting problem is not "can an agent find the break". It is **what has to be true
-before a regulated firm would let it.**
+**The first is capability, and it is genuinely recent.** Explaining a break means reading a notice
+written for a person, reasoning about which of several causes fits, deciding what evidence would
+settle it, and producing a balanced journal entry against it. Deterministic automation has been
+aimed at this for years: it clears the easy cases and leaves behind exactly the ones that need
+judgement. An agent that can read the unstructured source, choose which tools to call, and cite
+what it actually used is what changes that — and that is a 2026 capability, not a 2023 one.
+
+**The second is permission.** No fund administrator will let an autonomous process near a NAV
+without verified identity, enforced separation of duties, screening of anything ingested from
+outside, and an audit trail that survives a regulator asking *why* eighteen months later.
+
+So this builds both: **a fleet that can now do the work, and the control plane that makes it
+deployable.**
 
 ## Why it pays
 
@@ -57,12 +66,24 @@ trade blotter — a substantial part of a morning, every morning, on a deadline.
 
 And the number that actually decides it: a break still unexplained when the valuation window
 closes means the NAV is struck on numbers somebody already knew were wrong. That is investor
-compensation, a restatement, and a conversation with a regulator. Against that, the cost of the
-fleet is a rounding error — which is why the barrier to automating this has never been the
-economics. It has been that nobody would let an autonomous process near a NAV without verified
-identity, enforced separation of duties, and an audit trail that survives being asked *why*.
+compensation, a restatement, and a conversation with a regulator.
 
-That is the part this builds.
+**So why is it still manual?** Not cost — the arithmetic above has been obvious for years. It is
+manual because explaining a break is *judgement*. You read a corporate-action notice written for
+humans, work out that the accounting book recognised a dividend gross while the custodian credited
+it net of withholding at the issuer's domicile rate, decide whether the treaty allows a reclaim,
+and then know which two accounts that lands in. Rules engines and RPA have been thrown at this for
+a decade and they clear the easy ones; the residue is exactly the part that needs reasoning over
+evidence nobody has structured.
+
+That capability is new. An agent can now read the unstructured notice, choose which sources to
+consult, cite what it actually used, and draft a balanced entry against it. That is the whole
+reason this is buildable in 2026 and was not in 2023.
+
+What the governance adds is not the capability — it is permission to use it. A fund administrator
+will not let an autonomous process near a NAV without verified identity, enforced separation of
+duties and an audit trail that survives being asked *why*. So this builds both halves: the fleet
+that can now do the work, and the control plane that makes it deployable.
 
 ## What it does
 
