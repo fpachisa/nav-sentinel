@@ -47,6 +47,23 @@ audit trail that survives a regulator asking *why* eighteen months later.
 So the interesting problem is not "can an agent find the break". It is **what has to be true
 before a regulated firm would let it.**
 
+## Why it pays
+
+Three numbers, in the order they matter.
+
+A break investigated by the fleet costs **cents of model time** and about twenty seconds. The same
+break by hand is an analyst chasing a price feed, an FX table, a corporate-action notice and a
+trade blotter — a substantial part of a morning, every morning, on a deadline.
+
+And the number that actually decides it: a break still unexplained when the valuation window
+closes means the NAV is struck on numbers somebody already knew were wrong. That is investor
+compensation, a restatement, and a conversation with a regulator. Against that, the cost of the
+fleet is a rounding error — which is why the barrier to automating this has never been the
+economics. It has been that nobody would let an autonomous process near a NAV without verified
+identity, enforced separation of duties, and an audit trail that survives being asked *why*.
+
+That is the part this builds.
+
 ## What it does
 
 NAV Sentinel runs a fleet of specialist agents over a fund's daily reconciliation, and a control

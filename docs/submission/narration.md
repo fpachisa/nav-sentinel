@@ -13,7 +13,7 @@ paying for itself.
 | Shot | Answers | Criterion |
 |---|---|---|
 | 1 · Why this matters | Is the problem real and expensive? | Utility (40%) |
-| 2 · The fleet does the work | Does it act on its own, and on what? | Utility (40%) · named tech |
+| 2 · The fleet does the work | Does it act on its own, on what, and at what cost? | Utility (40%) · named tech |
 | 3 · Evidence and the human gate | Can I trust it, and who is accountable? | Utility · Architecture (30%) |
 | 4 · Weeks, not minutes | Does it hold state across departments and time? | Architecture (30%) |
 | 5 · Extensible, on Google Cloud | Does it generalise, and is it really running? | Architecture · Demo (30%) |
@@ -60,6 +60,10 @@ needs already assigned.*
 >
 > Three specialists engaged. Seventeen source lookups, every one checked against this fund's
 > mandate. Forty controls applied. About a minute, and no analyst touched it.
+>
+> That run cost cents of model time. By hand it is most of an analyst's morning — and a break
+> still unexplained at the deadline becomes a NAV struck on wrong numbers: investor compensation,
+> and a filing with the regulator.
 
 *On screen: the terminal `gcloud pubsub topics publish`, hands off the keyboard, then Fleet
 activity — counters climbing, one gold arc per row walking left to right, the control log
@@ -69,8 +73,8 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 
 ## 3 · Evidence and the human gate — 1:32–2:30
 
-> Open one. The cause, and the European Central Bank rate it read, with a digest of the response —
-> so the citation can be checked rather than trusted. The correction balances: two legs, residual
+> Open one. The cause, and the European Central Bank rate it read, with a digest — so the
+> citation can be checked rather than trusted. The correction balances: two legs, residual
 > zero.
 >
 > I'm a controller. This case is above my authority, so the desk won't offer it: the button reads
@@ -103,9 +107,9 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 
 ## 5 · Extensible, and running on Google Cloud — 2:56–3:44
 
-> None of this knows about fund accounting. A second department — a share register, counted in
-> units instead of currency — cost five lines and no change to the registry. Any process where the
-> work is slow, the evidence matters, and a person must answer for the outcome fits the same seam.
+> A second department — a share register, counted in units instead of currency — cost five lines
+> and no change to the registry. Any process where the work is slow, the evidence matters, and a
+> person must answer for the outcome fits the same seam.
 >
 > And where no specialist is authorised, a break is refused rather than handed to the closest one.
 > Four kinds of break here have nobody, and they go to a person.
@@ -132,10 +136,21 @@ disabled button now, not a click and a refusal. The four-eyes beat still puts a 
 refusal on camera, because a controller *is* eligible there and is turned down on count rather than
 on role.
 
+**The cost line is defensible, so do not inflate it.** 68 investigations have run on the deployed
+service and the project's entire Gemini spend is under a dollar, which makes a seven-case run
+comfortably "cents". Do not put a per-case figure on screen: the honest comparison is not compute
+against compute, it is compute against an analyst's morning, and against what a mis-struck NAV
+costs in compensation and regulatory filings. That third number is the one that actually wins the
+argument, and it is the fund's, not ours.
+
 **Say the numbers you actually see.** Three specialists, seventeen lookups and forty controls are
 what a warm run produced; if the take differs, read the take. A figure that does not match the
 screen is worse than no figure.
 
-**If the voice reads slowly**, the levers in order: inter-shot pauses from 2.5s to 1.5s buys 8s;
-then trim shot 5's first sentence, which is the one point the address bar has been making for three
-minutes. Not shot 2, and not shot 3.
+**If the voice reads slowly**, the levers in order: inter-shot pauses from 2.5s to 1.5s buys 5s;
+then trim shot 5's second sentence, the one about any process fitting the same seam — the first
+half already makes the point with a worked example. Not shot 2, and not shot 3.
+
+Shot 5's opening line, "None of this knows about fund accounting", has already been spent: adding
+the economics beat to shot 2 put the slow read 0.8s over, and that sentence was the cheapest thing
+in the script.

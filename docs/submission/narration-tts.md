@@ -33,12 +33,14 @@ there the lift is precision rather than excitement — the system saying no is t
 [informative] Eight agents on Google's Agent Development Kit, running Gemini three-point-seven Flash to investigate and three-point-five Flash Lite to classify, on Vertex AI. [explanation] Each case is classified, handed to the specialist authorised for that kind of break, investigated against source data, and drafted into a correcting entry.
 
 [informative] Three specialists engaged. Seventeen source lookups, every one checked against this fund's mandate. Forty controls applied. [emphatic] About a minute, and no analyst touched it.
+
+[matter-of-fact] That run cost cents of model time. [explanation] By hand it is most of an analyst's morning — [serious] and a break still unexplained at the deadline becomes a NAV struck on wrong numbers: investor compensation, and a filing with the regulator.
 ```
 
 ## Shot 3 · Evidence and the human gate
 
 ```
-[instruction] Open one. [informative] The cause, and the European Central Bank rate it read, with a digest of the response — [emphatic] so the citation can be checked rather than trusted. [matter-of-fact] The correction balances: two legs, residual zero.
+[instruction] Open one. [informative] The cause, and the European Central Bank rate it read, with a digest — [emphatic] so the citation can be checked rather than trusted. [matter-of-fact] The correction balances: two legs, residual zero.
 
 [neutral] I'm a controller. [explanation] This case is above my authority, so the desk won't offer it: the button reads CIO to approve, and it's disabled.
 
@@ -58,7 +60,7 @@ there the lift is precision rather than excitement — the system saying no is t
 ## Shot 5 · Extensible, and running on Google Cloud
 
 ```
-[informative] None of this knows about fund accounting. [explanation] A second department — a share register, counted in units instead of currency — cost five lines and no change to the registry. [serious] Any process where the work is slow, the evidence matters, and a person must answer for the outcome fits the same seam.
+[explanation] A second department — a share register, counted in units instead of currency — cost five lines and no change to the registry. [serious] Any process where the work is slow, the evidence matters, and a person must answer for the outcome fits the same seam.
 
 [informative] And where no specialist is authorised, a break is refused rather than handed to the closest one. [serious] Four kinds of break here have nobody, and they go to a person.
 
