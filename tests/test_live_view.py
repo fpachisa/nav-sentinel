@@ -667,3 +667,82 @@ class TestStalenessIsMeasuredFromNow:
     def test_a_fixed_past_date_would_always_read_as_stalled(self):
         """Which is why a fixture meaning "just dispatched" has to be built from now."""
         assert workflow._stalled_for("2020-01-01T00:00:00+00:00") > workflow.STALL_AFTER_SECONDS
+
+
+class TestEvidenceCountsWhatStandsBehindAConclusion:
+    """The tile read 50 at rest, beside five counters correctly reading "no run yet".
+
+    It counted every observation those seven cases had ever accumulated. True, and the answer to a
+    question nobody asked: an operator opening a reset desk is not asking how much evidence the
+    fund has gathered since deployment. Gating on the verdict answers what the tile is for -- how
+    much evidence stands behind what is on this page -- and is stable across re-runs, which a
+    time-scoped count is not, because observation ids are content-derived and first-write-wins.
+    """
+
+    def _observe(self, case_id: str, n: int, tag: str = "a") -> None:
+        """`tag` keeps ids unique per test.
+
+        Observations are append-only and the store is shared across this module, so two tests
+        writing `OBS-<case><i>` collide and the second one's count is the first one's -- which is
+        how the reset test first failed with `4 == 3`.
+        """
+        from datetime import UTC, datetime
+
+        from nav_sentinel.control_plane.observations import Observation
+
+        store = composition.store()
+        for i in range(n):
+            store.record_observation(
+                Observation(
+                    observation_id=f"OBS-{tag}{case_id[-5:]}{i:09d}",
+                    case_id=case_id,
+                    agent_ref="fx-rates-investigator@1.3.0",
+                    tool="ecb_fx.rate_on",
+                    args=f"{tag}:on=2026-08-1{i}",
+                    digest=f"d{i}",
+                    retrieved_at=datetime(2026, 8, 17, 9, i, tzinfo=UTC),
+                    source="ECB",
+                    observed={"rate": "1.1489"},
+                )
+            )
+
+    def test_a_case_with_no_conclusion_contributes_nothing(self, cycled):
+        self._observe(cycled[0], 4, tag="none")
+        assert workflow.live_snapshot()["counters"]["evidence"] == 0
+
+    def test_the_same_records_count_once_a_conclusion_exists(self, cycled):
+        self._observe(cycled[0], 4, tag="conc")
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document["verdict"] = {"root_cause": "x", "agent": "fx@1"}
+        store.save_case(cycled[0], document)
+
+        assert workflow.live_snapshot()["counters"]["evidence"] >= 4
+
+    def test_a_reset_takes_it_back_to_zero(self, cycled):
+        """Observations are append-only and survive a reset, which is correct -- the count must
+        still open at zero, because the conclusions they supported are gone."""
+        from nav_sentinel import demo_reset
+
+        self._observe(cycled[0], 3, tag="reset")
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document["verdict"] = {"root_cause": "x", "agent": "fx@1"}
+        store.save_case(cycled[0], document)
+        assert workflow.live_snapshot()["counters"]["evidence"] >= 3
+
+        demo_reset.reset()
+
+        assert store.observations_for(cycled[0]), "the audit record must survive a reset"
+        assert workflow.live_snapshot()["counters"]["evidence"] == 0
+
+    def test_it_does_not_grow_when_the_same_case_is_worked_twice(self, cycled):
+        """Observation ids are content-derived, so a re-run reuses them. The tile must not double."""
+        store = composition.store()
+        document = store.load_case(cycled[0])
+        document["verdict"] = {"root_cause": "x", "agent": "fx@1"}
+        store.save_case(cycled[0], document)
+        self._observe(cycled[0], 5, tag="twice")
+        first = workflow.live_snapshot()["counters"]["evidence"]
+        self._observe(cycled[0], 5, tag="twice")
+        assert workflow.live_snapshot()["counters"]["evidence"] == first

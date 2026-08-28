@@ -1392,7 +1392,8 @@ def live(snapshot: dict[str, Any], *, principal: Principal) -> str:
              "cause established and correction drafted"),
             ("agents", "Specialists engaged", "", "", "FX, corporate actions, settlement, pricing"),
             ("tool_calls", "Source lookups", "", "", "each one checked against this fund's mandate"),
-            ("evidence", "Evidence on file", "", "", "citable, and traceable to its source"),
+            ("evidence", "Evidence gathered", "", "",
+             "source records behind these conclusions"),
             ("decisions", "Controls applied", "t-four", "", "recorded against each case"),
             ("denials", "Actions blocked", "t-esc", "", "the fleet was not permitted to proceed"),
         )

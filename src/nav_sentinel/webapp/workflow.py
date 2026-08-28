@@ -631,12 +631,19 @@ def live_snapshot(
         agent = document.get("investigator") or (document.get("verdict") or {}).get("agent")
         if agent:
             agents.add(str(agent))
-        # Not filtered by time. Observation ids are content-derived and first-write-wins, so a
-        # re-run reuses the existing record with its original `retrieved_at` -- which is correct
-        # (a cited timestamp is when the data was obtained) and made this counter read ~0 on every
-        # repeat while tool calls read 16. The honest scope for evidence is *these cases*: exact,
-        # and not inflated by another valuation date.
-        observations = store.observations_for(case_id)
+        # Counted only for cases that have reached a conclusion, which is the question the tile is
+        # actually asking: how much evidence stands behind what is on this page.
+        #
+        # Not filtered by time, because observation ids are content-derived and first-write-wins --
+        # a re-run reuses the existing record with its original `retrieved_at`, which is correct
+        # (a cited timestamp is when the data was obtained) and made a time-scoped count read ~0 on
+        # every repeat. Scoping by *case* fixed that and introduced a worse problem: at rest the
+        # tile showed every observation those cases had ever accumulated, 50 of them, while every
+        # other counter correctly read "no run yet". Gating on the verdict answers the question and
+        # is stable across re-runs.
+        observations = (
+            store.observations_for(case_id) if "verdict" in document else []
+        )
         evidence += len(observations)
         stages = _stage_states(document)
         kind, step = _next_step(document)
