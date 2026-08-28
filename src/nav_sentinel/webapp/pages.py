@@ -314,6 +314,14 @@ ul.plain li{margin:3px 0}
 @keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.16);color:var(--accent)}100%{transform:scale(1)}}
 @keyframes reveal{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 
+/* ---- source documents ---------------------------------------------------------------------- */
+.filing{font-family:"JetBrains Mono",monospace;font-size:11.5px;line-height:1.65;color:var(--soft);
+  white-space:pre-wrap;margin:0;padding:16px 18px;background:var(--sunk);border-radius:7px;
+  border:1px solid var(--hair);max-height:340px;overflow:auto}
+.filing-src{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:11px;color:var(--faint);
+  font-family:"JetBrains Mono",monospace;margin-top:12px;overflow-wrap:anywhere}
+.filing-src span{display:inline-flex;align-items:center;gap:5px}
+
 /* ---- fund ----------------------------------------------------------------------------------- */
 .books{display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch;margin-bottom:16px}
 .book{background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:20px 22px;
@@ -1231,6 +1239,51 @@ def progress(stages: list[tuple[str, str]]) -> str:
     )
 
 
+def _documents_panel(documents: list[dict[str, Any]], decisions: list[dict[str, Any]]) -> str:
+    """The external documents the investigation read, as they were written.
+
+    A corporate-action notice is a filing meant for a person: a gross rate, withholding at the
+    issuer's domicile rate, a depositary ratio, in prose. Nothing about it is structured, and
+    reading it is the part of this job that resisted automation for a decade. Putting it on screen
+    is the difference between claiming an agent reasons over unstructured evidence and showing it.
+
+    Escaped, and the escaping is not incidental: this is content from outside the firm reaching a
+    page inside it. The same property that makes it worth screening before a model reads it makes
+    it worth escaping before a browser does.
+
+    The screening line is driven by the case's own governance record rather than asserted, so it
+    appears when a decision exists and is absent when one does not.
+    """
+    if not documents:
+        return ""
+
+    screened = next(
+        (d for d in decisions if str(d.get("nav.policy.id", "")).startswith("P-005")),
+        None,
+    )
+    note = (
+        '<div class="note" style="margin-top:12px;font-size:11.5px">Admitted through the gateway '
+        f'before any model read it &mdash; <code>{_e(screened.get("nav.policy.id"))}</code>: '
+        f'{_e(screened.get("nav.policy.reason"))}</div>'
+        if screened
+        else ""
+    )
+
+    blocks = ""
+    for document in documents:
+        blocks += (
+            '<div class="panel"><div class="panel-h"><b>Source document</b>'
+            f'<span class="r mono" style="font-size:11px">{_e(document["filing"])}</span></div>'
+            f'<div class="pad"><pre class="filing">{_e(document["text"])}</pre>'
+            f'<div class="filing-src"><span>read by <code>{_e(document["tool"])}</code></span>'
+            f'<span>source: {_e(document["source"])}</span>'
+            f'<span>{_e(document["source_uri"])}</span>'
+            f'<span>digest {_e(document["digest"][:16])}</span></div>'
+            f"{note}</div></div>"
+        )
+    return blocks
+
+
 def case(detail: dict[str, Any], *, principal: Principal) -> str:
     """One exception, from the numbers through the reasoning to the signature."""
     document = detail["document"]
@@ -1244,6 +1297,7 @@ def case(detail: dict[str, Any], *, principal: Principal) -> str:
         _triage_panel(document)
         + _routing_panel(document)
         + _cause_panel(document)
+        + _documents_panel(detail.get("documents", []), detail.get("decisions", []))
         + _evidence_panel(detail["observations"])
         + _proposal_panel(document)
     )

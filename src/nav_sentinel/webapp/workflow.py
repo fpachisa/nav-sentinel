@@ -139,6 +139,7 @@ def case_detail(case_id: str, as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
         "case": case,
         "observations": store.observations_for(case_id),
         "decisions": store.decisions_for(case_id),
+        "documents": source_documents(store.observations_for(case_id)),
         "signals": [],
     }
     if case is not None:
@@ -173,6 +174,40 @@ WORK_STAGES: tuple[tuple[str, str], ...] = (
     ("investigation", "Investigate and cite evidence"),
     ("proposal", "Draft the correcting entry"),
 )
+
+
+def source_documents(observations: list[Any]) -> list[dict[str, Any]]:
+    """The external documents an investigation actually read, as they were written.
+
+    A corporate-action notice is a filing written for a person: gross rate, withholding at the
+    issuer's domicile rate, a DR ratio. Nothing about it is structured, and reading it is the part
+    of this job that resisted automation. Showing it is the difference between claiming an agent
+    reasons over unstructured evidence and demonstrating it.
+
+    Read from the recorded filing rather than reconstructed from the extraction, because the point
+    is what the specialist was handed, not what it concluded.
+    """
+    from nav_sentinel.tools.corporate_action import FIXTURES
+
+    documents = []
+    for observation in observations:
+        filing = (observation.observed or {}).get("filing")
+        if not filing:
+            continue
+        path = FIXTURES / str(filing)
+        if not path.is_file():
+            continue
+        documents.append(
+            {
+                "filing": str(filing),
+                "source": observation.source,
+                "source_uri": observation.source_uri or "",
+                "digest": observation.digest,
+                "tool": observation.tool,
+                "text": path.read_text(),
+            }
+        )
+    return documents
 
 
 def work_case_events(case_id: str, as_of: date = DEFAULT_AS_OF) -> Iterator[WorkEvent]:

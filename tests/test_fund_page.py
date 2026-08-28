@@ -137,3 +137,78 @@ class TestTheNumbersOnScreenAreTheNumbersInTheBooks:
         meaningless and this should fail rather than mislead."""
         assert isinstance(overview["shares"], int | Decimal)
         assert overview["shares"] > 0
+
+
+class TestTheSourceDocumentIsShownAsItWasWritten:
+    """A corporate-action notice is a filing meant for a person: a gross rate, withholding at the
+    issuer's domicile rate, a depositary ratio, in prose. Reading it is the part of this job that
+    resisted automation, so putting it on screen is the difference between claiming an agent
+    reasons over unstructured evidence and showing it.
+    """
+
+    def _notice(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            observed={"filing": "ca_notice_msft_split.txt", "split_ratio": "2:1"},
+            source="sec_edgar",
+            source_uri="https://www.sec.gov/Archives/edgar/data/789019/msft-20260817.txt",
+            digest="52d8407bdc54e14f0000",
+            tool="corporate_action.notice_for",
+        )
+
+    def test_the_filing_is_read_from_the_recorded_document(self):
+        docs = workflow.source_documents([self._notice()])
+        assert len(docs) == 1
+        assert "CORPORATE ACTION NOTICE" in docs[0]["text"]
+        assert "Split Ratio" in docs[0]["text"]
+
+    def test_an_observation_with_no_filing_contributes_nothing(self):
+        from types import SimpleNamespace
+
+        rate = SimpleNamespace(
+            observed={"rate": "1.1489"}, source="ECB", source_uri="", digest="d", tool="ecb_fx.rate_on"
+        )
+        assert workflow.source_documents([rate]) == []
+
+    def test_a_filing_that_is_not_on_disk_is_skipped_rather_than_raising(self):
+        from types import SimpleNamespace
+
+        missing = SimpleNamespace(
+            observed={"filing": "no_such_notice.txt"}, source="sec_edgar",
+            source_uri="", digest="d", tool="corporate_action.notice_for",
+        )
+        assert workflow.source_documents([missing]) == []
+
+    def test_the_document_is_escaped_before_it_reaches_the_page(self):
+        """External content reaching a page inside the firm. The property that makes it worth
+        screening before a model reads it makes it worth escaping before a browser does."""
+        html = pages._documents_panel(
+            [{"filing": "x.txt", "source": "sec_edgar", "source_uri": "u",
+              "digest": "d" * 20, "tool": "t",
+              "text": "<script>alert('x')</script> & <b>bold</b>"}],
+            [],
+        )
+        assert "<script>alert" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_the_screening_line_appears_only_when_a_decision_exists(self):
+        document = {"filing": "x.txt", "source": "s", "source_uri": "u", "digest": "d" * 20,
+                    "tool": "t", "text": "hello"}
+        without = pages._documents_panel([document], [])
+        assert "Admitted through the gateway" not in without
+
+        with_decision = pages._documents_panel(
+            [document],
+            [{"nav.policy.id": "P-005-UNTRUSTED-INGEST",
+              "nav.policy.reason": "Model Armor is required"}],
+        )
+        assert "Admitted through the gateway" in with_decision
+        assert "P-005-UNTRUSTED-INGEST" in with_decision
+
+    def test_no_documents_renders_nothing_at_all(self):
+        assert pages._documents_panel([], []) == ""
+
+    def test_the_panel_is_styled(self):
+        assert ".filing{" in pages.CSS
+        assert ".filing-src{" in pages.CSS

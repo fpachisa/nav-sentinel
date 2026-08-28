@@ -96,7 +96,10 @@ scrolling. Let the numbers move; this shot is the 40% criterion.*
 > That was checked, not claimed: the gateway was asked to post this entry under an agent's
 > identity, carrying the signature, and refused.
 
-*On screen: the case page, then both accounts. Linger on the refusal and on "Cleared for posting".*
+*On screen: the case page. **Scroll to the Source document panel first** — the corporate-action
+notice as it was filed, in prose, with the split ratio and the par values. That is the thing a
+rules engine cannot read, and it is on screen for free while the narration is talking about the
+cause and the citation. Then both accounts. Linger on the refusal and on "Cleared for posting".*
 
 ---
 
