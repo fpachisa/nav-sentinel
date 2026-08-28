@@ -41,10 +41,18 @@ four minutes are evaluated, so overrunning does not truncate the video, it disca
 > morning they don't, somewhere, and each difference has to be explained before the deadline.
 >
 > It is still done by hand. Explaining a break is judgement, not rules — read the notice, work out
-> which of four causes fits, find the evidence. Software could not do that. Now it can.
+> which of four causes fits, find the evidence. Software could not do that. Now agents can.
 
-*On screen: the exception queue. Seven differences, impacts in basis points, the approval each one
-needs already assigned.*
+*On screen, three beats rather than one static page — this was thirty-seven seconds on a list of
+seven rows, which is the weakest picture in the video:*
+
+1. **The Fund page.** The fund's own books say 41.8519 per share; the custodian says 42.9177. They
+   disagree by 4,529,562.69 — 248 basis points. Two numbers, side by side, and the gap in red.
+2. **Scroll to the holdings.** Eight positions, five of them differing, the differing figures
+   marked. `US5949181045` is the one to rest on: quantity halved, price doubled, value identical —
+   a split that moves no money and is still a stock-record failure.
+3. **Then the exception queue**, as the line about judgement lands. Seven differences, impacts in
+   basis points, and the approval each one already requires.
 
 ---
 

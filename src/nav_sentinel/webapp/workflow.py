@@ -24,6 +24,7 @@ import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from queue import Queue
 from typing import Any
 
@@ -597,6 +598,79 @@ def _stage_states(document: dict[str, Any]) -> dict[str, str]:
             if routed is False or document.get("drafted") is False
             else "pending"
         ),
+    }
+
+
+def fund_overview(as_of: date = DEFAULT_AS_OF) -> dict[str, Any]:
+    """The fund, and the two books that have to agree about it.
+
+    The number a fund publishes is one number, and this is where it comes from -- so it is the first
+    thing to show anyone asking why reconciliation matters. Both books are read here and neither is
+    treated as correct: the accounting book is the fund's own, the custodian's is the independent
+    record, and the whole exercise exists because they disagree before the deadline.
+
+    No model, and no case documents. This is what the sources say, before anything has looked at
+    them.
+    """
+    from nav_sentinel.tools import books_and_records as bnr
+
+    fund = "MERID-GEF"
+    books = {
+        source: bnr.nav_record(source, fund, as_of) for source in ("accounting", "custodian")
+    }
+    if not all(books.values()):
+        return {"as_of": as_of.isoformat(), "fund": fund, "known": False}
+
+    accounting, custodian = books["accounting"], books["custodian"]
+    difference = accounting.net_assets - custodian.net_assets
+    bps = (
+        (difference / custodian.net_assets * 10000) if custodian.net_assets else Decimal(0)
+    )
+
+    held = {source: {p.isin: p for p in bnr.positions(source)} for source in books}
+    rows = []
+    for isin in sorted(set(held["accounting"]) | set(held["custodian"])):
+        a, c = held["accounting"].get(isin), held["custodian"].get(isin)
+        rows.append(
+            {
+                "isin": isin,
+                "currency": (a or c).local_currency,
+                "quantity": {"a": a.quantity if a else None, "c": c.quantity if c else None},
+                "price": {"a": a.local_price if a else None, "c": c.local_price if c else None},
+                "fx": {"a": a.fx_rate if a else None, "c": c.fx_rate if c else None},
+                "value": {
+                    "a": a.market_value_base if a else None,
+                    "c": c.market_value_base if c else None,
+                },
+            }
+        )
+    for row in rows:
+        row["differs"] = {
+            field: row[field]["a"] != row[field]["c"]
+            for field in ("quantity", "price", "fx", "value")
+        }
+
+    return {
+        "known": True,
+        "as_of": as_of.isoformat(),
+        "fund": fund,
+        "name": "Merian Global Equity Fund",
+        "shares": accounting.shares_outstanding,
+        "books": {
+            "accounting": {
+                "net_assets": accounting.net_assets,
+                "per_share": accounting.nav_per_share,
+            },
+            "custodian": {
+                "net_assets": custodian.net_assets,
+                "per_share": custodian.nav_per_share,
+            },
+        },
+        "difference": difference,
+        "per_share_difference": accounting.nav_per_share - custodian.nav_per_share,
+        "bps": bps,
+        "holdings": rows,
+        "disagreeing": sum(1 for r in rows if any(r["differs"].values())),
     }
 
 

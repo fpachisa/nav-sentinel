@@ -274,6 +274,15 @@ def approve(case_id: str, request: Request) -> RedirectResponse:
     return _to(f"/app/case/{case_id}")
 
 
+@router.get("/app/fund", response_class=HTMLResponse)
+def fund(request: Request) -> str:
+    composition.configure()
+    principal = _who(request)
+    if principal is None:
+        return _signin_page()
+    return pages.fund(workflow.fund_overview(AS_OF), principal=principal)
+
+
 @router.get("/app/live", response_class=HTMLResponse)
 def live(request: Request) -> str:
     composition.configure()

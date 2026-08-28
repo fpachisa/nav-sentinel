@@ -314,6 +314,28 @@ ul.plain li{margin:3px 0}
 @keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.16);color:var(--accent)}100%{transform:scale(1)}}
 @keyframes reveal{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 
+/* ---- fund ----------------------------------------------------------------------------------- */
+.books{display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch;margin-bottom:16px}
+.book{background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:20px 22px;
+  box-shadow:var(--shadow)}
+.book .src{font-family:"JetBrains Mono",monospace;font-size:10px;text-transform:uppercase;
+  letter-spacing:.14em;color:var(--faint);margin-bottom:12px}
+.book .nav{font-family:"JetBrains Mono",monospace;font-size:38px;font-weight:500;color:#fff;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.book .unit{font-size:13px;color:var(--faint);margin-left:8px;font-family:inherit;font-weight:400}
+.book .net{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--soft);margin-top:10px;
+  font-variant-numeric:tabular-nums}
+.gap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 22px;
+  min-width:210px}
+.gap .lbl{font-family:"JetBrains Mono",monospace;font-size:10px;text-transform:uppercase;
+  letter-spacing:.14em;color:var(--escalate);margin-bottom:8px}
+.gap .amt{font-family:"JetBrains Mono",monospace;font-size:23px;color:var(--escalate);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.gap .sub{font-size:11.5px;color:var(--faint);margin-top:6px;text-align:center}
+@media (max-width:980px){.books{grid-template-columns:1fr}.gap{padding:16px 0}}
+td.diff{color:var(--escalate);font-weight:600}
+td.same{color:var(--faint)}
+
 /* ---- live ops ----------------------------------------------------------------------------- */
 .lgrid{width:100%;border-collapse:collapse}
 .lgrid th{font-size:9.5px}
@@ -662,6 +684,7 @@ def _chip(band: str) -> str:
 def shell(title: str, body: str, *, principal: Principal | None, active: str = "") -> str:
     """The application frame. One layout, so every page reads as the same product."""
     links = [
+        ("fund", "/app/fund", "Fund"),
         ("queue", "/app", "Exceptions"),
         ("remediation", "/app/remediation", "Remediation"),
         ("live", "/app/live", "Fleet activity"),
@@ -836,6 +859,82 @@ def _bps(value: Any) -> float:
         return abs(float(str(value)))
     except (TypeError, ValueError):
         return 0.0
+
+
+def fund(overview: dict[str, Any], *, principal: Principal) -> str:
+    """The fund, its published number, and the two books that have to agree about it.
+
+    The first screen to show anyone asking why reconciliation matters: one number is published, two
+    independent records disagree about it before the deadline, and the holdings below say where.
+    Read straight from the sources -- no case documents, no model, nothing that has looked at them
+    yet.
+    """
+    if not overview.get("known"):
+        return shell(
+            "Fund — NAV Sentinel",
+            _head("Fund", f"No valuation recorded for {_e(overview.get('as_of'))}."),
+            principal=principal,
+            active="fund",
+        )
+
+    acc, cus = overview["books"]["accounting"], overview["books"]["custodian"]
+    def cell(h: dict[str, Any], field: str, side: str, places: int = 2) -> str:
+        """One figure from one book, marked when the two books disagree about it."""
+        value = h[field][side]
+        if value is None:
+            return '<td class="r num same">&mdash;</td>'
+        klass = "diff" if h["differs"][field] else "same"
+        return f'<td class="r num {klass}">{value:,.{places}f}</td>'
+
+    rows = ""
+    for h in overview["holdings"]:
+        rows += (
+            f'<tr><td class="rail r-{"cio_escalation" if any(h["differs"].values()) else "auto_clear"}">'
+            f'<code>{_e(h["isin"])}</code></td>'
+            f'<td class="mono" style="font-size:11px;color:var(--faint)">{_e(h["currency"])}</td>'
+            + cell(h, "quantity", "a", 0) + cell(h, "quantity", "c", 0)
+            + cell(h, "price", "a", 2) + cell(h, "price", "c", 2)
+            + cell(h, "value", "a", 2) + cell(h, "value", "c", 2)
+            + "</tr>"
+        )
+
+    sign = "" if overview["difference"] >= 0 else "&minus;"
+    return shell(
+        "Fund — NAV Sentinel",
+        _head(
+            _e(overview["name"]),
+            f"One number is published for this fund every day, and two independent records have to "
+            f"agree about it first. At the {_e(overview['as_of'])} valuation point they do not.",
+            actions='<a class="btn ghost" href="/app">Exception queue</a>',
+        )
+        + '<div class="books">'
+        + '<div class="book"><div class="src">The fund\'s own books</div>'
+        + f'<div class="nav">{acc["per_share"]:,.4f}<span class="unit">per share</span></div>'
+        + f'<div class="net">net assets {acc["net_assets"]:,.2f} &middot; '
+        + f'{overview["shares"]:,} shares in issue</div></div>'
+        + '<div class="gap"><div class="lbl">they disagree by</div>'
+        + f'<div class="amt">{sign}{abs(overview["difference"]):,.2f}</div>'
+        + f'<div class="sub">{abs(overview["bps"]):,.0f} basis points of NAV &middot; '
+        + f'{abs(overview["per_share_difference"]):,.4f} per share</div></div>'
+        + '<div class="book"><div class="src">The custodian\'s record</div>'
+        + f'<div class="nav">{cus["per_share"]:,.4f}<span class="unit">per share</span></div>'
+        + f'<div class="net">net assets {cus["net_assets"]:,.2f} &middot; '
+        + f'{overview["shares"]:,} shares in issue</div></div></div>'
+        + '<h2>Where they disagree</h2>'
+        + '<div class="panel"><div class="panel-h"><b>Holdings</b>'
+        + f'<span class="r">{overview["disagreeing"]} of {len(overview["holdings"])} '
+        + "positions differ</span></div>"
+        + '<div class="scroll"><table><thead><tr><th>Instrument</th><th>Ccy</th>'
+        + '<th class="r">Qty · fund</th><th class="r">Qty · custodian</th>'
+        + '<th class="r">Price · fund</th><th class="r">Price · custodian</th>'
+        + '<th class="r">Value · fund</th><th class="r">Value · custodian</th></tr></thead>'
+        + f"<tbody>{rows}</tbody></table></div></div>"
+        + '<div class="note">Neither book is assumed correct. The fund\'s is its own record and '
+        "the custodian's is independent; the exercise is to explain every difference before the "
+        "valuation point closes, not to pick a side.</div>",
+        principal=principal,
+        active="fund",
+    )
 
 
 def queue(items: list[Any], *, principal: Principal, as_of: str) -> str:

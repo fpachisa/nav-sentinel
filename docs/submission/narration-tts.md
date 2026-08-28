@@ -22,7 +22,7 @@ there the lift is precision rather than excitement — the system saying no is t
 
 [informative] Before it can be published, the fund's own books have to agree with the custodian's. [explanation] Every morning they don't, somewhere, and each difference has to be explained before the deadline.
 
-[serious] It is still done by hand. [explanation] Explaining a break is judgement, not rules — read the notice, work out which of four causes fits, find the evidence. [emphatic] Software could not do that. Now it can.
+[serious] It is still done by hand. [explanation] Explaining a break is judgement, not rules — read the notice, work out which of four causes fits, find the evidence. [emphatic] Software could not do that. Now agents can.
 ```
 
 ## Shot 2 · The fleet does the work
